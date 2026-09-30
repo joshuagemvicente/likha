@@ -61,7 +61,7 @@ func runApprovalScenario(t *testing.T, root, name, arguments string, decide func
 		t.Fatal(err)
 	}
 	var events []turnEvent
-	runTurn(context.Background(), client, repo, root, nil, "make a change", func(ev turnEvent) {
+	runTurn(context.Background(), client, repo, root, nil, "make a change", nil, func(ev turnEvent) {
 		events = append(events, ev)
 		if ev.kind == "approval" {
 			decide(ev.approval)

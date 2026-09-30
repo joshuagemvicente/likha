@@ -90,38 +90,79 @@ func TestRunWithoutConfigurationExplainsSetup(t *testing.T) {
 
 func TestResolveProviderSelectsEndpointsAndKeys(t *testing.T) {
 	t.Setenv("LISA_ENDPOINT", "")
-	if _, _, _, _, err := resolveProvider("", "", "", false, t.TempDir()); err == nil || !strings.Contains(err.Error(), "no provider configured") {
+	if _, err := resolveProvider("", "", "", false, t.TempDir()); err == nil || !strings.Contains(err.Error(), "no provider configured") {
 		t.Fatalf("no-provider error = %v", err)
 	}
-	endpoint, verified, display, _, err := resolveProvider("", "https://gateway.example.net/v1", "", false, t.TempDir())
-	if err != nil || endpoint != "https://gateway.example.net/v1" || verified || display != "Custom endpoint" {
-		t.Fatalf("custom endpoint = %q verified=%t display=%q err=%v", endpoint, verified, display, err)
+	res, err := resolveProvider("", "https://gateway.example.net/v1", "", false, t.TempDir())
+	if err != nil || res.endpoint != "https://gateway.example.net/v1" || res.verified || res.display != "Custom endpoint" {
+		t.Fatalf("custom endpoint = %+v err=%v", res, err)
 	}
-	// Every listed provider resolves to its own base URL and display name.
+	// Every listed API-key provider resolves to its own base URL, display
+	// name, and the flagged key; the OAuth row is covered separately because
+	// keys do not apply to it.
 	for _, p := range model.Providers {
-		endpoint, verified, display, key, err := resolveProvider(p.Name, "", "sk-test", false, t.TempDir())
-		if err != nil || endpoint != p.BaseURL || !verified || display != p.DisplayName || key != "sk-test" {
-			t.Fatalf("provider %s: endpoint=%q verified=%t display=%q key=%q err=%v", p.Name, endpoint, verified, display, key, err)
+		if p.Auth == model.AuthOAuth {
+			continue
 		}
+		res, err := resolveProvider(p.Name, "", "sk-test", false, t.TempDir())
+		if err != nil || res.endpoint != p.BaseURL || !res.verified || res.display != p.DisplayName || res.key != "sk-test" {
+			t.Fatalf("provider %s: %+v err=%v", p.Name, res, err)
+		}
+	}
+}
+
+func TestResolveProviderStoredOAuth(t *testing.T) {
+	stateDir := t.TempDir()
+	// Without a stored login, resolution names the remedy.
+	if _, err := resolveProvider("chatgpt", "", "", false, stateDir); err == nil || !strings.Contains(err.Error(), "--device-login") {
+		t.Fatalf("missing login error = %v", err)
+	}
+	want := model.OAuthCredentials{Refresh: "refresh-token", Access: "access-token", Expires: 12345, AccountID: "acc_123"}
+	if err := storeOAuth(stateDir, "chatgpt", want); err != nil {
+		t.Fatal(err)
+	}
+	res, err := resolveProvider("chatgpt", "", "", false, stateDir)
+	if err != nil {
+		t.Fatalf("stored login: %v", err)
+	}
+	if !res.oauth || !res.verified || res.endpoint != "https://chatgpt.com/backend-api/codex" || res.display != "ChatGPT (Plus/Pro)" || res.key != "" {
+		t.Fatalf("stored login resolution = %+v", res)
+	}
+	if res.creds != want {
+		t.Fatalf("credentials did not round-trip: %+v want %+v", res.creds, want)
+	}
+	// A --endpoint override still wins for OAuth providers; NewOAuth
+	// validates it later.
+	res, err = resolveProvider("chatgpt", "https://proxy.example.net/v1", "", false, stateDir)
+	if err != nil || !res.oauth || res.endpoint != "https://proxy.example.net/v1" {
+		t.Fatalf("endpoint override = %+v err=%v", res, err)
+	}
+}
+
+func TestResolveProviderCustomEndpointUnchanged(t *testing.T) {
+	t.Setenv("LISA_ENDPOINT", "")
+	res, err := resolveProvider("", "https://custom.example.net/v1", "sk-x", true, t.TempDir())
+	if err != nil || res.endpoint != "https://custom.example.net/v1" || res.verified || res.display != "Custom endpoint" || res.key != "" || res.oauth {
+		t.Fatalf("custom endpoint = %+v err=%v", res, err)
 	}
 }
 
 func TestResolveProviderRequiresAndStoresHostedKeys(t *testing.T) {
 	t.Setenv("LISA_API_KEY", "")
 	stateDir := t.TempDir()
-	if _, _, _, _, err := resolveProvider("openrouter", "", "", false, stateDir); err == nil || !strings.Contains(err.Error(), "requires an API key") {
+	if _, err := resolveProvider("openrouter", "", "", false, stateDir); err == nil || !strings.Contains(err.Error(), "requires an API key") {
 		t.Fatalf("missing key error = %v", err)
 	}
-	endpoint, _, _, key, err := resolveProvider("openrouter", "", "sk-env", false, stateDir)
-	if err != nil || endpoint != "https://openrouter.ai/api/v1" || key != "sk-env" {
-		t.Fatalf("env key: endpoint=%q key=%q err=%v", endpoint, key, err)
+	res, err := resolveProvider("openrouter", "", "sk-env", false, stateDir)
+	if err != nil || res.endpoint != "https://openrouter.ai/api/v1" || res.key != "sk-env" {
+		t.Fatalf("env key: %+v err=%v", res, err)
 	}
 	stored, err := storedKey(stateDir, "openrouter")
 	if err != nil || stored != "" {
 		t.Fatalf("non-persisted key was stored: %q %v", stored, err)
 	}
-	if _, _, _, key, err := resolveProvider("openrouter", "", "sk-flag", true, stateDir); err != nil || key != "sk-flag" {
-		t.Fatalf("flag key: %q %v", key, err)
+	if res, err := resolveProvider("openrouter", "", "sk-flag", true, stateDir); err != nil || res.key != "sk-flag" {
+		t.Fatalf("flag key: %+v %v", res, err)
 	}
 	stored, err = storedKey(stateDir, "openrouter")
 	if err != nil || stored != "sk-flag" {
@@ -131,8 +172,8 @@ func TestResolveProviderRequiresAndStoresHostedKeys(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("stored key permissions: %v %v", info, err)
 	}
-	if _, _, _, key, err = resolveProvider("openrouter", "", "", false, stateDir); err != nil || key != "sk-flag" {
-		t.Fatalf("stored key not used: %q %v", key, err)
+	if res, err = resolveProvider("openrouter", "", "", false, stateDir); err != nil || res.key != "sk-flag" {
+		t.Fatalf("stored key not used: %+v %v", res, err)
 	}
 }
 

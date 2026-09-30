@@ -38,7 +38,11 @@ var agentTools = []model.ToolDefinition{
 
 // runTurn streams one user request and its tools. An edit or command can only
 // execute after the UI sends an explicit decision for that specific proposal.
-func runTurn(ctx context.Context, client *model.Client, repo *repository.Repository, root string, prior []model.Message, prompt string, emit func(turnEvent)) {
+// mcp may be nil when no MCP servers are configured.
+func runTurn(ctx context.Context, client *model.Client, repo *repository.Repository, root string, prior []model.Message, prompt string, mcpServers *mcpManager, emit func(turnEvent)) {
+	// @file references inline repository content so the model reads context
+	// directly; unresolved tokens stay literal.
+	prompt = expandFileReferences(prompt, repo)
 	history := make([]model.Message, 0, len(prior)+4)
 	history = append(history, prior...)
 	history = append(history, model.Message{Role: "user", Content: prompt})
@@ -49,14 +53,20 @@ func runTurn(ctx context.Context, client *model.Client, repo *repository.Reposit
 		fail(err)
 		return
 	}
+	tools := agentTools
+	if extra := mcpServers.Tools(model.UserAgent); len(extra) > 0 {
+		tools = append(append([]model.ToolDefinition(nil), agentTools...), extra...)
+	}
 
 	for range 32 {
 		if err := ctx.Err(); err != nil {
 			fail(err)
 			return
 		}
-		assistant, err := client.Stream(ctx, history, agentTools, func(text string) {
+		assistant, err := client.Stream(ctx, history, tools, func(text string) {
 			emit(turnEvent{kind: "text", text: text})
+		}, func(reasoning string) {
+			emit(turnEvent{kind: "reasoning", text: reasoning})
 		})
 		if err != nil {
 			fail(err)
@@ -78,7 +88,7 @@ func runTurn(ctx context.Context, client *model.Client, repo *repository.Reposit
 				return
 			}
 			emit(turnEvent{kind: "tool_start", text: "Request: " + call.Name + " " + call.Arguments})
-			result, toolErr := dispatchTool(ctx, repo, root, call, emit)
+			result, toolErr := dispatchTool(ctx, repo, root, call, mcpServers, emit)
 			if ctx.Err() != nil && (errors.Is(toolErr, context.Canceled) || errors.Is(toolErr, context.DeadlineExceeded)) {
 				appendUnexecuted(&history, assistant.ToolCalls[index:])
 				fail(ctx.Err())
@@ -109,7 +119,7 @@ func appendUnexecuted(history *[]model.Message, calls []model.ToolCall) {
 	}
 }
 
-func dispatchTool(ctx context.Context, repo *repository.Repository, root string, call model.ToolCall, emit func(turnEvent)) (string, error) {
+func dispatchTool(ctx context.Context, repo *repository.Repository, root string, call model.ToolCall, mcpServers *mcpManager, emit func(turnEvent)) (string, error) {
 	var args struct {
 		Path    string  `json:"path"`
 		Query   string  `json:"query"`
@@ -187,7 +197,21 @@ func dispatchTool(ctx context.Context, repo *repository.Repository, root string,
 		}
 		return output, nil
 	default:
-		return "", fmt.Errorf("unsupported tool %q", call.Name)
+		// Unknown to the built-in switch: an MCP tool, if any server exposes
+		// one. Trust-on-first-use: the first call from a server is approved
+		// explicitly; afterwards that server's tools run for the session.
+		result, isError, err := mcpServers.Call(ctx, call.Name, json.RawMessage(call.Arguments), func(server, tool, arguments string) bool {
+			body := fmt.Sprintf("MCP server: %s\nTool: %s\nArguments: %s\n\nApproving trusts this server's tools for the rest of this session. MCP servers run on your machine with your permissions.", server, tool, arguments)
+			approved, approveErr := requestApproval(ctx, "mcp", "MCP tool", body, emit)
+			return approveErr == nil && approved
+		})
+		if err != nil {
+			return "", err
+		}
+		if isError {
+			return "", fmt.Errorf("MCP tool %s failed: %s", call.Name, result)
+		}
+		return result, nil
 	}
 }
 

@@ -1,6 +1,9 @@
 # Feature: Slash commands in the prompt input
 
-**Status:** planned — deferred until the release-gate chain (publish → walkthrough → installer verification) is complete. This spec is written now so the design is captured and future work cannot drift.
+**Status:** implemented (local). Tests cover dispatch, unknown-command error
+handling, the `//` escape, `/quit`/Ctrl+D parity, `/models` + live `/model`
+switching (verified through a real client request), and in-place `/sessions`
+resume.
 
 ## Context
 
@@ -19,16 +22,19 @@ the model.
   see open questions), plus `/help`.
 - Implementation timing is flexible: after the release gate, not before.
 
-## Proposed command semantics (to confirm before implementation)
+## Resolved command semantics (decided 2026-09-29 before implementation)
 
 | Command | Behavior |
 | --- | --- |
-| `/sessions` | List saved sessions for the current repository in the conversation view; selecting one resumes it in place (no restart required). |
-| `/models` | List the configured provider's reported models in the conversation view; selecting one switches the active model for subsequent turns (no provider change; provider switch is a setup-flow concern). |
+| `/sessions` | No argument: open the **session selection dialog** (dimmed conversation behind it; newest first). With a number (`/sessions 2`): resume that session **in place** — history, entries, and snapshot swap without a restart. Only completed snapshots load; a pending approval is never replayed (v1-spec FR-10 rules take precedence). |
+| `/models` | Open the **model selection dialog**: the provider's reported models are fetched and shown with the cursor on the live model; the numbered list is remembered for `/model <n>`. |
+| `/model <n-or-id>` | Switch the **live client** to that model (a number from the last `/models` listing, or an exact model ID) for subsequent turns. The `/model` form keeps the stored configuration untouched; applying a model **inside the dialog** (Enter) additionally stores provider+model in `config.json` (decided 2026-09-29 with the dialog integration, superseding the earlier live-only rule). |
 | `/quit` | Identical to Ctrl+D: drains pending state, never replays pending approvals, restores the terminal. |
 | `/skills` | **Placeholder** — Lisa has no skills system in any spec. Excluded from scope until a skills feature exists; reserving the name without implementing it is not useful. |
-| `/help` | Print the command list in the conversation view (cheap, high value). |
-| Unknown `/word` | Visible error in the conversation view; **never sent to the model** — a bare-word catch-all would corrupt conversations when the user legitimately asks the model about "slash commands". |
+| `/help` | Print the command list in the conversation view. |
+| Unknown `/word` | Visible error in the conversation view; **never sent to the model**, and the draft text is restored so nothing is lost. |
+| `//word` | Escape: the leading slash is stripped and `/word` is sent to the model as a normal prompt. |
+| During an active run or pending approval | Commands are inert (the Enter key is already ignored while working); `/quit` is likewise deferred to the run's own cancellation path — no command can interrupt a review. |
 
 ## Functional changes (to apply in v1-spec.md when started)
 

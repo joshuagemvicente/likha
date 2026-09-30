@@ -18,6 +18,7 @@ import (
 	"lisa/internal/model"
 	"lisa/internal/repository"
 	"lisa/internal/session"
+	lisaui "lisa/ui"
 )
 
 const logo = ` _     ___ ____    _
@@ -51,13 +52,17 @@ Options:
   --endpoint URL    OpenAI-compatible base URL; overrides the provider default.
                     Plain HTTP is allowed only for loopback hosts. Endpoints
                     outside the list run with a visible "unverified" warning.
-  --sessions        List saved sessions for the repository; no model needed.
+  --sessions        List saved sessions for the selected repository; no model needed.
   --resume ID       Resume a saved session for the selected repository.
+  --device-login    Sign in to the selected OAuth provider (e.g. chatgpt)
+                    headlessly and store the login; no TUI or repository needed.
   --version         Print the build version and exit.
   --help            Print this help and exit.
 
 First-run setup: launching with no provider configured (interactive terminal)
 prompts for a provider, your API key, and a model, and stores the choice.
+ChatGPT signs in through your browser at first run instead of using an API
+key; the login is stored for later runs.
 
 Environment: LISA_MODEL, LISA_ENDPOINT, LISA_PROVIDER, LISA_API_KEY,
 LISA_STATE_DIR (private storage directory; default is the OS user
@@ -70,6 +75,14 @@ Examples:
   lisa --provider openai --api-key sk-... ~/projects/app
 
 Put options before the repository path. Lisa needs an interactive terminal.
+
+Composer editing keys: Ctrl+W / Ctrl+Backspace / Alt+Backspace delete the
+previous word (with its spaces), Ctrl+Delete or Alt+D the next word;
+Alt+B/Alt+F move by word; Ctrl+U/Ctrl+K kill to the start/end and Ctrl+Y
+yanks; Ctrl+T transposes. Alt+Return (or Ctrl+Return/Shift+Return where the
+terminal sends them; Ctrl+J always) inserts a newline; Enter sends and
+flattens newlines to spaces. Esc clears an idle draft. Tool output and model
+reasoning render in the theme's muted color.
 `
 
 // usageText builds the help text with the provider block generated from the
@@ -81,6 +94,9 @@ func usageText() string {
 		key := p.KeyEnv
 		if !p.Hosted {
 			key = "no key needed"
+		}
+		if p.Auth == model.AuthOAuth {
+			key = "OAuth login"
 		}
 		line := fmt.Sprintf("  %-14s %-52s key: %s", p.Name, p.BaseURL, key)
 		if p.DefaultModel != "" {
@@ -107,7 +123,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	apiKey := flags.String("api-key", os.Getenv("LISA_API_KEY"), "API key for a hosted provider (stored in the private state directory)")
 	listSessions := flags.Bool("sessions", false, "list sessions for the selected repository")
 	resumeID := flags.String("resume", "", "resume a previous session ID")
+	themeFlag := flags.String("theme", os.Getenv("LISA_THEME"), "color theme (see --help list; stored in config.json when set)")
+	nerdFlag := flags.Bool("nerd-fonts", os.Getenv("LISA_NERD") == "1", "use Nerd Font glyphs for status markers")
 	showVersion := flags.Bool("version", false, "print the build version")
+	deviceLogin := flags.Bool("device-login", false, "sign in to the selected OAuth provider headlessly and store the login")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -178,13 +197,39 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	// Precedence: --provider flag (which includes LISA_PROVIDER) > stored
 	// first-run config. A stored model applies only when the provider itself
-	// came from storage and no model was given.
+	// came from storage and no model was given. The theme follows the same
+	// rule: explicit --theme/LISA_THEME > stored config > default.
 	effectiveProvider := *providerName
 	if !providerExplicit && *providerName == "" && stored.Provider != "" {
 		effectiveProvider = stored.Provider
 		if *name == "" && stored.Model != "" {
 			*name = stored.Model
 		}
+	}
+	if *deviceLogin {
+		return deviceLoginFlow(effectiveProvider, stateDir, stdout, stderr)
+	}
+	themeName := *themeFlag
+	themeExplicit := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "theme" {
+			themeExplicit = true
+		}
+	})
+	if !themeExplicit && themeName == "" && stored.Theme != "" {
+		themeName = stored.Theme
+	}
+	if _, ok := lisaui.Named(themeName, true); !ok && themeName != "" && themeName != "default" {
+		fmt.Fprintf(stderr, "lisa: unknown theme %q; using default (run lisa --help for the list)\n", themeName)
+		themeName = ""
+	}
+	composerStyle := ""
+	if stored.Composer != nil {
+		composerStyle = stored.Composer.Style
+	}
+	var statusLine storedStatusLineConfig
+	if stored.StatusLine != nil {
+		statusLine = *stored.StatusLine
 	}
 	// First-run setup: nothing configured anywhere. An interactive terminal
 	// walks the user through provider, key, and model; anything else fails
@@ -199,25 +244,39 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	var chosen, display string
 	var verified bool
 	var key string
+	var res resolvedProvider
 	var selected model.Provider
 	var modelName string
 	var client *model.Client
 	if !setupNeeded {
-		chosen, verified, display, key, err = resolveProvider(effectiveProvider, *endpoint, *apiKey, persistKey, stateDir)
+		res, err = resolveProvider(effectiveProvider, *endpoint, *apiKey, persistKey, stateDir)
 		if err != nil {
 			fmt.Fprintf(stderr, "lisa: %v\n", err)
 			return 2
 		}
+		chosen, verified, display, key = res.endpoint, res.verified, res.display, res.key
 		selected, _ = model.LookupProvider(effectiveProvider)
 		modelName, err = resolveModel(*name, selected, chosen, key)
 		if err != nil {
 			fmt.Fprintf(stderr, "lisa: %v\n", err)
 			return 2
 		}
-		client, err = model.New(chosen, modelName, key)
+		if res.oauth {
+			client, err = model.NewOAuth(res.endpoint, modelName, model.ChatGPTIssuer, model.ChatGPTClientID, res.creds)
+		} else {
+			client, err = model.New(chosen, modelName, key)
+		}
 		if err != nil {
 			fmt.Fprintf(stderr, "lisa: %v\n", err)
 			return 2
+		}
+		if res.oauth {
+			// By the time NewOAuth returns, a stored login exists, so the
+			// provider name must resolve; resolveProvider already validated
+			// it. The saver persists every refreshed token set.
+			client.SetOAuthSaver(func(c model.OAuthCredentials) error {
+				return storeOAuth(stateDir, selected.Name, c)
+			})
 		}
 	}
 	repo, err := repository.New(root)
@@ -225,6 +284,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "lisa: %v\n", err)
 		return 2
 	}
+	mcpServers, err := newMcpManager(stateDir, model.UserAgent)
+	if err != nil {
+		fmt.Fprintf(stderr, "lisa: %v\n", err)
+		return 2
+	}
+	defer mcpServers.Stop()
 	if !interactive {
 		fmt.Fprintln(stderr, "lisa: interactive terminal required")
 		return 2
@@ -253,7 +318,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		client.SetSessionHeader(selected.SessionHeader)
 		client.SetSession(snapshot.ID)
 	}
-	program := tea.NewProgram(newUI(root, repo, client, modelName, connection{provider: display, verified: verified, err: startupErr, setup: setupNeeded}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
+	program := tea.NewProgram(newUI(root, repo, client, modelName, connection{provider: display, providerCanonical: selected.Name, verified: verified, err: startupErr, setup: setupNeeded, theme: themeName, composerStyle: composerStyle, statusLine: statusLine, nerd: *nerdFlag || os.Getenv("LISA_NERD") == "1", mcp: mcpServers}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(stderr, "lisa: terminal: %v\n", err)
 		return 1
@@ -304,4 +369,47 @@ func resolveRoot(path string) (string, error) {
 		return "", errors.New("repository path is not a directory")
 	}
 	return root, nil
+}
+
+// deviceLoginFlow runs the headless device authorization flow for one OAuth
+// provider and stores the resulting login in the private state directory. It
+// needs no interactive terminal, no repository, and no TUI: printing to stdout
+// keeps the code and verification URL visible even when output is piped.
+func deviceLoginFlow(providerName, stateDir string, stdout, stderr io.Writer) int {
+	name := strings.TrimSpace(providerName)
+	if name == "" {
+		fmt.Fprintln(stderr, "lisa: --device-login needs a provider; choose one with --provider (e.g. --provider chatgpt)")
+		return 2
+	}
+	p, ok := model.LookupProvider(name)
+	if !ok {
+		fmt.Fprintf(stderr, "lisa: unknown provider %q (see --help)\n", name)
+		return 2
+	}
+	if p.Auth != model.AuthOAuth {
+		fmt.Fprintln(stderr, "lisa: --device-login applies to OAuth providers (chatgpt)")
+		return 2
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	tokenSet, err := model.DeviceLogin(ctx, model.ChatGPTIssuer, model.ChatGPTClientID, model.UserAgent, func(userCode, verifyURL string) error {
+		fmt.Fprintf(stdout, "Open %s and enter code: %s\n", verifyURL, userCode)
+		fmt.Fprintln(stdout, "Waiting for approval… (Ctrl+C aborts)")
+		return nil
+	}, nil)
+	if err != nil {
+		fmt.Fprintf(stderr, "lisa: %v\n", err)
+		return 1
+	}
+	creds := tokenSet.Credentials()
+	if err := storeOAuth(stateDir, p.Name, creds); err != nil {
+		fmt.Fprintf(stderr, "lisa: store login: %v\n", err)
+		return 1
+	}
+	account := creds.AccountID
+	if account == "" {
+		account = "unknown account"
+	}
+	fmt.Fprintf(stdout, "Signed in as %s; login stored in %s\n", account, keyFilePath(stateDir))
+	return 0
 }

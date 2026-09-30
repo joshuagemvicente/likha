@@ -210,6 +210,20 @@ func (r *Repository) Read(path string) (string, error) {
 	return text, err
 }
 
+// IsDir reports whether a repository-relative path opens as a directory
+// under the same confinement rules as every other repository operation.
+func (r *Repository) IsDir(path string) (bool, error) {
+	dir, err := r.open(path, true)
+	if err == nil {
+		dir.Close()
+		return true, nil
+	}
+	if errors.Is(err, unix.ENOTDIR) {
+		return false, nil
+	}
+	return false, err
+}
+
 // Search performs a literal, case-sensitive search over regular UTF-8 files.
 // Symlinks and .git entries are not traversed. Limits fail explicitly rather
 // than returning an incomplete result set.

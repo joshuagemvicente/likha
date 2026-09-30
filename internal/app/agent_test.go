@@ -74,7 +74,7 @@ func TestAgentReadsFileAndReportsResultToModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	var events []turnEvent
-	runTurn(context.Background(), client, repo, root, nil, "Find the answer", func(ev turnEvent) { events = append(events, ev) })
+	runTurn(context.Background(), client, repo, root, nil, "Find the answer", nil, func(ev turnEvent) { events = append(events, ev) })
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("model requests = %d, want 2", got)
 	}
@@ -138,7 +138,7 @@ func TestAgentReportsRejectedReadWithoutLeakingFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	var events []turnEvent
-	runTurn(context.Background(), client, repo, root, nil, "Read outside", func(ev turnEvent) { events = append(events, ev) })
+	runTurn(context.Background(), client, repo, root, nil, "Read outside", nil, func(ev turnEvent) { events = append(events, ev) })
 	if calls.Load() != 2 || events[len(events)-1].kind != "done" {
 		t.Fatalf("agent did not recover from rejected read: %+v", events)
 	}
@@ -152,7 +152,7 @@ func TestRunCommandRejectsHiddenReviewCharactersBeforeApproval(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = dispatchTool(context.Background(), nil, t.TempDir(), model.ToolCall{Name: "run_command", Arguments: string(args)}, func(ev turnEvent) {
+			_, err = dispatchTool(context.Background(), nil, t.TempDir(), model.ToolCall{Name: "run_command", Arguments: string(args)}, nil, func(ev turnEvent) {
 				if ev.kind == "approval" {
 					approvals++
 				}
@@ -187,7 +187,7 @@ func TestCancelledPendingCommandDoesNotExecuteOrRecordCompletion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var terminal turnEvent
-	runTurn(ctx, client, repo, root, nil, "do it", func(ev turnEvent) {
+	runTurn(ctx, client, repo, root, nil, "do it", nil, func(ev turnEvent) {
 		if ev.kind == "approval" {
 			cancel()
 		}
@@ -229,7 +229,7 @@ func TestCancelledAfterCompletedToolStillReportsOutcome(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var result, terminal turnEvent
-	runTurn(ctx, client, repo, root, nil, "edit", func(ev turnEvent) {
+	runTurn(ctx, client, repo, root, nil, "edit", nil, func(ev turnEvent) {
 		if ev.kind == "approval" {
 			ev.approval.Reply <- true
 		}

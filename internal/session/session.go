@@ -38,6 +38,12 @@ type Snapshot struct {
 	History []model.Message
 	Entries []Entry
 
+	// NamedTitle is the model-generated session name (spec tui-layout phase
+	// 1c). It is set only by the auto-naming flow after the first completed
+	// turn and wins over the first-user-entry derivation below; empty (also
+	// for snapshots saved before this field existed) keeps the derived title.
+	NamedTitle string `json:"named_title,omitempty"`
+
 	// revision belongs to the loaded snapshot, not to the Store: two Store
 	// instances must never assume that their copies are equally current.
 	revision *int64
@@ -264,6 +270,9 @@ func (s *Store) List() ([]Summary, error) {
 }
 
 func title(snapshot Snapshot) string {
+	if snapshot.NamedTitle != "" {
+		return snapshot.NamedTitle
+	}
 	for _, entry := range snapshot.Entries {
 		if entry.Role == "user" {
 			return strings.TrimSpace(entry.Content)

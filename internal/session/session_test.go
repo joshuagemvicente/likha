@@ -2,6 +2,7 @@ package session
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -384,5 +385,65 @@ func TestTitleUsesFirstUserPrompt(t *testing.T) {
 	listed, err := store.List()
 	if err != nil || len(listed) != 1 || listed[0].Title != "First prompt" {
 		t.Fatalf("title not derived from first user prompt: %+v, %v", listed, err)
+	}
+}
+
+func TestTitlePrefersNamedTitle(t *testing.T) {
+	snapshot := Snapshot{Entries: []Entry{{Role: "user", Content: "First prompt"}}}
+	snapshot.NamedTitle = "Feature scaffolding"
+	if got := title(snapshot); got != "Feature scaffolding" {
+		t.Fatalf("named title = %q", got)
+	}
+	snapshot.NamedTitle = ""
+	if got := title(snapshot); got != "First prompt" {
+		t.Fatalf("derived title = %q", got)
+	}
+	// Whitespace-only names keep the derivation.
+	snapshot.NamedTitle = "   "
+	if got := title(snapshot); got != "   " {
+		t.Fatalf("blank-trimmed name = %q", got)
+	}
+}
+
+func TestListShowsGeneratedTitle(t *testing.T) {
+	store, _, _ := testStore(t)
+	snapshot, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Entries = []Entry{{Role: "user", Content: "I want you to create this feature"}}
+	snapshot.NamedTitle = "Feature scaffolding"
+	if err := store.Save(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := store.List()
+	if err != nil || len(listed) != 1 || listed[0].Title != "Feature scaffolding" {
+		t.Fatalf("generated title missing from list: %+v, %v", listed, err)
+	}
+	loaded, err := store.Load(snapshot.ID)
+	if err != nil || loaded.NamedTitle != "Feature scaffolding" {
+		t.Fatalf("generated name did not survive reload: %+v, %v", loaded, err)
+	}
+}
+
+func TestDecodeLegacySnapshotWithoutNamedTitle(t *testing.T) {
+	id := "0123456789abcdef0123456789abcdef"
+	legacy := []byte(`{"ID":"` + id + `","Root":"/repo","History":null,"Entries":null}`)
+	snapshot, err := decode(id, "/repo", legacy)
+	if err != nil || snapshot.NamedTitle != "" {
+		t.Fatalf("legacy snapshot = %+v, %v", snapshot, err)
+	}
+	// Round-trip: a named snapshot re-encodes with the field present.
+	snapshot.NamedTitle = "Feature scaffolding"
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"named_title":"Feature scaffolding"`) {
+		t.Fatalf("named_title not encoded: %s", data)
+	}
+	decoded, err := decode(id, "/repo", data)
+	if err != nil || decoded.NamedTitle != "Feature scaffolding" {
+		t.Fatalf("named title did not round-trip: %+v, %v", decoded, err)
 	}
 }

@@ -41,5 +41,19 @@ specs/
 | --- | --- | --- |
 | Predefined accepted providers (BYOK) | [predefined-providers/](predefined-providers/spec.md) | implemented (local) — hosted-provider probes outstanding |
 | First-run provider setup in the TUI | [first-run-setup/](first-run-setup/spec.md) | implemented (local) |
-| Slash commands in the prompt input | [slash-commands/](slash-commands/spec.md) | planned — after the release gate |
+| Slash commands in the prompt input | [slash-commands/](slash-commands/spec.md) | implemented (local) — including the `/` command autocomplete popup (typing `/` opens the reserved-command list; see [conversation-compaction/](conversation-compaction/context.md)) |
+| Themes and optional Nerd Font icons | [themes/](themes/spec.md) | implemented (local) |
+| MCP server support (tools via stdio) | [mcp-support/](mcp-support/spec.md) | implemented (local) |
+| Agent harness prompt (system prompt + project instructions) | [agent-harness/](agent-harness/spec.md) | draft — awaiting review |
+| @ file/folder references (mention paths in prompts) | [file-references/](file-references/spec.md) | implemented (local) |
 | curl installer for released binaries | [curl-install/](curl-install/spec.md) | implemented (local) — no release published |
+| ChatGPT Plus/Pro login (OAuth 2) provider | [chatgpt-plus/](chatgpt-plus/spec.md) | implemented (local) — live probe outstanding |
+| Prompt line editor, native selection, image attachments | [prompt-editor/](prompt-editor/spec.md) | planned |
+| Conversation compaction (/compact) | [conversation-compaction/](conversation-compaction/spec.md) | implemented (local) |
+| Thinking control (/think) | [thinking-control/](thinking-control/spec.md) | draft |
+| Repo context file (/init → AGENTS.md) | [repo-init/](repo-init/spec.md) | draft |
+| Plan mode (/plan read-only) | [plan-mode/](plan-mode/spec.md) | draft |
+| Custom commands / skills | [custom-commands/](custom-commands/spec.md) | draft |
+| Text transforms (/transform, Wispr-Flow style) | [text-transforms/](text-transforms/spec.md) | draft |
+| TUI layout (status bar enrichment, header declutter, scrollbar fix, role backgrounds) | [tui-layout/](tui-layout/spec.md) | implemented (local) — phases 1–2 done (phase 1: header declutter + mini logo, status-bar enrichment incl. git/env/spend/ctx, auto session names, folder/branch default-on; phase 2: content-width breakpoints + per-path no-overflow invariant tests); phase 3 (role backgrounds) pending |
+| Muted tool rendering + terminal-native composer keys | [tool-rendering-terminal-keys/](tool-rendering-terminal-keys/spec.md) | in progress — M1 (muted tools) and M2 (composer keys) implemented (local); Ctrl+Delete chord unbindable on bubbletea v1.3.10, carried by Alt+D |
