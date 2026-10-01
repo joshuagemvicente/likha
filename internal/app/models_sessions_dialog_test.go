@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"lisa/internal/model"
+	"lisa/internal/providers"
 	"lisa/internal/session"
 )
 
@@ -18,7 +19,7 @@ import (
 // only, Enter switches and stores, and Esc discards.
 func TestModelsDialogSelection(t *testing.T) {
 	stateDir := t.TempDir()
-	if err := saveStoredConfig(stateDir, storedProviderConfig{Provider: "openai", Model: "beta"}); err != nil {
+	if err := providers.SaveStoredConfig(stateDir, providers.StoredProviderConfig{Provider: "openai", Model: "beta"}); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +36,7 @@ func TestModelsDialogSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, client, "beta", connection{provider: "OpenAI", verified: true}, stateDir, nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "beta", providers.Connection{Provider: "OpenAI", Verified: true}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// A bare /models opens the dialog with the cursor on the live model.
@@ -74,7 +75,7 @@ func TestModelsDialogSelection(t *testing.T) {
 	if m.modelName != "gamma" {
 		t.Fatalf("applied model = %q, want gamma", m.modelName)
 	}
-	cfg, err := loadStoredConfig(stateDir)
+	cfg, err := providers.LoadStoredConfig(stateDir)
 	if err != nil || cfg.Model != "gamma" || cfg.Provider != "openai" {
 		t.Fatalf("stored model: %+v %v", cfg, err)
 	}
@@ -105,7 +106,7 @@ func TestModelsDialogSelection(t *testing.T) {
 	if m.modelName != "gamma" {
 		t.Fatalf("Esc changed the applied model to %q", m.modelName)
 	}
-	cfg, err = loadStoredConfig(stateDir)
+	cfg, err = providers.LoadStoredConfig(stateDir)
 	if err != nil || cfg.Model != "gamma" {
 		t.Fatalf("Esc persisted a model: %+v %v", cfg, err)
 	}
@@ -126,7 +127,7 @@ func TestModelsDialogBlocksPromptInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, client, "", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -163,7 +164,7 @@ func TestModelsDialogListErrorStaysOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, client, "test", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "test", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -209,7 +210,7 @@ func TestSessionsDialogSelection(t *testing.T) {
 	if err := store.Save(first); err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, nil, "", connection{provider: "OpenAI", verified: true}, t.TempDir(), store, second)
+	m := newUI(root, nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), store, second)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// A bare /sessions opens the dialog listing both sessions.
@@ -278,7 +279,7 @@ func TestSessionsDialogBlocksPromptInput(t *testing.T) {
 	if _, err := store.Create(); err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, nil, "", connection{provider: "OpenAI", verified: true}, t.TempDir(), store, session.Snapshot{})
+	m := newUI(root, nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), store, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/sessions")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -308,7 +309,7 @@ func TestSessionsDialogBlocksPromptInput(t *testing.T) {
 // full intensity.
 func TestDialogDimsBackground(t *testing.T) {
 	forceANSI(t)
-	m := newUI("/sample", nil, nil, "", connection{provider: "OpenAI", verified: true, theme: "default"}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true, Theme: "default"}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/themes")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -345,7 +346,7 @@ func TestDialogDimsBackground(t *testing.T) {
 // solid band: overlaying the box must not wipe the rows it spans, so a
 // conversation entry in the dialog's vertical band stays visible beside it.
 func TestDialogKeepsBaseContentBesideBox(t *testing.T) {
-	m := newUI("/sample", nil, nil, "", connection{provider: "OpenAI", verified: true, theme: "default"}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true, Theme: "default"}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.entries = append(m.entries, entry{role: "You", content: "hello world"})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/themes")})
@@ -363,7 +364,7 @@ func TestDialogKeepsBaseContentBesideBox(t *testing.T) {
 // frame as escaped literal text.
 func TestDialogRenderNoEscapedSequences(t *testing.T) {
 	forceANSI(t)
-	m := newUI("/sample", nil, nil, "", connection{provider: "OpenAI", verified: true, theme: "default"}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true, Theme: "default"}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/themes")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -394,7 +395,7 @@ func TestModelsDialogShowsProviderRight(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, client, "alpha", connection{provider: "OpenCode Go", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "alpha", providers.Connection{Provider: "OpenCode Go", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -445,7 +446,7 @@ func TestModelsDialogReopenDuringLoadNoPanic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, client, "alpha", connection{provider: "OpenCode Go", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "alpha", providers.Connection{Provider: "OpenCode Go", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// First open: the list arrives and the dialog shows it.
@@ -505,7 +506,7 @@ func TestModelsDialogLateResultRefreshesOpenDialog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, client, "only", connection{provider: "OpenCode Go", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "only", providers.Connection{Provider: "OpenCode Go", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// First open: three models.
@@ -552,7 +553,7 @@ func TestModelsDialogEnterDuringLoadDoesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, client, "test", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "test", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})

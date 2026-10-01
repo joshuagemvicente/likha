@@ -15,7 +15,9 @@ import (
 	"github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
 
+	"lisa/internal/mcp"
 	"lisa/internal/model"
+	"lisa/internal/providers"
 	"lisa/internal/repository"
 	"lisa/internal/session"
 	lisaui "lisa/internal/ui"
@@ -194,7 +196,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			providerExplicit = true
 		}
 	})
-	stored, err := loadStoredConfig(stateDir)
+	stored, err := providers.LoadStoredConfig(stateDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "lisa: %v\n", err)
 		return 2
@@ -231,7 +233,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if stored.Composer != nil {
 		composerStyle = stored.Composer.Style
 	}
-	var statusLine storedStatusLineConfig
+	var statusLine providers.StoredStatusLineConfig
 	if stored.StatusLine != nil {
 		statusLine = *stored.StatusLine
 	}
@@ -248,25 +250,25 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	var chosen, display string
 	var verified bool
 	var key string
-	var res resolvedProvider
+	var res providers.ResolvedProvider
 	var selected model.Provider
 	var modelName string
 	var client *model.Client
 	if !setupNeeded {
-		res, err = resolveProvider(effectiveProvider, *endpoint, *apiKey, persistKey, stateDir)
+		res, err = providers.ResolveProvider(effectiveProvider, *endpoint, *apiKey, persistKey, stateDir)
 		if err != nil {
 			fmt.Fprintf(stderr, "lisa: %v\n", err)
 			return 2
 		}
-		chosen, verified, display, key = res.endpoint, res.verified, res.display, res.key
+		chosen, verified, display, key = res.Endpoint, res.Verified, res.Display, res.Key
 		selected, _ = model.LookupProvider(effectiveProvider)
 		modelName, err = resolveModel(*name, selected, chosen, key)
 		if err != nil {
 			fmt.Fprintf(stderr, "lisa: %v\n", err)
 			return 2
 		}
-		if res.oauth {
-			client, err = model.NewOAuth(res.endpoint, modelName, model.ChatGPTIssuer, model.ChatGPTClientID, res.creds)
+		if res.OAuth {
+			client, err = model.NewOAuth(res.Endpoint, modelName, model.ChatGPTIssuer, model.ChatGPTClientID, res.Creds)
 		} else {
 			client, err = model.New(chosen, modelName, key)
 		}
@@ -274,12 +276,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "lisa: %v\n", err)
 			return 2
 		}
-		if res.oauth {
+		if res.OAuth {
 			// By the time NewOAuth returns, a stored login exists, so the
-			// provider name must resolve; resolveProvider already validated
+			// provider name must resolve; providers.ResolveProvider already validated
 			// it. The saver persists every refreshed token set.
 			client.SetOAuthSaver(func(c model.OAuthCredentials) error {
-				return storeOAuth(stateDir, selected.Name, c)
+				return providers.StoreOAuth(stateDir, selected.Name, c)
 			})
 		}
 	}
@@ -288,7 +290,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "lisa: %v\n", err)
 		return 2
 	}
-	mcpServers, err := newMcpManager(stateDir, model.UserAgent)
+	mcpServers, err := mcp.NewMcpManager(stateDir, model.UserAgent)
 	if err != nil {
 		fmt.Fprintf(stderr, "lisa: %v\n", err)
 		return 2
@@ -322,7 +324,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		client.SetSessionHeader(selected.SessionHeader)
 		client.SetSession(snapshot.ID)
 	}
-	program := tea.NewProgram(newUI(root, repo, client, modelName, connection{provider: display, providerCanonical: selected.Name, verified: verified, err: startupErr, setup: setupNeeded, theme: themeName, composerStyle: composerStyle, statusLine: statusLine, nerd: *nerdFlag || os.Getenv("LISA_NERD") == "1", mcp: mcpServers}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
+	program := tea.NewProgram(newUI(root, repo, client, modelName, providers.Connection{Provider: display, ProviderCanonical: selected.Name, Verified: verified, Err: startupErr, Setup: setupNeeded, Theme: themeName, ComposerStyle: composerStyle, StatusLine: statusLine, Nerd: *nerdFlag || os.Getenv("LISA_NERD") == "1", Mcp: mcpServers}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(stderr, "lisa: terminal: %v\n", err)
 		return 1
@@ -406,7 +408,7 @@ func deviceLoginFlow(providerName, stateDir string, stdout, stderr io.Writer) in
 		return 1
 	}
 	creds := tokenSet.Credentials()
-	if err := storeOAuth(stateDir, p.Name, creds); err != nil {
+	if err := providers.StoreOAuth(stateDir, p.Name, creds); err != nil {
 		fmt.Fprintf(stderr, "lisa: store login: %v\n", err)
 		return 1
 	}
@@ -414,6 +416,6 @@ func deviceLoginFlow(providerName, stateDir string, stdout, stderr io.Writer) in
 	if account == "" {
 		account = "unknown account"
 	}
-	fmt.Fprintf(stdout, "Signed in as %s; login stored in %s\n", account, keyFilePath(stateDir))
+	fmt.Fprintf(stdout, "Signed in as %s; login stored in %s\n", account, providers.KeyFilePath(stateDir))
 	return 0
 }

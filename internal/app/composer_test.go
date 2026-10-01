@@ -7,12 +7,13 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"lisa/internal/providers"
 	"lisa/internal/session"
 )
 
 func composerTestUI(t *testing.T, style string, width, height int) *ui {
 	t.Helper()
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local", verified: true, composerStyle: style}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local", Verified: true, ComposerStyle: style}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: width, Height: height})
 	return m
 }
@@ -124,11 +125,11 @@ func TestComposerReviewFooterAndPageGate(t *testing.T) {
 
 func TestComposerChooserFiltersCancelsAndPersists(t *testing.T) {
 	stateDir := t.TempDir()
-	original := storedProviderConfig{Provider: "openai", Model: "gpt-4o-mini", Theme: "habamax"}
-	if err := saveStoredConfig(stateDir, original); err != nil {
+	original := providers.StoredProviderConfig{Provider: "openai", Model: "gpt-4o-mini", Theme: "habamax"}
+	if err := providers.SaveStoredConfig(stateDir, original); err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, nil, original.Model, connection{provider: "OpenAI", verified: true}, stateDir, nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, original.Model, providers.Connection{Provider: "OpenAI", Verified: true}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	if !m.dialog.open || m.dialog.kind != dialogComposer || m.dialog.cursor != 0 || !strings.Contains(m.View(), "Composer selection") {
@@ -149,11 +150,11 @@ func TestComposerChooserFiltersCancelsAndPersists(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("chatt")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	cfg, err := loadStoredConfig(stateDir)
+	cfg, err := providers.LoadStoredConfig(stateDir)
 	if err != nil || m.dialog.open || m.composerStyle != "chatter" || cfg.Composer == nil || cfg.Composer.Style != "chatter" || cfg.Provider != original.Provider || cfg.Model != original.Model || cfg.Theme != original.Theme {
 		t.Fatalf("composer preference failed to preserve configuration: %+v, %v", cfg, err)
 	}
-	reopened := newUI("/sample", nil, nil, cfg.Model, connection{provider: "OpenAI", composerStyle: cfg.Composer.Style}, stateDir, nil, session.Snapshot{})
+	reopened := newUI("/sample", nil, nil, cfg.Model, providers.Connection{Provider: "OpenAI", ComposerStyle: cfg.Composer.Style}, stateDir, nil, session.Snapshot{})
 	reopened.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	reopened.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	if reopened.dialog.cursor != 3 || !strings.Contains(reopened.View(), "> chatter (current)") {
@@ -178,7 +179,7 @@ func TestComposerPersistenceErrorKeepsSelection(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(stateDir, "config.json"), []byte("not JSON"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, nil, "local", connection{composerStyle: "minimal"}, stateDir, nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{ComposerStyle: "minimal"}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -190,17 +191,17 @@ func TestComposerPersistenceErrorKeepsSelection(t *testing.T) {
 
 func TestFinishSetupPreservesComposerPreference(t *testing.T) {
 	stateDir := t.TempDir()
-	cfg := storedProviderConfig{Composer: &storedComposerConfig{Style: "borderless"}}
-	if err := saveStoredConfig(stateDir, cfg); err != nil {
+	cfg := providers.StoredProviderConfig{Composer: &providers.StoredComposerConfig{Style: "borderless"}}
+	if err := providers.SaveStoredConfig(stateDir, cfg); err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, nil, "", connection{setup: true, composerStyle: "borderless"}, stateDir, nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Setup: true, ComposerStyle: "borderless"}, stateDir, nil, session.Snapshot{})
 	m.setup.cursor = 0
 	m.finishSetup("gpt-4o-mini")
 	if m.setup.err != "" {
 		t.Fatal(m.setup.err)
 	}
-	stored, err := loadStoredConfig(stateDir)
+	stored, err := providers.LoadStoredConfig(stateDir)
 	if err != nil || stored.Composer == nil || stored.Composer.Style != "borderless" || stored.Provider == "" || stored.Model != "gpt-4o-mini" {
 		t.Fatalf("setup lost composer setting: %+v %v", stored, err)
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"lisa/internal/providers"
 	"lisa/internal/session"
 )
 
@@ -12,7 +13,7 @@ import (
 
 func newKeysTestUI(t *testing.T) *ui {
 	t.Helper()
-	m := newUI("/sample", nil, nil, "", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return m
 }

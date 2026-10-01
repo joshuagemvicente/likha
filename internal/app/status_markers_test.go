@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"lisa/internal/providers"
 	"lisa/internal/session"
 	lisaui "lisa/internal/ui"
 )
@@ -15,7 +16,7 @@ import (
 // the status identity; a listed provider never does.
 func TestStatusIdentityShowsUnverifiedWarning(t *testing.T) {
 	custom := func(verified bool) *ui {
-		m := newUI("/sample", nil, nil, "local-model", connection{provider: "Custom endpoint", verified: verified}, t.TempDir(), nil, session.Snapshot{})
+		m := newUI("/sample", nil, nil, "local-model", providers.Connection{Provider: "Custom endpoint", Verified: verified}, t.TempDir(), nil, session.Snapshot{})
 		m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 		return m
 	}
@@ -33,14 +34,14 @@ func TestStatusIdentityShowsUnverifiedWarning(t *testing.T) {
 func TestNerdMarkersOnlyWithOptIn(t *testing.T) {
 	clock := lisaui.NerdGlyphs().Waiting
 	pencil := lisaui.NerdGlyphs().Review
-	nerd := newUI("/sample", nil, nil, "local", connection{provider: "OpenAI", verified: true, nerd: true}, t.TempDir(), nil, session.Snapshot{})
+	nerd := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true, Nerd: true}, t.TempDir(), nil, session.Snapshot{})
 	nerd.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	nerd.status = "Waiting for model"
 	hints := nerd.statusHints(1, 1, false)
 	if !strings.Contains(hints[0], clock+" Waiting for model") {
 		t.Fatalf("nerd waiting marker missing: %q", hints[0])
 	}
-	plain := newUI("/sample", nil, nil, "local", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	plain := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	plain.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	plain.status = "Waiting for model"
 	hints = plain.statusHints(1, 1, false)
@@ -62,7 +63,7 @@ func TestNerdMarkersOnlyWithOptIn(t *testing.T) {
 func TestErrorEntriesRenderThemeError(t *testing.T) {
 	for _, name := range lisaui.ThemeNames() {
 		theme := lisaui.Resolve(name, true)
-		m := newUI("/sample", nil, nil, "local", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+		m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 		m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		m.theme = theme
 		m.entries = append(m.entries, entry{role: "Error", content: "startup connection check failed"}, entry{role: "Lisa", content: "plain prose"})

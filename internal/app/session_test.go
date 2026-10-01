@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"lisa/internal/model"
+	"lisa/internal/providers"
 	"lisa/internal/session"
 )
 
@@ -22,7 +23,7 @@ func TestConversationPersistsAndResumesWithContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", store, snapshot)
+	m := newUI(root, nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", store, snapshot)
 	m.working, m.runID = true, 1
 	m.cancel = func() {}
 	m.entries = append(m.entries, entry{role: "You", content: "What changed?"}, entry{role: "Assistant", content: "The file was updated."})
@@ -33,7 +34,7 @@ func TestConversationPersistsAndResumesWithContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resumed := newUI(root, nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", store, saved)
+	resumed := newUI(root, nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", store, saved)
 	resumed.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	if !strings.Contains(resumed.View(), "The file was updated.") || len(resumed.history) != 2 || resumed.history[1].Content != "The file was updated." {
 		t.Fatalf("completed conversation not resumed: entries = %+v, history = %+v", resumed.entries, resumed.history)
@@ -50,7 +51,7 @@ func TestInterruptedApprovalDoesNotResumeAsPermission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", store, snapshot)
+	m := newUI(root, nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", store, snapshot)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.entries = append(m.entries, entry{role: "You", content: "Proceed safely"})
 	m.persist()
@@ -65,7 +66,7 @@ func TestInterruptedApprovalDoesNotResumeAsPermission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resumed := newUI(root, nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", store, loaded)
+	resumed := newUI(root, nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", store, loaded)
 	resumed.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	if resumed.pending != nil || resumed.working || strings.Contains(resumed.View(), "touch marker") || len(pending.Reply) != 0 {
 		t.Fatal("unfinished command approval survived a session restart")

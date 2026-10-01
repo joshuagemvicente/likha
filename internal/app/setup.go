@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"lisa/internal/model"
+	"lisa/internal/providers"
 	lisaui "lisa/internal/ui"
 )
 
@@ -230,26 +231,26 @@ func (m *ui) finishSetup(modelID string) tea.Cmd {
 	if p.Auth == model.AuthOAuth {
 		// Store the fresh login immediately; access tokens then expire and
 		// the client refreshes them through this saver.
-		if err := storeOAuth(m.stateDir, p.Name, m.setup.creds); err != nil {
+		if err := providers.StoreOAuth(m.stateDir, p.Name, m.setup.creds); err != nil {
 			m.setup.err = err.Error()
 			return nil
 		}
 		client.SetOAuthSaver(func(c model.OAuthCredentials) error {
-			return storeOAuth(m.stateDir, p.Name, c)
+			return providers.StoreOAuth(m.stateDir, p.Name, c)
 		})
 	} else if key := strings.TrimSpace(string(m.setup.keyInput)); key != "" {
-		if err := storeKey(m.stateDir, p.Name, key); err != nil {
+		if err := providers.StoreKey(m.stateDir, p.Name, key); err != nil {
 			m.setup.err = err.Error()
 			return nil
 		}
 	}
-	cfg, err := loadStoredConfig(m.stateDir)
+	cfg, err := providers.LoadStoredConfig(m.stateDir)
 	if err != nil {
 		m.setup.err = err.Error()
 		return nil
 	}
 	cfg.Provider, cfg.Model, cfg.Theme = p.Name, modelID, m.themeName
-	if err := saveStoredConfig(m.stateDir, cfg); err != nil {
+	if err := providers.SaveStoredConfig(m.stateDir, cfg); err != nil {
 		m.setup.err = err.Error()
 		return nil
 	}
@@ -261,7 +262,7 @@ func (m *ui) finishSetup(modelID string) tea.Cmd {
 		client.SetSession(m.snapshot.ID)
 	}
 	m.modelName = modelID
-	m.conn = connection{provider: p.DisplayName, providerCanonical: p.Name, verified: true, theme: m.themeName, nerd: m.conn.nerd, composerStyle: m.composerStyle}
+	m.conn = providers.Connection{Provider: p.DisplayName, ProviderCanonical: p.Name, Verified: true, Theme: m.themeName, Nerd: m.conn.Nerd, ComposerStyle: m.composerStyle}
 	m.setup.stage = setupTheme
 	m.setup.cursor = 0
 	return nil
@@ -285,10 +286,10 @@ func (m *ui) applySetupTheme() tea.Cmd {
 	}
 	m.themeName = names[m.setup.cursor]
 	m.theme = lisaui.Resolve(m.themeName, lisaui.HasDarkBackground())
-	cfg, err := loadStoredConfig(m.stateDir)
+	cfg, err := providers.LoadStoredConfig(m.stateDir)
 	if err == nil && cfg.Provider != "" {
 		cfg.Theme = m.themeName
-		if err := saveStoredConfig(m.stateDir, cfg); err != nil {
+		if err := providers.SaveStoredConfig(m.stateDir, cfg); err != nil {
 			m.setup.err = err.Error()
 			return nil
 		}

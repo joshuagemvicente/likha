@@ -10,26 +10,27 @@ import (
 	"testing"
 
 	"lisa/internal/model"
+	"lisa/internal/providers"
 	"lisa/internal/session"
 )
 
 func TestStoredStatusLineConfigRoundTripAndLegacy(t *testing.T) {
 	stateDir := t.TempDir()
 	legacy := []byte(`{"provider":"openai","model":"gpt-4o-mini","theme":"default","composer":{"style":"bordered"},"future_setting":{"enabled":true}}`)
-	if err := os.WriteFile(configFilePath(stateDir), legacy, 0600); err != nil {
+	if err := os.WriteFile(providers.ConfigFilePath(stateDir), legacy, 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadStoredConfig(stateDir)
+	cfg, err := providers.LoadStoredConfig(stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.StatusLine != nil || cfg.Provider != "openai" || cfg.Model != "gpt-4o-mini" || cfg.Theme != "default" || cfg.Composer == nil || cfg.Composer.Style != "bordered" {
 		t.Fatalf("legacy config changed on load: %+v", cfg)
 	}
-	if err := saveStoredConfig(stateDir, cfg); err != nil {
+	if err := providers.SaveStoredConfig(stateDir, cfg); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(configFilePath(stateDir))
+	data, err := os.ReadFile(providers.ConfigFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,19 +42,19 @@ func TestStoredStatusLineConfigRoundTripAndLegacy(t *testing.T) {
 		t.Fatalf("optional status fields were enabled by default: %s", data)
 	}
 
-	cfg.StatusLine = &storedStatusLineConfig{Folder: statusFlag(true), Branch: statusFlag(true), Session: true, Version: true}
+	cfg.StatusLine = &providers.StoredStatusLineConfig{Folder: statusFlag(true), Branch: statusFlag(true), Session: true, Version: true}
 	cfg.Theme = "habamax" // existing read-modify-write saves must keep the other preferences
-	if err := saveStoredConfig(stateDir, cfg); err != nil {
+	if err := providers.SaveStoredConfig(stateDir, cfg); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := loadStoredConfig(stateDir)
+	loaded, err := providers.LoadStoredConfig(stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if loaded.Provider != cfg.Provider || loaded.Model != cfg.Model || loaded.Theme != cfg.Theme || loaded.Composer == nil || loaded.Composer.Style != cfg.Composer.Style || loaded.StatusLine == nil || !reflect.DeepEqual(loaded.StatusLine, cfg.StatusLine) {
 		t.Fatalf("preferences changed after save: %+v", loaded)
 	}
-	data, err = os.ReadFile(configFilePath(stateDir))
+	data, err = os.ReadFile(providers.ConfigFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,15 +10,16 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"lisa/internal/model"
+	"lisa/internal/providers"
 	"lisa/internal/session"
 )
 
 func TestThemesModalSelection(t *testing.T) {
 	stateDir := t.TempDir()
-	if err := saveStoredConfig(stateDir, storedProviderConfig{Provider: "openai", Model: "gpt-4o-mini"}); err != nil {
+	if err := providers.SaveStoredConfig(stateDir, providers.StoredProviderConfig{Provider: "openai", Model: "gpt-4o-mini"}); err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, nil, "", connection{provider: "OpenAI", verified: true, theme: "default"}, stateDir, nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true, Theme: "default"}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// A bare /themes opens the modal with the cursor on the applied theme.
@@ -61,7 +62,7 @@ func TestThemesModalSelection(t *testing.T) {
 	if m.themeName != "habamax" {
 		t.Fatalf("applied theme = %q, want habamax", m.themeName)
 	}
-	cfg, err := loadStoredConfig(stateDir)
+	cfg, err := providers.LoadStoredConfig(stateDir)
 	if err != nil || cfg.Theme != "habamax" {
 		t.Fatalf("stored theme: %+v %v", cfg, err)
 	}
@@ -81,7 +82,7 @@ func TestThemesModalSelection(t *testing.T) {
 	if m.themeName != "habamax" {
 		t.Fatalf("Esc changed the applied theme to %q", m.themeName)
 	}
-	cfg, err = loadStoredConfig(stateDir)
+	cfg, err = providers.LoadStoredConfig(stateDir)
 	if err != nil || cfg.Theme != "habamax" {
 		t.Fatalf("Esc persisted a theme: %+v %v", cfg, err)
 	}
@@ -102,7 +103,7 @@ func TestThemesModalBlocksPromptInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, client, "", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/themes")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})

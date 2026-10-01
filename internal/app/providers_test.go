@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"lisa/internal/model"
+	"lisa/internal/providers"
 	"lisa/internal/session"
 )
 
@@ -48,7 +49,7 @@ func newProvidersUI(t *testing.T, stateDir, endpoint string) *ui {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newUI("/sample", nil, client, "start-model", connection{provider: "OpenAI", verified: true}, stateDir, nil, session.Snapshot{})
+	return newUI("/sample", nil, client, "start-model", providers.Connection{Provider: "OpenAI", Verified: true}, stateDir, nil, session.Snapshot{})
 }
 
 // runCommand types a prompt line and submits it with Enter. Any draft left
@@ -75,7 +76,7 @@ func findEntry(m *ui, needle string) (entry, bool) {
 // ones show "not configured", and the cursor starts on the active provider.
 func TestProvidersDialogBareCommand(t *testing.T) {
 	stateDir := t.TempDir()
-	if err := storeKey(stateDir, "opencode-go", "k"); err != nil {
+	if err := providers.StoreKey(stateDir, "opencode-go", "k"); err != nil {
 		t.Fatal(err)
 	}
 	server := newProvidersServer(t, false)
@@ -199,25 +200,25 @@ func TestProvidersSwitchActivatesSession(t *testing.T) {
 	stateDir := t.TempDir()
 	server := newProvidersServer(t, false)
 	defer server.Close()
-	if err := storeKey(stateDir, "custom", "test-key"); err != nil {
+	if err := providers.StoreKey(stateDir, "custom", "test-key"); err != nil {
 		t.Fatal(err)
 	}
-	cfgBefore := storedProviderConfig{Provider: "openai", Model: "gpt-4o-mini"}
-	if err := saveStoredConfig(stateDir, cfgBefore); err != nil {
+	cfgBefore := providers.StoredProviderConfig{Provider: "openai", Model: "gpt-4o-mini"}
+	if err := providers.SaveStoredConfig(stateDir, cfgBefore); err != nil {
 		t.Fatal(err)
 	}
-	configBefore, err := os.ReadFile(configFilePath(stateDir))
+	configBefore, err := os.ReadFile(providers.ConfigFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	providersBefore, err := os.ReadFile(keyFilePath(stateDir))
+	providersBefore, err := os.ReadFile(providers.KeyFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	m := newProvidersUI(t, stateDir, server.URL+"/v1")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	cmd := m.applyProviderDirect(customEndpointTarget(server.URL + "/v1"))
+	cmd := m.applyProviderDirect(providers.CustomEndpointTarget(server.URL + "/v1"))
 	if cmd == nil {
 		t.Fatal("configured provider did not start a switch")
 	}
@@ -240,27 +241,27 @@ func TestProvidersSwitchActivatesSession(t *testing.T) {
 	if m.status != "Connected" {
 		t.Fatalf("status = %q, want Connected", m.status)
 	}
-	if m.conn.provider != "Custom endpoint" {
-		t.Fatalf("connection provider = %q, want Custom endpoint", m.conn.provider)
+	if m.conn.Provider != "Custom endpoint" {
+		t.Fatalf("connection provider = %q, want Custom endpoint", m.conn.Provider)
 	}
 	if _, ok := findEntry(m, "Provider switched to Custom endpoint for this session."); !ok {
 		t.Fatalf("confirmation entry missing: %+v", m.entries)
 	}
-	configAfter, err := os.ReadFile(configFilePath(stateDir))
+	configAfter, err := os.ReadFile(providers.ConfigFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(configBefore, configAfter) {
 		t.Fatalf("config.json changed: %s -> %s", configBefore, configAfter)
 	}
-	providersAfter, err := os.ReadFile(keyFilePath(stateDir))
+	providersAfter, err := os.ReadFile(providers.KeyFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(providersBefore, providersAfter) {
 		t.Fatal("providers.json was rewritten by a session switch")
 	}
-	if cfg, err := loadStoredConfig(stateDir); err != nil || cfg != cfgBefore {
+	if cfg, err := providers.LoadStoredConfig(stateDir); err != nil || cfg != cfgBefore {
 		t.Fatalf("stored config changed: %+v %v", cfg, err)
 	}
 }
@@ -274,14 +275,14 @@ func TestProvidersSwitchVerificationFailure(t *testing.T) {
 	defer good.Close()
 	bad := newProvidersServer(t, true)
 	defer bad.Close()
-	if err := storeKey(stateDir, "custom", "test-key"); err != nil {
+	if err := providers.StoreKey(stateDir, "custom", "test-key"); err != nil {
 		t.Fatal(err)
 	}
 	m := newProvidersUI(t, stateDir, good.URL+"/v1")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	prevClient := m.client
 
-	cmd := m.applyProviderDirect(customEndpointTarget(bad.URL + "/v1"))
+	cmd := m.applyProviderDirect(providers.CustomEndpointTarget(bad.URL + "/v1"))
 	if cmd == nil {
 		t.Fatal("configured provider did not start a switch")
 	}
@@ -318,7 +319,7 @@ func TestProvidersKeyModalSuccess(t *testing.T) {
 	m := newProvidersUI(t, stateDir, server.URL+"/v1")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	if cmd := m.applyProviderDirect(customEndpointTarget(server.URL + "/v1")); cmd != nil {
+	if cmd := m.applyProviderDirect(providers.CustomEndpointTarget(server.URL + "/v1")); cmd != nil {
 		t.Fatal("unconfigured provider returned a switch command instead of the key modal")
 	}
 	if !m.keyModal.open {
@@ -354,7 +355,7 @@ func TestProvidersKeyModalSuccess(t *testing.T) {
 	}
 	m.Update(msg)
 
-	if key, err := storedKey(stateDir, "custom"); err != nil || key != "test-key" {
+	if key, err := providers.StoredKey(stateDir, "custom"); err != nil || key != "test-key" {
 		t.Fatalf("stored key = %q %v, want test-key", key, err)
 	}
 	if m.keyModal.open {
@@ -381,7 +382,7 @@ func TestProvidersKeyModalFailure(t *testing.T) {
 		t.Fatal("providers dialog did not open")
 	}
 	prevClient := m.client
-	if cmd := m.applyProviderDirect(customEndpointTarget(bad.URL + "/v1")); cmd != nil {
+	if cmd := m.applyProviderDirect(providers.CustomEndpointTarget(bad.URL + "/v1")); cmd != nil {
 		t.Fatal("unconfigured provider returned a switch command instead of the key modal")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("test-key")})
@@ -399,7 +400,7 @@ func TestProvidersKeyModalFailure(t *testing.T) {
 	if m.keyModal.err == "" {
 		t.Fatalf("modal error not set: %+v", m.keyModal)
 	}
-	if key, err := storedKey(stateDir, "custom"); err != nil || key != "" {
+	if key, err := providers.StoredKey(stateDir, "custom"); err != nil || key != "" {
 		t.Fatalf("failed check stored a key: %q %v", key, err)
 	}
 	if m.client != prevClient {
@@ -414,7 +415,7 @@ func TestProvidersKeyModalFailure(t *testing.T) {
 	if m.keyModal.open {
 		t.Fatal("Esc did not close the key modal")
 	}
-	if key, err := storedKey(stateDir, "custom"); err != nil || key != "" {
+	if key, err := providers.StoredKey(stateDir, "custom"); err != nil || key != "" {
 		t.Fatalf("Esc stored a key: %q %v", key, err)
 	}
 }
@@ -434,7 +435,7 @@ func TestProvidersKeyModalEscKeepsDialog(t *testing.T) {
 		t.Fatal("providers dialog did not open")
 	}
 	prevClient := m.client
-	if cmd := m.applyProviderDirect(customEndpointTarget(server.URL + "/v1")); cmd != nil {
+	if cmd := m.applyProviderDirect(providers.CustomEndpointTarget(server.URL + "/v1")); cmd != nil {
 		t.Fatal("unconfigured provider returned a switch command")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("partial")})
@@ -448,7 +449,7 @@ func TestProvidersKeyModalEscKeepsDialog(t *testing.T) {
 	if !m.dialog.open {
 		t.Fatal("Esc closed the provider dialog underneath")
 	}
-	if key, err := storedKey(stateDir, "custom"); err != nil || key != "" {
+	if key, err := providers.StoredKey(stateDir, "custom"); err != nil || key != "" {
 		t.Fatalf("Esc stored a key: %q %v", key, err)
 	}
 	if m.client != prevClient {
@@ -481,7 +482,7 @@ func TestProvidersDirectArguments(t *testing.T) {
 	// Number on a configured provider: the switch command starts. The
 	// command verifies against the endpoint asynchronously; it is never
 	// invoked here (the real OpenAI endpoint must not be contacted).
-	if err := storeKey(stateDir, "openai", "k"); err != nil {
+	if err := providers.StoreKey(stateDir, "openai", "k"); err != nil {
 		t.Fatal(err)
 	}
 	cmd := runCommand(m, "/providers 1")
@@ -563,7 +564,7 @@ func TestCustomEndpointGate(t *testing.T) {
 	if customEndpointsEnabled {
 		t.Fatal("customEndpointsEnabled should be false until the feature ships")
 	}
-	p := customEndpointTarget("https://example.invalid/v1")
+	p := providers.CustomEndpointTarget("https://example.invalid/v1")
 	if p.Name != "custom" || p.DisplayName != "Custom endpoint" {
 		t.Fatalf("custom endpoint target = %+v", p)
 	}
@@ -587,24 +588,6 @@ func TestCustomEndpointGate(t *testing.T) {
 	}
 }
 
-// TestProvidersSwitchModelID verifies the landing-model resolution: the
-// provider's documented default wins over the reported list, the first
-// reported id is used when there is no default, and the result is empty when
-// neither exists.
-func TestProvidersSwitchModelID(t *testing.T) {
-	withDefault := model.Provider{Name: "with-default", DefaultModel: "default-model"}
-	if got := switchModelID(withDefault, []string{"reported-1", "reported-2"}); got != "default-model" {
-		t.Fatalf("switchModelID with default = %q, want default-model", got)
-	}
-	noDefault := model.Provider{Name: "no-default"}
-	if got := switchModelID(noDefault, []string{"reported-1", "reported-2"}); got != "reported-1" {
-		t.Fatalf("switchModelID without default = %q, want the first reported id", got)
-	}
-	if got := switchModelID(noDefault, nil); got != "" {
-		t.Fatalf("switchModelID with neither = %q, want empty", got)
-	}
-}
-
 // storedTestOAuth writes a signed-in OAuth login with a future expiry into
 // the private state dir for a test.
 func storedTestOAuth(t *testing.T, stateDir string) model.OAuthCredentials {
@@ -615,7 +598,7 @@ func storedTestOAuth(t *testing.T, stateDir string) model.OAuthCredentials {
 		Expires:   time.Now().Add(time.Hour).UnixMilli(),
 		AccountID: "acct_test",
 	}
-	if err := storeOAuth(stateDir, "chatgpt", creds); err != nil {
+	if err := providers.StoreOAuth(stateDir, "chatgpt", creds); err != nil {
 		t.Fatal(err)
 	}
 	return creds
@@ -656,15 +639,15 @@ func TestProvidersChatgptSwitchActivated(t *testing.T) {
 	defer server.Close() // unused by the OAuth path; nothing may dial it
 	storedTestOAuth(t, stateDir)
 
-	cfgBefore := storedProviderConfig{Provider: "openai", Model: "gpt-4o-mini"}
-	if err := saveStoredConfig(stateDir, cfgBefore); err != nil {
+	cfgBefore := providers.StoredProviderConfig{Provider: "openai", Model: "gpt-4o-mini"}
+	if err := providers.SaveStoredConfig(stateDir, cfgBefore); err != nil {
 		t.Fatal(err)
 	}
-	configBefore, err := os.ReadFile(configFilePath(stateDir))
+	configBefore, err := os.ReadFile(providers.ConfigFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	providersBefore, err := os.ReadFile(keyFilePath(stateDir))
+	providersBefore, err := os.ReadFile(providers.KeyFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -688,8 +671,8 @@ func TestProvidersChatgptSwitchActivated(t *testing.T) {
 	}
 	m.Update(msg)
 
-	if m.conn.provider != "ChatGPT (Plus/Pro)" {
-		t.Fatalf("connection provider = %q, want ChatGPT (Plus/Pro)", m.conn.provider)
+	if m.conn.Provider != "ChatGPT (Plus/Pro)" {
+		t.Fatalf("connection provider = %q, want ChatGPT (Plus/Pro)", m.conn.Provider)
 	}
 	if m.modelName != "gpt-5.5" {
 		t.Fatalf("model = %q, want the provider default gpt-5.5", m.modelName)
@@ -715,24 +698,24 @@ func TestProvidersChatgptSwitchActivated(t *testing.T) {
 	if err := m.client.Check(ctx); err != nil {
 		t.Fatalf("activated OAuth client failed an offline check: %v", err)
 	}
-	configAfter, err := os.ReadFile(configFilePath(stateDir))
+	configAfter, err := os.ReadFile(providers.ConfigFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(configBefore, configAfter) {
 		t.Fatalf("config.json changed: %s -> %s", configBefore, configAfter)
 	}
-	providersAfter, err := os.ReadFile(keyFilePath(stateDir))
+	providersAfter, err := os.ReadFile(providers.KeyFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(providersBefore, providersAfter) {
 		t.Fatal("providers.json was rewritten by a session switch")
 	}
-	if cfg, err := loadStoredConfig(stateDir); err != nil || cfg != cfgBefore {
+	if cfg, err := providers.LoadStoredConfig(stateDir); err != nil || cfg != cfgBefore {
 		t.Fatalf("stored config changed: %+v %v", cfg, err)
 	}
-	if _, ok, err := storedOAuth(stateDir, "chatgpt"); err != nil || !ok {
+	if _, ok, err := providers.StoredOAuth(stateDir, "chatgpt"); err != nil || !ok {
 		t.Fatalf("stored login lost during the switch: ok=%t err=%v", ok, err)
 	}
 }
@@ -747,7 +730,7 @@ func TestProvidersChatgptSwitchCheckFailure(t *testing.T) {
 		Access:  "access-token",
 		Expires: time.Now().Add(-time.Hour).UnixMilli(),
 	}
-	if err := storeOAuth(stateDir, "chatgpt", creds); err != nil {
+	if err := providers.StoreOAuth(stateDir, "chatgpt", creds); err != nil {
 		t.Fatal(err)
 	}
 	m := newProvidersUI(t, stateDir, "https://example.invalid/v1")

@@ -12,6 +12,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"lisa/internal/model"
+	"lisa/internal/providers"
 	lisaui "lisa/internal/ui"
 )
 
@@ -45,7 +46,7 @@ func (m *ui) refreshStatusSessionTitle() {
 // only under --nerd-fonts; plain output stays identical without the flag.
 func (m *ui) statusState() string {
 	state := m.status
-	if !m.conn.nerd || m.pending != nil {
+	if !m.conn.Nerd || m.pending != nil {
 		return state
 	}
 	switch {
@@ -66,7 +67,7 @@ func (m *ui) statusState() string {
 // reviewKind prefixes a review label with the pencil marker under the Nerd
 // Font opt-in; plain terminals keep the bare label.
 func (m *ui) reviewMark(kind string) string {
-	if !m.conn.nerd {
+	if !m.conn.Nerd {
 		return kind
 	}
 	return m.glyphs.Review + " " + kind
@@ -169,20 +170,20 @@ func (m *ui) statusOptional() []statusSegment {
 			segments = append(segments, statusSegment{statusField(value, m.width), m.theme.Muted})
 		}
 	}
-	add(flagEnabled(m.statusLineOpts.Folder), m.statusFolder)
+	add(providers.FlagEnabled(m.statusLineOpts.Folder), m.statusFolder)
 	// Git segments (spec tui-layout 1b.4): one bounded git status read feeds
 	// every segment, and a failed read (git missing, timeout, non-repository)
 	// hides them all rather than rendering stale zeros.
 	if m.gitOK {
 		// An unborn branch renders "No commits yet on <name>"; show the name.
 		branch := strings.TrimPrefix(m.git.Branch, "No commits yet on ")
-		add(flagEnabled(m.statusLineOpts.Branch), branch)
-		add(flagEnabled(m.statusLineOpts.Branch), aheadBehindSegment(m.git))
+		add(providers.FlagEnabled(m.statusLineOpts.Branch), branch)
+		add(providers.FlagEnabled(m.statusLineOpts.Branch), aheadBehindSegment(m.git))
 		add(m.statusLineOpts.Staged, statusCountSegment(m.git.Staged, "staged"))
 		add(m.statusLineOpts.Changes, statusCountSegment(m.git.Dirty, "changed"))
 		add(m.statusLineOpts.Changes, statusCountSegment(m.git.Untracked, "untracked"))
 	}
-	add(m.statusLineOpts.MCP, m.conn.mcp.Summary())
+	add(m.statusLineOpts.MCP, m.conn.Mcp.Summary())
 	add(m.statusLineOpts.Session, m.statusTitle)
 	add(true, envSegment())
 	add(m.statusLineOpts.Minutes, fmt.Sprintf("minutes %dm", int(time.Since(m.started).Minutes())))
@@ -271,10 +272,10 @@ func statusWidth(segments []statusSegment) int {
 // The model renders its curated display name where one exists, falling back
 // to the slug (spec tui-layout 1b.2).
 func (m *ui) statusIdentity(maxWidth int, usage string) []statusSegment {
-	provider := statusField(m.conn.provider, m.width)
+	provider := statusField(m.conn.Provider, m.width)
 	if provider == "" {
 		provider = "Provider"
-	} else if !m.conn.verified {
+	} else if !m.conn.Verified {
 		// v1 spec §3: an endpoint outside the accepted list runs with a
 		// visible unverified warning. The identity row is the provider
 		// display; the tight-width abbreviation below may drop the marker

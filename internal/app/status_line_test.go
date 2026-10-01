@@ -10,12 +10,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"lisa/internal/mcp"
 	"lisa/internal/model"
+	"lisa/internal/providers"
 	"lisa/internal/session"
 )
 
-func statusTestUI(t *testing.T, style string, width, height int, options storedStatusLineConfig) *ui {
+func statusTestUI(t *testing.T, style string, width, height int, options providers.StoredStatusLineConfig) *ui {
 	t.Helper()
-	m := newUI("/sample", nil, nil, "model-alpha", connection{provider: "Local", verified: true, composerStyle: style, statusLine: options}, t.TempDir(), nil, session.Snapshot{ID: "sample-session"})
+	m := newUI("/sample", nil, nil, "model-alpha", providers.Connection{Provider: "Local", Verified: true, ComposerStyle: style, StatusLine: options}, t.TempDir(), nil, session.Snapshot{ID: "sample-session"})
 	m.Update(tea.WindowSizeMsg{Width: width, Height: height})
 	return m
 }
@@ -23,7 +24,7 @@ func statusTestUI(t *testing.T, style string, width, height int, options storedS
 func TestStatusViewportAcrossComposerStyles(t *testing.T) {
 	for _, style := range composerStyles {
 		for _, size := range [][2]int{{40, 12}, {80, 24}, {100, 24}} {
-			m := statusTestUI(t, style, size[0], size[1], storedStatusLineConfig{})
+			m := statusTestUI(t, style, size[0], size[1], providers.StoredStatusLineConfig{})
 			m.entries = append(m.entries, entry{role: "Assistant", content: "A visible transcript answer"})
 			view := m.View()
 			assertViewport(t, view, size[0], size[1])
@@ -50,7 +51,7 @@ func TestStatusViewportAcrossComposerStyles(t *testing.T) {
 }
 
 func TestStatusOptionalOrderAndNarrowControls(t *testing.T) {
-	allOn := storedStatusLineConfig{
+	allOn := providers.StoredStatusLineConfig{
 		Branch: statusFlag(true), Changes: true, Staged: true, MCP: true,
 		Session: true, Minutes: true, Tokens: true, Version: true, Update: true,
 	}
@@ -63,7 +64,7 @@ func TestStatusOptionalOrderAndNarrowControls(t *testing.T) {
 	m.usagePrompt, m.usageCompletion = 1200, 300
 	m.lastPromptTokens = 1200
 	m.updateVersion = "v0.2.0"
-	m.conn.mcp = deterministicMcp()
+	m.conn.Mcp = deterministicMcp()
 	row := stripANSI(m.statusLineRows(1, 1)[0])
 	previous := -1
 	for _, text := range []string{
@@ -91,7 +92,7 @@ func TestStatusOptionalOrderAndNarrowControls(t *testing.T) {
 	if !strings.HasSuffix(row, "Lisa") {
 		t.Fatalf("bottom-right mark missing: %q", row)
 	}
-	plain := statusTestUI(t, "minimal", 100, 24, storedStatusLineConfig{})
+	plain := statusTestUI(t, "minimal", 100, 24, providers.StoredStatusLineConfig{})
 	defaultRow := stripANSI(plain.statusLineRows(1, 1)[0])
 	for _, future := range []string{"cost ", "tokens ", "minutes ", "update ", " changed", " staged"} {
 		if strings.Contains(defaultRow, future) {
@@ -119,7 +120,7 @@ func TestStatusOptionalOrderAndNarrowControls(t *testing.T) {
 
 func TestStatusLongDraftAndMentionPopupKeepTranscriptVisible(t *testing.T) {
 	for _, style := range composerStyles {
-		m := statusTestUI(t, style, 40, 12, storedStatusLineConfig{})
+		m := statusTestUI(t, style, 40, 12, providers.StoredStatusLineConfig{})
 		m.entries = append(m.entries, entry{role: "Assistant", content: "visible answer"})
 		m.input = []rune(strings.Repeat("draft ", 120) + "@file")
 		m.mention = mentionState{open: true, matches: []string{"file-one", "file-two", "file-three", "file-four", "file-five"}}
@@ -138,7 +139,7 @@ func TestStatusLongDraftAndMentionPopupKeepTranscriptVisible(t *testing.T) {
 }
 
 func TestStatusReviewPagesRemainReachableAfterResize(t *testing.T) {
-	m := statusTestUI(t, "bordered", 100, 24, storedStatusLineConfig{})
+	m := statusTestUI(t, "bordered", 100, 24, providers.StoredStatusLineConfig{})
 	m.working, m.runID = true, 1
 	m.events = make(chan turnEvent, 1)
 	request := &approvalRequest{Kind: "command", Title: "Review command", Body: strings.Repeat("a review line\n", 70), Reply: make(chan bool, 1)}
@@ -171,7 +172,7 @@ func TestStatusTitleUpdatesOnPromptSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(t.TempDir(), nil, client, "local", connection{provider: "Local", statusLine: storedStatusLineConfig{Session: true}}, t.TempDir(), nil, session.Snapshot{ID: "fresh-session"})
+	m := newUI(t.TempDir(), nil, client, "local", providers.Connection{Provider: "Local", StatusLine: providers.StoredStatusLineConfig{Session: true}}, t.TempDir(), nil, session.Snapshot{ID: "fresh-session"})
 	m.Update(tea.WindowSizeMsg{Width: 130, Height: 24})
 	m.startTurn("First real prompt")
 	defer m.cancel()
@@ -199,8 +200,8 @@ func TestStatusSessionTitleAndBranchRefresh(t *testing.T) {
 	run("init", "-q")
 	run("symbolic-ref", "HEAD", "refs/heads/first")
 	run("commit", "-qm", "initial", "--allow-empty")
-	options := storedStatusLineConfig{Branch: statusFlag(true), Session: true}
-	m := newUI(root, nil, nil, "local", connection{provider: "Local", statusLine: options}, t.TempDir(), nil, session.Snapshot{ID: "new-session-id"})
+	options := providers.StoredStatusLineConfig{Branch: statusFlag(true), Session: true}
+	m := newUI(root, nil, nil, "local", providers.Connection{Provider: "Local", StatusLine: options}, t.TempDir(), nil, session.Snapshot{ID: "new-session-id"})
 	m.Update(tea.WindowSizeMsg{Width: 130, Height: 24})
 	if !m.gitOK || m.git.Branch != "first" || !strings.Contains(stripANSI(m.statusLineRows(1, 1)[0]), "first") {
 		t.Fatalf("configured git branch not displayed: git=%+v ok=%t", m.git, m.gitOK)
@@ -253,17 +254,17 @@ func TestStatusSessionTitleAndBranchRefresh(t *testing.T) {
 	}
 }
 
-func deterministicMcp() *mcpManager {
-	return &mcpManager{
-		servers: map[string]mcp.ServerConfig{"a": {Command: "a"}, "b": {Command: "b"}},
-		clients: map[string]*mcp.Client{"a": {}},
-		trusted: map[string]bool{},
-		failed:  map[string]string{"b": "exit status 1"},
-	}
+func deterministicMcp() *mcp.McpManager {
+	return mcp.NewMcpManagerForTest(
+		map[string]mcp.ServerConfig{"a": {Command: "a"}, "b": {Command: "b"}},
+		map[string]*mcp.Client{"a": {}},
+		map[string]bool{},
+		map[string]string{"b": "exit status 1"},
+	)
 }
 
 func TestStatusCtxPercentAndWarningThreshold(t *testing.T) {
-	m := statusTestUI(t, "minimal", 100, 24, storedStatusLineConfig{})
+	m := statusTestUI(t, "minimal", 100, 24, providers.StoredStatusLineConfig{})
 	m.modelName = "gpt-4o" // known catalog window: 128000
 	m.usageSeen = true
 	for _, tc := range []struct {
@@ -297,30 +298,30 @@ func TestStatusCtxPercentAndWarningThreshold(t *testing.T) {
 
 func TestStatusSegmentsHonorTogglesAndMeasurements(t *testing.T) {
 	cases := []struct {
-		option  storedStatusLineConfig
-		off     storedStatusLineConfig // Folder/Branch default-on: an explicit false is the off state
+		option  providers.StoredStatusLineConfig
+		off     providers.StoredStatusLineConfig // Folder/Branch default-on: an explicit false is the off state
 		present string
 	}{
-		{storedStatusLineConfig{Folder: statusFlag(true)}, storedStatusLineConfig{Folder: statusFlag(false)}, "~/work"},
-		{storedStatusLineConfig{Branch: statusFlag(true)}, storedStatusLineConfig{Branch: statusFlag(false)}, "feat"},
-		{storedStatusLineConfig{Changes: true}, storedStatusLineConfig{Changes: false}, "3 changed"},
-		{storedStatusLineConfig{Staged: true}, storedStatusLineConfig{Staged: false}, "1 staged"},
-		{storedStatusLineConfig{MCP: true}, storedStatusLineConfig{MCP: false}, "mcp 1/2"},
-		{storedStatusLineConfig{Session: true}, storedStatusLineConfig{Session: false}, "T"},
-		{storedStatusLineConfig{Minutes: true}, storedStatusLineConfig{Minutes: false}, "minutes 1m"},
-		{storedStatusLineConfig{Tokens: true}, storedStatusLineConfig{Tokens: false}, "tokens 1500"},
-		{storedStatusLineConfig{Version: true}, storedStatusLineConfig{Version: false}, "v" + strings.TrimPrefix(Version, "v")},
-		{storedStatusLineConfig{Update: true}, storedStatusLineConfig{Update: false}, "update → v0.2.0"},
+		{providers.StoredStatusLineConfig{Folder: statusFlag(true)}, providers.StoredStatusLineConfig{Folder: statusFlag(false)}, "~/work"},
+		{providers.StoredStatusLineConfig{Branch: statusFlag(true)}, providers.StoredStatusLineConfig{Branch: statusFlag(false)}, "feat"},
+		{providers.StoredStatusLineConfig{Changes: true}, providers.StoredStatusLineConfig{Changes: false}, "3 changed"},
+		{providers.StoredStatusLineConfig{Staged: true}, providers.StoredStatusLineConfig{Staged: false}, "1 staged"},
+		{providers.StoredStatusLineConfig{MCP: true}, providers.StoredStatusLineConfig{MCP: false}, "mcp 1/2"},
+		{providers.StoredStatusLineConfig{Session: true}, providers.StoredStatusLineConfig{Session: false}, "T"},
+		{providers.StoredStatusLineConfig{Minutes: true}, providers.StoredStatusLineConfig{Minutes: false}, "minutes 1m"},
+		{providers.StoredStatusLineConfig{Tokens: true}, providers.StoredStatusLineConfig{Tokens: false}, "tokens 1500"},
+		{providers.StoredStatusLineConfig{Version: true}, providers.StoredStatusLineConfig{Version: false}, "v" + strings.TrimPrefix(Version, "v")},
+		{providers.StoredStatusLineConfig{Update: true}, providers.StoredStatusLineConfig{Update: false}, "update → v0.2.0"},
 	}
 	fresh := func() *ui {
-		m := statusTestUI(t, "minimal", 200, 24, storedStatusLineConfig{})
+		m := statusTestUI(t, "minimal", 200, 24, providers.StoredStatusLineConfig{})
 		m.started = time.Now().Add(-90 * time.Second)
 		m.usageSeen = true
 		m.usagePrompt, m.usageCompletion = 1200, 300
 		m.git, m.gitOK = gitState{Branch: "feat", Staged: 1, Dirty: 3}, true
 		m.updateVersion = "v0.2.0"
 		m.statusFolder, m.statusTitle = "~/work", "T"
-		m.conn.mcp = deterministicMcp()
+		m.conn.Mcp = deterministicMcp()
 		return m
 	}
 	for i, tc := range cases {
@@ -341,7 +342,7 @@ func TestStatusSegmentsHonorTogglesAndMeasurements(t *testing.T) {
 	m := fresh()
 	m.usageSeen = false
 	m.updateVersion = ""
-	m.statusLineOpts = storedStatusLineConfig{Tokens: true, Update: true}
+	m.statusLineOpts = providers.StoredStatusLineConfig{Tokens: true, Update: true}
 	row := stripANSI(m.statusLineRows(1, 1)[0])
 	if !strings.Contains(row, "ctx —") || strings.Contains(row, "tokens ") || strings.Contains(row, "update ") {
 		t.Fatalf("unmeasured data fabricated a segment: %q", row)
@@ -349,14 +350,14 @@ func TestStatusSegmentsHonorTogglesAndMeasurements(t *testing.T) {
 	// Zero counts hide their segments rather than reporting "0 changed".
 	m = fresh()
 	m.git = gitState{Branch: "feat"}
-	m.statusLineOpts = storedStatusLineConfig{Changes: true, Staged: true}
+	m.statusLineOpts = providers.StoredStatusLineConfig{Changes: true, Staged: true}
 	if row := stripANSI(m.statusLineRows(1, 1)[0]); strings.Contains(row, "changed") || strings.Contains(row, "staged") {
 		t.Fatalf("empty git state rendered a segment: %q", row)
 	}
 	// A failed git read hides every git segment, including the branch.
 	m = fresh()
 	m.git, m.gitOK = gitState{}, false
-	m.statusLineOpts = storedStatusLineConfig{Changes: true, Staged: true}
+	m.statusLineOpts = providers.StoredStatusLineConfig{Changes: true, Staged: true}
 	if row := stripANSI(m.statusLineRows(1, 1)[0]); strings.Contains(row, "feat") || strings.Contains(row, "changed") {
 		t.Fatalf("failed git read kept segments: %q", row)
 	}

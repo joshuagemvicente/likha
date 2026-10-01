@@ -15,11 +15,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"lisa/internal/model"
+	"lisa/internal/providers"
 	"lisa/internal/session"
 )
 
 // statusFlag builds an explicit optional-segment value for config literals;
-// the zero value of storedStatusLineConfig leaves Folder/Branch default-on.
+// the zero value of providers.StoredStatusLineConfig leaves Folder/Branch default-on.
 func statusFlag(on bool) *bool { return &on }
 
 // driveTurn runs the working loop until the turn ends, chaining every
@@ -40,7 +41,7 @@ func driveTurn(m *ui) {
 
 func TestHeaderCollapsesToFiftySixColumns(t *testing.T) {
 	for _, width := range []int{40, 55, 56, 80, 120} {
-		m := newUI("/home/me/repo-x", nil, nil, "local", connection{provider: "Local", verified: true}, t.TempDir(), nil, session.Snapshot{})
+		m := newUI("/home/me/repo-x", nil, nil, "local", providers.Connection{Provider: "Local", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
 		if width >= 56 {
 			if lines := m.header(); len(lines) != 0 {
@@ -62,13 +63,13 @@ func TestHeaderCollapsesToFiftySixColumns(t *testing.T) {
 	}
 	// A long repository basename below 56 columns re-wraps into the body
 	// instead of clipping.
-	m := newUI("/somewhere/very-long-repository-name-for-wrapping", nil, nil, "local", connection{provider: "Local", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/somewhere/very-long-repository-name-for-wrapping", nil, nil, "local", providers.Connection{Provider: "Local", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 24})
 	assertViewport(t, m.View(), 40, 24)
 }
 
 func TestLogoEntryIsPureLogo(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	if len(m.entries) == 0 || m.entries[0].role != "Logo" {
 		t.Fatalf("fresh session missing the logo entry: %+v", m.entries)
@@ -83,7 +84,7 @@ func TestLogoEntryIsPureLogo(t *testing.T) {
 
 func TestLisaMarkPlacementAndRetirement(t *testing.T) {
 	newAt := func(width int) *ui {
-		m := newUI("/sample", nil, nil, "local", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+		m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
 		m.entries = append(m.entries, entry{role: "Assistant", content: "a visible answer"})
 		return m
@@ -123,7 +124,7 @@ func TestContextSegmentFormats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, client, "gpt-4o", connection{provider: "Local OpenAI-compatible", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "gpt-4o", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.startTurn("first question")
 	defer m.cancel()
@@ -145,7 +146,7 @@ func TestContextSegmentFormats(t *testing.T) {
 		t.Fatalf("unknown-window ctx = %q", got)
 	}
 	// Nothing measured at all.
-	m2 := statusTestUI(t, "minimal", 100, 24, storedStatusLineConfig{})
+	m2 := statusTestUI(t, "minimal", 100, 24, providers.StoredStatusLineConfig{})
 	if got := stripANSI(m2.contextSegment().text); got != "ctx —" {
 		t.Fatalf("unmeasured ctx = %q", got)
 	}
@@ -164,7 +165,7 @@ func TestHumanTokens(t *testing.T) {
 }
 
 func TestStatusShowsModelDisplayName(t *testing.T) {
-	m := statusTestUI(t, "minimal", 200, 24, storedStatusLineConfig{})
+	m := statusTestUI(t, "minimal", 200, 24, providers.StoredStatusLineConfig{})
 	m.modelName = "gpt-4o"
 	if row := stripANSI(m.statusLineRows(1, 1)[0]); !strings.Contains(row, "GPT-4o") {
 		t.Fatalf("mapped slug did not render its display name: %q", row)
@@ -226,7 +227,7 @@ func TestGitSegmentsRenderFromGitState(t *testing.T) {
 	// Worktree edit and an untracked file: dirty and untracked segments.
 	write("tracked.txt", "one\ntwo\n")
 	write("scratch.txt", "new\n")
-	m := newUI(repo, nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true, statusLine: storedStatusLineConfig{Changes: true, Staged: true}}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI(repo, nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true, StatusLine: providers.StoredStatusLineConfig{Changes: true, Staged: true}}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 	row := stripANSI(m.statusLineRows(1, 1)[0])
 	if !strings.Contains(row, "main") || !strings.Contains(row, "1 changed") || !strings.Contains(row, "1 untracked") {
@@ -266,7 +267,7 @@ func TestSpendSegmentPricing(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		m := newUI("/sample", nil, c, modelName, connection{provider: "OpenAI", providerCanonical: canonical, verified: true}, t.TempDir(), nil, session.Snapshot{})
+		m := newUI("/sample", nil, c, modelName, providers.Connection{Provider: "OpenAI", ProviderCanonical: canonical, Verified: true}, t.TempDir(), nil, session.Snapshot{})
 		m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 		return m
 	}
@@ -308,29 +309,29 @@ func TestSpendSegmentPricing(t *testing.T) {
 func TestStatusLineConfigPointerDefaults(t *testing.T) {
 	stateDir := t.TempDir()
 	// Explicit false disables; a missing key keeps the new default-on.
-	if err := os.WriteFile(configFilePath(stateDir), []byte(`{"provider":"openai","model":"gpt-4o-mini","status_line":{"folder":false,"session":true}}`), 0600); err != nil {
+	if err := os.WriteFile(providers.ConfigFilePath(stateDir), []byte(`{"provider":"openai","model":"gpt-4o-mini","status_line":{"folder":false,"session":true}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadStoredConfig(stateDir)
+	cfg, err := providers.LoadStoredConfig(stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.StatusLine == nil || cfg.StatusLine.Folder == nil || *cfg.StatusLine.Folder {
 		t.Fatalf("explicit false not loaded: %+v", cfg.StatusLine)
 	}
-	if flagEnabled(cfg.StatusLine.Folder) {
+	if providers.FlagEnabled(cfg.StatusLine.Folder) {
 		t.Fatal("explicit false did not disable folder")
 	}
-	if !flagEnabled(cfg.StatusLine.Branch) {
+	if !providers.FlagEnabled(cfg.StatusLine.Branch) {
 		t.Fatal("absent branch key must default on")
 	}
 	if !cfg.StatusLine.Session {
 		t.Fatal("session bool lost")
 	}
-	if err := saveStoredConfig(stateDir, cfg); err != nil {
+	if err := providers.SaveStoredConfig(stateDir, cfg); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(configFilePath(stateDir))
+	data, err := os.ReadFile(providers.ConfigFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +385,7 @@ func TestAutoSessionNameAppliesAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, client, "local", connection{provider: "Local OpenAI-compatible", verified: true, statusLine: storedStatusLineConfig{Session: true}}, t.TempDir(), store, snapshot)
+	m := newUI(root, nil, client, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true, StatusLine: providers.StoredStatusLineConfig{Session: true}}, t.TempDir(), store, snapshot)
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.startTurn("I want you to fix the parser bug")
 	defer m.cancel()
@@ -435,7 +436,7 @@ func TestAutoSessionNameFailureStaysSilent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, client, "local", connection{provider: "Local OpenAI-compatible", verified: true, statusLine: storedStatusLineConfig{Session: true}}, t.TempDir(), store, snapshot)
+	m := newUI(root, nil, client, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true, StatusLine: providers.StoredStatusLineConfig{Session: true}}, t.TempDir(), store, snapshot)
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.startTurn("first prompt")
 	defer m.cancel()
@@ -476,7 +477,7 @@ func TestAutoSessionNameSkipsResumedSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, client, "local", connection{provider: "Local OpenAI-compatible", verified: true}, t.TempDir(), store, snapshot)
+	m := newUI(root, nil, client, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, t.TempDir(), store, snapshot)
 	if m.freshSession {
 		t.Fatal("a snapshot with entries must not count as fresh")
 	}
@@ -505,7 +506,7 @@ func TestAutoSessionNameExitBeforeCompletionPersistsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, client, "local", connection{provider: "Local OpenAI-compatible", verified: true}, t.TempDir(), store, snapshot)
+	m := newUI(root, nil, client, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, t.TempDir(), store, snapshot)
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.startTurn("first prompt")
 	defer close(m.abandon)

@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"lisa/internal/model"
+	"lisa/internal/providers"
 	"lisa/internal/repository"
 	"lisa/internal/session"
 	lisaui "lisa/internal/ui"
@@ -33,7 +34,7 @@ func contentWidth(termWidth int) int {
 
 type ui struct {
 	root, modelName string
-	conn            connection
+	conn            providers.Connection
 	stateDir        string
 	repo            *repository.Repository
 	client          *model.Client
@@ -42,7 +43,7 @@ type ui struct {
 	themeName       string
 	composerStyle   string
 	width, height   int
-	statusLineOpts  storedStatusLineConfig
+	statusLineOpts  providers.StoredStatusLineConfig
 	statusFolder    string
 	statusTitle     string
 	entries         []entry
@@ -104,19 +105,19 @@ type ui struct {
 // indexes into this filtered list, so any query change moves the cursor to
 // the first visible match (filtering never re-selects the active provider).
 
-func newUI(root string, repo *repository.Repository, client *model.Client, name string, conn connection, stateDir string, store *session.Store, snapshot session.Snapshot) *ui {
-	themeName := conn.theme
+func newUI(root string, repo *repository.Repository, client *model.Client, name string, conn providers.Connection, stateDir string, store *session.Store, snapshot session.Snapshot) *ui {
+	themeName := conn.Theme
 	dark := lisaui.HasDarkBackground()
 	theme := lisaui.Resolve(themeName, dark)
 	glyphs := lisaui.AsciiGlyphs()
-	if conn.nerd {
+	if conn.Nerd {
 		glyphs = lisaui.NerdGlyphs()
 	}
-	m := &ui{root: root, repo: repo, client: client, modelName: name, conn: conn, stateDir: stateDir, store: store, snapshot: snapshot, history: snapshot.History, following: true, caretOn: true, streaming: -1, status: "Connected", mode: modeMain, theme: theme, glyphs: glyphs, themeName: themeName, composerStyle: validComposerStyle(conn.composerStyle), statusLineOpts: conn.statusLine, started: time.Now(), freshSession: len(snapshot.Entries) == 0}
-	if flagEnabled(m.statusLineOpts.Folder) {
+	m := &ui{root: root, repo: repo, client: client, modelName: name, conn: conn, stateDir: stateDir, store: store, snapshot: snapshot, history: snapshot.History, following: true, caretOn: true, streaming: -1, status: "Connected", mode: modeMain, theme: theme, glyphs: glyphs, themeName: themeName, composerStyle: validComposerStyle(conn.ComposerStyle), statusLineOpts: conn.StatusLine, started: time.Now(), freshSession: len(snapshot.Entries) == 0}
+	if providers.FlagEnabled(m.statusLineOpts.Folder) {
 		m.statusFolder = statusFolder(root)
 	}
-	if m.statusLineOpts.Changes || m.statusLineOpts.Staged || flagEnabled(m.statusLineOpts.Branch) {
+	if m.statusLineOpts.Changes || m.statusLineOpts.Staged || providers.FlagEnabled(m.statusLineOpts.Branch) {
 		// Session-start read per spec §8: refreshed again after tool
 		// results, but an idle user should see the state immediately. One
 		// bounded call feeds branch, counts and ahead/behind; ok=false on
@@ -134,20 +135,20 @@ func newUI(root string, repo *repository.Repository, client *model.Client, name 
 	if m.freshSession {
 		m.entries = append(m.entries, entry{role: "Logo", content: logo})
 	}
-	if conn.setup {
+	if conn.Setup {
 		m.mode = modeSetup
 		m.setup.stage = setupProvider
 		m.status = "First-run setup"
 		return m
 	}
-	if conn.err != nil {
+	if conn.Err != nil {
 		m.status = "Not connected"
-		m.entries = append(m.entries, entry{role: "Error", content: "Startup connection check failed: " + conn.err.Error()})
+		m.entries = append(m.entries, entry{role: "Error", content: "Startup connection check failed: " + conn.Err.Error()})
 	}
 	for _, saved := range snapshot.Entries {
 		m.entries = append(m.entries, entry{role: saved.Role, content: saved.Content})
 	}
-	if len(snapshot.Entries) > 0 && conn.err == nil {
+	if len(snapshot.Entries) > 0 && conn.Err == nil {
 		m.status = "Resumed session"
 	}
 	return m
@@ -215,7 +216,7 @@ func (m *ui) startTurn(prompt string) tea.Cmd {
 	runID := m.runID
 	events := m.events
 	abandon := m.abandon
-	client, repo, root, mcp := m.client, m.repo, m.root, m.conn.mcp
+	client, repo, root, mcp := m.client, m.repo, m.root, m.conn.Mcp
 	go func() {
 		defer close(events)
 		runTurn(ctx, client, repo, root, prior, prompt, mcp, func(ev turnEvent) {
@@ -290,9 +291,9 @@ func (m *ui) previewTheme(themeName string) {
 func (m *ui) applyTheme(themeName string) {
 	m.themeName = themeName
 	m.previewTheme(themeName)
-	if cfg, err := loadStoredConfig(m.stateDir); err == nil && cfg.Provider != "" {
+	if cfg, err := providers.LoadStoredConfig(m.stateDir); err == nil && cfg.Provider != "" {
 		cfg.Theme = themeName
-		if err := saveStoredConfig(m.stateDir, cfg); err != nil {
+		if err := providers.SaveStoredConfig(m.stateDir, cfg); err != nil {
 			m.entries = append(m.entries, entry{role: "Error", content: "Store theme: " + err.Error()})
 			return
 		}
@@ -393,9 +394,9 @@ func (m *ui) applyModel(id string) {
 		return
 	}
 	m.modelName = id
-	if cfg, err := loadStoredConfig(m.stateDir); err == nil && cfg.Provider != "" {
+	if cfg, err := providers.LoadStoredConfig(m.stateDir); err == nil && cfg.Provider != "" {
 		cfg.Model = id
-		if err := saveStoredConfig(m.stateDir, cfg); err != nil {
+		if err := providers.SaveStoredConfig(m.stateDir, cfg); err != nil {
 			m.entries = append(m.entries, entry{role: "Error", content: "Store model: " + err.Error()})
 			return
 		}
@@ -472,7 +473,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "Waiting for model"
 			}
 			if v.kind == "tool_result" {
-				if m.statusLineOpts.Changes || m.statusLineOpts.Staged || flagEnabled(m.statusLineOpts.Branch) {
+				if m.statusLineOpts.Changes || m.statusLineOpts.Staged || providers.FlagEnabled(m.statusLineOpts.Branch) {
 					m.git, m.gitOK = gitStatus(m.root)
 				}
 				m.history = v.history
@@ -532,7 +533,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// row is a known $0.00, priced models accumulate, and a
 					// model without documented pricing keeps the segment
 					// hidden rather than estimating.
-					if m.conn.providerCanonical == "chatgpt" {
+					if m.conn.ProviderCanonical == "chatgpt" {
 						m.spendKnown = true
 					} else if cost, priced := model.TurnCost(m.modelName, usage.Prompt, usage.Completion); priced {
 						m.spend += cost

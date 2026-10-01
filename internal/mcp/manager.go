@@ -1,4 +1,4 @@
-package app
+package mcp
 
 import (
 	"context"
@@ -7,48 +7,50 @@ import (
 	"strings"
 	"sync"
 
-	"lisa/internal/mcp"
 	"lisa/internal/model"
 )
 
-// mcpManager owns the user's configured MCP servers: lazy startup, the merged
+// McpManager owns the user's configured MCP servers: lazy startup, the merged
 // tool surface handed to the model, trust-on-first-use tracking, and cleanup.
 // A nil manager means the feature is unused and everything is inert.
-type mcpManager struct {
+type McpManager struct {
 	mu      sync.Mutex
 	path    string
-	servers map[string]mcp.ServerConfig
-	clients map[string]*mcp.Client
+	servers map[string]ServerConfig
+	clients map[string]*Client
 	trusted map[string]bool // server name → approved for the session
 	failed  map[string]string
 }
 
-func newMcpManager(stateDir, userAgent string) (*mcpManager, error) {
-	path, err := mcp.EnsureSkeleton(stateDir)
+func NewMcpManager(stateDir, userAgent string) (*McpManager, error) {
+	path, err := EnsureSkeleton(stateDir)
 	if err != nil {
 		return nil, err
 	}
-	servers, err := mcp.LoadConfig(stateDir)
+	servers, err := LoadConfig(stateDir)
 	if err != nil {
 		return nil, err
 	}
 	if len(servers) == 0 {
-		return &mcpManager{path: path, clients: map[string]*mcp.Client{}, trusted: map[string]bool{}, failed: map[string]string{}}, nil
+		return &McpManager{path: path, clients: map[string]*Client{}, trusted: map[string]bool{}, failed: map[string]string{}}, nil
 	}
-	return &mcpManager{
+	return &McpManager{
 		path:    path,
 		servers: servers,
-		clients: map[string]*mcp.Client{},
+		clients: map[string]*Client{},
 		trusted: map[string]bool{},
 		failed:  map[string]string{},
 	}, nil
 }
 
-// ToolDefinition is the model-facing shape of one MCP tool.
-type toolDefinition = model.ToolDefinition
+// NewMcpManagerForTest builds a manager with fixed server/client state for
+// status-line and summary assertions. Production code uses NewMcpManager.
+func NewMcpManagerForTest(servers map[string]ServerConfig, clients map[string]*Client, trusted map[string]bool, failed map[string]string) *McpManager {
+	return &McpManager{servers: servers, clients: clients, trusted: trusted, failed: failed}
+}
 
 // toolSource maps a model-facing tool name to its owning server.
-func (m *mcpManager) lookup(name string) (server string, client *mcp.Client, tool mcp.Tool, ok bool) {
+func (m *McpManager) lookup(name string) (server string, client *Client, tool Tool, ok bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for serverName, client := range m.clients {
@@ -58,12 +60,12 @@ func (m *mcpManager) lookup(name string) (server string, client *mcp.Client, too
 			}
 		}
 	}
-	return "", nil, mcp.Tool{}, false
+	return "", nil, Tool{}, false
 }
 
 // Tools returns every MCP tool as model definitions, starting servers lazily
 // on first use. Servers that fail to start are recorded and skipped.
-func (m *mcpManager) Tools(userAgent string) []model.ToolDefinition {
+func (m *McpManager) Tools(userAgent string) []model.ToolDefinition {
 	if m == nil {
 		return nil
 	}
@@ -77,7 +79,7 @@ func (m *mcpManager) Tools(userAgent string) []model.ToolDefinition {
 				_ = reason // stays dead for the session (relaunch-only restart)
 				continue
 			}
-			started, err := mcp.Start(name, cfg, userAgent)
+			started, err := Start(name, cfg, userAgent)
 			if err != nil {
 				m.failed[name] = err.Error()
 				continue
@@ -99,7 +101,7 @@ func (m *mcpManager) Tools(userAgent string) []model.ToolDefinition {
 // Call executes one MCP tool with a 60 s deadline. trusted reports whether
 // the server was already approved this session; approve is the callback the
 // TUI uses to surface the trust-on-first-use prompt.
-func (m *mcpManager) Call(ctx context.Context, name string, arguments json.RawMessage, approve func(server, tool string, arguments string) bool) (string, bool, error) {
+func (m *McpManager) Call(ctx context.Context, name string, arguments json.RawMessage, approve func(server, tool string, arguments string) bool) (string, bool, error) {
 	if m == nil {
 		return "", false, fmt.Errorf("unsupported tool %q", name)
 	}
@@ -122,7 +124,7 @@ func (m *mcpManager) Call(ctx context.Context, name string, arguments json.RawMe
 		m.trusted[server] = true
 		m.mu.Unlock()
 	}
-	callCtx, cancel := context.WithTimeout(ctx, mcp.CallTimeout)
+	callCtx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()
 	text, isError, err := client.Call(callCtx, tool.Name, arguments)
 	if err != nil {
@@ -133,7 +135,7 @@ func (m *mcpManager) Call(ctx context.Context, name string, arguments json.RawMe
 
 // Status renders the /mcp view: each server, its state, and its tools, plus
 // where to edit the configuration.
-func (m *mcpManager) Status() string {
+func (m *McpManager) Status() string {
 	if m == nil {
 		return "No MCP servers configured; mcp.json unavailable."
 	}
@@ -165,7 +167,7 @@ func (m *mcpManager) Status() string {
 // (running/configured), with " crashed" appended when any configured server
 // failed to start. With no servers configured it returns "" so the segment
 // hides.
-func (m *mcpManager) Summary() string {
+func (m *McpManager) Summary() string {
 	if m == nil {
 		return ""
 	}
@@ -192,7 +194,7 @@ func (m *mcpManager) Summary() string {
 }
 
 // Trusted reports whether a server has been approved for this session.
-func (m *mcpManager) Trusted(name string) bool {
+func (m *McpManager) Trusted(name string) bool {
 	if m == nil {
 		return false
 	}
@@ -203,7 +205,7 @@ func (m *mcpManager) Trusted(name string) bool {
 
 // Stop kills every running server and fails pending calls. Called on exit;
 // servers must not outlive Lisa.
-func (m *mcpManager) Stop() {
+func (m *McpManager) Stop() {
 	if m == nil {
 		return
 	}

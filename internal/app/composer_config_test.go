@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"lisa/internal/providers"
 	"os"
 	"reflect"
 	"testing"
@@ -9,12 +10,12 @@ import (
 
 func TestStoredComposerConfigRoundTrip(t *testing.T) {
 	stateDir := t.TempDir()
-	want := storedProviderConfig{
+	want := providers.StoredProviderConfig{
 		Provider: "openrouter",
 		Model:    "openai/gpt-4o-mini",
 		Theme:    "habamax",
-		Composer: &storedComposerConfig{Style: "bordered"},
-		StatusLine: &storedStatusLineConfig{
+		Composer: &providers.StoredComposerConfig{Style: "bordered"},
+		StatusLine: &providers.StoredStatusLineConfig{
 			Folder:  statusFlag(true),
 			Branch:  statusFlag(true),
 			Version: true,
@@ -26,11 +27,11 @@ func TestStoredComposerConfigRoundTrip(t *testing.T) {
 			Update:  true,
 		},
 	}
-	if err := saveStoredConfig(stateDir, want); err != nil {
+	if err := providers.SaveStoredConfig(stateDir, want); err != nil {
 		t.Fatal(err)
 	}
 
-	data, err := os.ReadFile(configFilePath(stateDir))
+	data, err := os.ReadFile(providers.ConfigFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +46,7 @@ func TestStoredComposerConfigRoundTrip(t *testing.T) {
 	if stored.Composer.Style != "bordered" {
 		t.Fatalf("persisted composer style = %q, want bordered", stored.Composer.Style)
 	}
-	got, err := loadStoredConfig(stateDir)
+	got, err := providers.LoadStoredConfig(stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +56,7 @@ func TestStoredComposerConfigRoundTrip(t *testing.T) {
 	if got.StatusLine == nil || !reflect.DeepEqual(got.StatusLine, want.StatusLine) {
 		t.Fatalf("status line roundtrip = %+v, want %+v", got.StatusLine, want.StatusLine)
 	}
-	info, err := os.Stat(configFilePath(stateDir))
+	info, err := os.Stat(providers.ConfigFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,20 +67,20 @@ func TestStoredComposerConfigRoundTrip(t *testing.T) {
 
 func TestStoredComposerLegacyConfigRemainsOptional(t *testing.T) {
 	stateDir := t.TempDir()
-	if err := os.WriteFile(configFilePath(stateDir), []byte(`{"provider":"openai","model":"gpt-4o-mini","theme":"default"}`), 0600); err != nil {
+	if err := os.WriteFile(providers.ConfigFilePath(stateDir), []byte(`{"provider":"openai","model":"gpt-4o-mini","theme":"default"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadStoredConfig(stateDir)
+	cfg, err := providers.LoadStoredConfig(stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Provider != "openai" || cfg.Model != "gpt-4o-mini" || cfg.Theme != "default" || cfg.Composer != nil {
 		t.Fatalf("legacy config = %+v", cfg)
 	}
-	if err := saveStoredConfig(stateDir, cfg); err != nil {
+	if err := providers.SaveStoredConfig(stateDir, cfg); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(configFilePath(stateDir))
+	data, err := os.ReadFile(providers.ConfigFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,10 +95,10 @@ func TestStoredComposerLegacyConfigRemainsOptional(t *testing.T) {
 
 func TestStoredComposerUnknownStylePreservedForUIFallback(t *testing.T) {
 	stateDir := t.TempDir()
-	if err := os.WriteFile(configFilePath(stateDir), []byte(`{"provider":"openai","model":"gpt-4o-mini","composer":{"style":"future-style"}}`), 0600); err != nil {
+	if err := os.WriteFile(providers.ConfigFilePath(stateDir), []byte(`{"provider":"openai","model":"gpt-4o-mini","composer":{"style":"future-style"}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadStoredConfig(stateDir)
+	cfg, err := providers.LoadStoredConfig(stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,19 +109,19 @@ func TestStoredComposerUnknownStylePreservedForUIFallback(t *testing.T) {
 
 func TestStoredStatusLineConfigRoundTrip(t *testing.T) {
 	stateDir := t.TempDir()
-	cfg := storedProviderConfig{
+	cfg := providers.StoredProviderConfig{
 		Provider: "openrouter",
 		Model:    "openai/gpt-4o-mini",
-		StatusLine: &storedStatusLineConfig{
+		StatusLine: &providers.StoredStatusLineConfig{
 			Folder:  statusFlag(true),
 			Version: true,
 			Staged:  true,
 		},
 	}
-	if err := saveStoredConfig(stateDir, cfg); err != nil {
+	if err := providers.SaveStoredConfig(stateDir, cfg); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(configFilePath(stateDir))
+	data, err := os.ReadFile(providers.ConfigFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +147,7 @@ func TestStoredStatusLineConfigRoundTrip(t *testing.T) {
 			t.Fatalf("disabled status_line.%s persisted: %s", name, statusLine)
 		}
 	}
-	got, err := loadStoredConfig(stateDir)
+	got, err := providers.LoadStoredConfig(stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,20 +158,20 @@ func TestStoredStatusLineConfigRoundTrip(t *testing.T) {
 
 func TestStoredStatusLineLegacyConfigStaysNilSafe(t *testing.T) {
 	stateDir := t.TempDir()
-	if err := os.WriteFile(configFilePath(stateDir), []byte(`{"provider":"openai","model":"gpt-4o-mini","status_line":{"folder":true}}`), 0600); err != nil {
+	if err := os.WriteFile(providers.ConfigFilePath(stateDir), []byte(`{"provider":"openai","model":"gpt-4o-mini","status_line":{"folder":true}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadStoredConfig(stateDir)
+	cfg, err := providers.LoadStoredConfig(stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.StatusLine == nil || cfg.StatusLine.Folder == nil || !*cfg.StatusLine.Folder || cfg.StatusLine.Changes || cfg.StatusLine.Staged || cfg.StatusLine.MCP || cfg.StatusLine.Minutes || cfg.StatusLine.Tokens || cfg.StatusLine.Update {
 		t.Fatalf("legacy status line = %+v, want only folder", cfg.StatusLine)
 	}
-	if err := saveStoredConfig(stateDir, cfg); err != nil {
+	if err := providers.SaveStoredConfig(stateDir, cfg); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(configFilePath(stateDir))
+	data, err := os.ReadFile(providers.ConfigFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,20 +197,20 @@ func TestStoredStatusLineLegacyConfigStaysNilSafe(t *testing.T) {
 
 func TestStoredStatusLineUnknownFutureKeysIgnored(t *testing.T) {
 	stateDir := t.TempDir()
-	if err := os.WriteFile(configFilePath(stateDir), []byte(`{"provider":"openai","model":"gpt-4o-mini","status_line":{"folder":true,"mcp":true,"budget":true,"widget":"fancy"}}`), 0600); err != nil {
+	if err := os.WriteFile(providers.ConfigFilePath(stateDir), []byte(`{"provider":"openai","model":"gpt-4o-mini","status_line":{"folder":true,"mcp":true,"budget":true,"widget":"fancy"}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadStoredConfig(stateDir)
+	cfg, err := providers.LoadStoredConfig(stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.StatusLine == nil || cfg.StatusLine.Folder == nil || !*cfg.StatusLine.Folder || !cfg.StatusLine.MCP || cfg.StatusLine.Changes || cfg.StatusLine.Update {
 		t.Fatalf("status line = %+v, want folder and mcp only", cfg.StatusLine)
 	}
-	if err := saveStoredConfig(stateDir, cfg); err != nil {
+	if err := providers.SaveStoredConfig(stateDir, cfg); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(configFilePath(stateDir))
+	data, err := os.ReadFile(providers.ConfigFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"lisa/internal/providers"
 	"lisa/internal/session"
 	lisaui "lisa/internal/ui"
 )
@@ -12,7 +13,7 @@ import (
 func TestThemeBackgroundFollowsPalette(t *testing.T) {
 	for _, name := range lisaui.ThemeNames() {
 		theme := lisaui.Resolve(name, true)
-		m := newUI("/sample", nil, nil, "", connection{provider: "OpenAI", verified: true, theme: name}, t.TempDir(), nil, session.Snapshot{})
+		m := newUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true, Theme: name}, t.TempDir(), nil, session.Snapshot{})
 		m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		forceANSI(t)
 		view := m.View()
@@ -37,10 +38,10 @@ func TestThemeBackgroundFollowsPalette(t *testing.T) {
 
 func TestThemePreviewAndEscRestore(t *testing.T) {
 	stateDir := t.TempDir()
-	if err := saveStoredConfig(stateDir, storedProviderConfig{Provider: "openai", Model: "gpt-4o-mini"}); err != nil {
+	if err := providers.SaveStoredConfig(stateDir, providers.StoredProviderConfig{Provider: "openai", Model: "gpt-4o-mini"}); err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, nil, "", connection{provider: "OpenAI", verified: true, theme: "default"}, stateDir, nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true, Theme: "default"}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/themes")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -55,7 +56,7 @@ func TestThemePreviewAndEscRestore(t *testing.T) {
 	if m.theme.BaseBG() == committedBG {
 		t.Fatalf("arrow down did not preview a new background")
 	}
-	cfg, _ := loadStoredConfig(stateDir)
+	cfg, _ := providers.LoadStoredConfig(stateDir)
 	if cfg.Theme == "catppuccin" {
 		t.Fatal("preview persisted to config")
 	}
@@ -63,7 +64,7 @@ func TestThemePreviewAndEscRestore(t *testing.T) {
 	if m.dialog.open || m.themeName != "default" || m.theme.BaseBG() != committedBG {
 		t.Fatalf("esc did not restore: open=%v name=%q bg=%q", m.dialog.open, m.themeName, m.theme.BaseBG())
 	}
-	cfg, _ = loadStoredConfig(stateDir)
+	cfg, _ = providers.LoadStoredConfig(stateDir)
 	if cfg.Theme == "catppuccin" {
 		t.Fatal("esc persisted a theme")
 	}

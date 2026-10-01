@@ -172,7 +172,7 @@ func (m *ui) handleCommand(line string) tea.Cmd {
 	case "themes":
 		return m.handleThemesCommand(arg)
 	case "mcp":
-		m.entries = append(m.entries, entry{role: "Lisa", content: m.conn.mcp.Status()})
+		m.entries = append(m.entries, entry{role: "Lisa", content: m.conn.Mcp.Status()})
 		return nil
 	default:
 		m.input = []rune(line)
@@ -412,7 +412,7 @@ func (m *ui) dialogView() string {
 	// model left, provider right, like a flex justify-between container.
 	providerName := ""
 	if m.dialog.kind == dialogModels && !m.dialog.loading && m.dialog.loadErr == "" {
-		providerName = m.conn.provider
+		providerName = m.conn.Provider
 	}
 	providerW := runewidth.StringWidth(providerName)
 

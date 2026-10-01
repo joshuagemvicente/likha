@@ -6,11 +6,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"lisa/internal/providers"
 	"lisa/internal/session"
 )
 
 func TestCaretBlinksSolidWhileTyping(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// Idle: the blink phase defaults to visible.
@@ -49,7 +50,7 @@ func TestCaretBlinksSolidWhileTyping(t *testing.T) {
 }
 
 func TestScrollbarAppearsOnlyWhenContentOverflows(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnd})
 	if m.scrollbarRows(m.bodyHeight()) != nil {
@@ -76,7 +77,7 @@ func TestScrollbarAppearsOnlyWhenContentOverflows(t *testing.T) {
 }
 
 func TestScrollbarDragRepositions(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	for range 100 {
 		m.entries = append(m.entries, entry{role: "Assistant", content: "filler line to overflow"})
@@ -104,7 +105,7 @@ func TestScrollbarDragRepositions(t *testing.T) {
 }
 
 func TestSmoothScrollLineGranular(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	for range 60 {
 		m.entries = append(m.entries, entry{role: "Assistant", content: "filler message for scrolling"})
@@ -140,7 +141,7 @@ func TestSmoothScrollLineGranular(t *testing.T) {
 func TestScrollbarStaysAtTheRightEdgeOnStyledRows(t *testing.T) {
 	forceANSI(t)
 	t.Cleanup(func() {})
-	m := newUI("/sample", nil, nil, "local", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.entries = append(m.entries,
 		entry{role: "Reasoning", content: strings.Repeat("the reasoning paragraph wraps well inside the viewport width. ", 40)},

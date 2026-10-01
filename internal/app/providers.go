@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbletea"
 
 	"lisa/internal/model"
+	"lisa/internal/providers"
 )
 
 // /providers implements in-session provider switching: a selection dialog
@@ -108,33 +109,19 @@ func (m *ui) handleKeyCheckMsg(v keyCheckMsg) {
 		return
 	}
 	p := v.provider
-	modelID := switchModelID(p, v.models)
+	modelID := providers.SwitchModelID(p, v.models)
 	if modelID == "" {
 		m.keyModal.err = "Provider reports no models; no model to switch to."
 		m.layoutWidth = 0
 		return
 	}
-	if err := storeKey(m.stateDir, p.Name, v.key); err != nil {
+	if err := providers.StoreKey(m.stateDir, p.Name, v.key); err != nil {
 		m.keyModal.err = err.Error()
 		m.layoutWidth = 0
 		return
 	}
 	m.keyModal = keyState{}
 	m.activateProvider(p, v.key, model.OAuthCredentials{}, modelID)
-}
-
-// switchModelID resolves the model a switch lands on: the provider's
-// documented default, or the first model the check reported when the
-// provider defines no default. Model names never carry over across
-// providers (spec §9.2: no guessed ID compatibility).
-func switchModelID(p model.Provider, reported []string) string {
-	if p.DefaultModel != "" {
-		return p.DefaultModel
-	}
-	if len(reported) > 0 {
-		return reported[0]
-	}
-	return ""
 }
 
 // startProviderSwitch begins the live switch for an already-configured
@@ -189,7 +176,7 @@ func (m *ui) handleProviderSwitchMsg(v providerSwitchMsg) tea.Cmd {
 		// row; only key providers resolve the model from what was reported.
 		reported = v.models
 	}
-	modelID := switchModelID(v.provider, reported)
+	modelID := providers.SwitchModelID(v.provider, reported)
 	if modelID == "" {
 		m.status = "Error"
 		m.entries = append(m.entries, entry{role: "Error", content: "Switch to " + v.provider.DisplayName + " failed: the provider reports no models."})
@@ -209,7 +196,7 @@ func (m *ui) activateProvider(p model.Provider, key string, creds model.OAuthCre
 		client, err = model.NewOAuth(p.BaseURL, modelID, model.ChatGPTIssuer, model.ChatGPTClientID, creds)
 		if client != nil {
 			client.SetOAuthSaver(func(c model.OAuthCredentials) error {
-				return storeOAuth(m.stateDir, p.Name, c)
+				return providers.StoreOAuth(m.stateDir, p.Name, c)
 			})
 		}
 	} else {
@@ -233,7 +220,7 @@ func (m *ui) activateProvider(p model.Provider, key string, creds model.OAuthCre
 	m.pending = nil
 	m.reviewSeen = nil
 	m.jumpBottom()
-	m.conn = connection{provider: p.DisplayName, verified: true, theme: m.conn.theme, nerd: m.conn.nerd, mcp: m.conn.mcp}
+	m.conn = providers.Connection{Provider: p.DisplayName, Verified: true, Theme: m.conn.Theme, Nerd: m.conn.Nerd, Mcp: m.conn.Mcp}
 	m.status = "Connected"
 	m.layoutWidth = 0
 	m.entries = append(m.entries, entry{role: "Lisa", content: "Provider switched to " + p.DisplayName + " for this session."})
@@ -275,7 +262,7 @@ func (m *ui) handleProvidersCommand(line, arg string) tea.Cmd {
 func (m *ui) applyProviderDirect(p model.Provider) tea.Cmd {
 	m.layoutWidth = 0
 	if p.Auth == model.AuthOAuth {
-		creds, ok, err := storedOAuth(m.stateDir, p.Name)
+		creds, ok, err := providers.StoredOAuth(m.stateDir, p.Name)
 		if err != nil {
 			m.entries = append(m.entries, entry{role: "Error", content: "Read stored credentials: " + err.Error()})
 			return nil
@@ -287,7 +274,7 @@ func (m *ui) applyProviderDirect(p model.Provider) tea.Cmd {
 		}
 		return m.startProviderSwitch(p, "", creds)
 	}
-	key, err := storedKey(m.stateDir, p.Name)
+	key, err := providers.StoredKey(m.stateDir, p.Name)
 	if err != nil {
 		m.entries = append(m.entries, entry{role: "Error", content: "Read stored API keys: " + err.Error()})
 		return nil
@@ -305,14 +292,6 @@ func (m *ui) applyProviderDirect(p model.Provider) tea.Cmd {
 // feature later removes the gate; it adds no plumbing.
 const customEndpointsEnabled = false
 
-// customEndpointTarget builds the provider record for an unlisted
-// OpenAI-compatible endpoint. Reserved for the hidden custom-endpoint
-// source: it flows through applyProviderDirect and activateProvider exactly
-// like a predefined row, so enabling it later is a one-line gate change.
-func customEndpointTarget(endpoint string) model.Provider {
-	return model.Provider{Name: "custom", DisplayName: "Custom endpoint", BaseURL: endpoint}
-}
-
 // providersDialogItems builds one display row per predefined provider with
 // its configured state. The current session's provider position is returned
 // for the dialog cursor (starts on the active provider, mirroring themes).
@@ -321,7 +300,7 @@ func (m *ui) providersDialogItems() (items []string, activeIndex int) {
 	for _, p := range model.Providers {
 		configured, labelSuffix := "", " — not configured"
 		if p.Auth == model.AuthOAuth {
-			_, signedIn, err := storedOAuth(m.stateDir, p.Name)
+			_, signedIn, err := providers.StoredOAuth(m.stateDir, p.Name)
 			if err == nil && signedIn {
 				configured = "✔ "
 				labelSuffix = ""
@@ -331,14 +310,14 @@ func (m *ui) providersDialogItems() (items []string, activeIndex int) {
 				labelSuffix = " — not signed in (first-run setup or --device-login)"
 			}
 		} else {
-			key, err := storedKey(m.stateDir, p.Name)
+			key, err := providers.StoredKey(m.stateDir, p.Name)
 			if err == nil && key != "" {
 				configured = "✔ "
 				labelSuffix = ""
 			}
 		}
 		label := configured + p.DisplayName + " (" + p.Name + ")" + labelSuffix
-		if m.conn.provider == p.DisplayName {
+		if m.conn.Provider == p.DisplayName {
 			activeIndex = len(items)
 			label += "  [connected]"
 		}

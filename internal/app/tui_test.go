@@ -19,12 +19,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 	"lisa/internal/model"
+	"lisa/internal/providers"
 	"lisa/internal/repository"
 	"lisa/internal/session"
 )
 
 func TestUIUsesFixedViewportAndPagesCompleteContent(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
 	m.entries = append(m.entries, entry{role: "Assistant", content: "beginning of conversation"})
 	for range 60 {
@@ -79,7 +80,7 @@ func TestSetupFlowPicksProviderKeyAndModel(t *testing.T) {
 	t.Cleanup(func() { model.Providers[0].BaseURL = "https://api.openai.com/v1" })
 
 	stateDir := t.TempDir()
-	m := newUI("/sample", nil, nil, "", connection{setup: true}, stateDir, nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Setup: true}, stateDir, nil, session.Snapshot{})
 	if m.mode != modeSetup || m.setup.stage != setupProvider {
 		t.Fatalf("setup did not start: mode=%q stage=%d", m.mode, m.setup.stage)
 	}
@@ -121,11 +122,11 @@ func TestSetupFlowPicksProviderKeyAndModel(t *testing.T) {
 	if status := stripANSI(m.statusLineRows(1, 1)[0]); !strings.Contains(status, "OpenRouter") || !strings.Contains(status, "zeta-model") {
 		t.Fatalf("status row missing provider/model identity: %q", status)
 	}
-	cfg, err := loadStoredConfig(stateDir)
+	cfg, err := providers.LoadStoredConfig(stateDir)
 	if err != nil || cfg.Provider != "openrouter" || cfg.Model != "zeta-model" {
 		t.Fatalf("stored config: %+v %v", cfg, err)
 	}
-	key, err := storedKey(stateDir, "openrouter")
+	key, err := providers.StoredKey(stateDir, "openrouter")
 	if err != nil || key != "sk-test-123" {
 		t.Fatalf("stored key = %q err=%v", key, err)
 	}
@@ -133,7 +134,7 @@ func TestSetupFlowPicksProviderKeyAndModel(t *testing.T) {
 
 func TestSetupModelStageListsAndSelects(t *testing.T) {
 	stateDir := t.TempDir()
-	m := newUI("/sample", nil, nil, "", connection{setup: true}, stateDir, nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Setup: true}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	// Jump straight to the model stage as if a check returned several models.
 	m.setup.stage = setupModel
@@ -151,14 +152,14 @@ func TestSetupModelStageListsAndSelects(t *testing.T) {
 	if m.mode != modeMain {
 		t.Fatalf("setup did not complete: mode=%q", m.mode)
 	}
-	cfg, err := loadStoredConfig(stateDir)
+	cfg, err := providers.LoadStoredConfig(stateDir)
 	if err != nil || cfg.Provider != "openai" || cfg.Model != "beta" || cfg.Theme != "default" {
 		t.Fatalf("stored config: %+v %v", cfg, err)
 	}
 }
 
 func TestSetupCheckFailureShowsClassifiedErrorAndRetries(t *testing.T) {
-	m := newUI("/sample", nil, nil, "", connection{setup: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Setup: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	// Select the first hosted provider (openai) and a bad key.
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -190,7 +191,7 @@ func TestSlashCommandsDispatchWithoutModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, nil, "", connection{provider: "OpenAI", verified: true}, t.TempDir(), store, snapshot)
+	m := newUI(root, nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), store, snapshot)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// /help prints the command list and never starts a turn.
@@ -262,7 +263,7 @@ func TestSlashCommandsDispatchWithoutModel(t *testing.T) {
 }
 
 func TestSlashQuitMirrorsCtrlD(t *testing.T) {
-	m := newUI("/sample", nil, nil, "", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/quit")})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -304,7 +305,7 @@ func TestModelSwitchCommandUsesListingAndLiveClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, client, "initial", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "initial", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// /models opens the selection dialog and fetches the list.
@@ -362,7 +363,7 @@ func TestSessionsCommandListsAndResumesInPlace(t *testing.T) {
 	if err := store.Save(first); err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, nil, "", connection{provider: "OpenAI", verified: true}, t.TempDir(), store, second)
+	m := newUI(root, nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), store, second)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/sessions")})
@@ -411,7 +412,7 @@ func TestReasoningStreamsMutedAndClosesOnContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, client, "", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("think and answer")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -456,7 +457,7 @@ func TestReasoningStreamsMutedAndClosesOnContent(t *testing.T) {
 }
 
 func TestSessionScrollsFromVeryTopToLastChat(t *testing.T) {
-	m := newUI("/sample", nil, nil, "", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	// Build a session much longer than one viewport.
 	for i := range 200 {
@@ -506,7 +507,7 @@ func TestSessionScrollsFromVeryTopToLastChat(t *testing.T) {
 }
 
 func TestUIRequiresResizeBeforePrompt(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 15, Height: 5})
 	assertViewport(t, m.View(), 15, 5)
 	m.input = []rune("hello")
@@ -526,7 +527,7 @@ func TestUICancellationDrainsCompletedResultBeforeEnding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", store, snapshot)
+	m := newUI(root, nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", store, snapshot)
 	m.working, m.runID = true, 1
 	cancelled := false
 	m.cancel = func() { cancelled = true }
@@ -588,7 +589,7 @@ func TestUICancelBeforeModelResponsePersistsPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, client, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", store, snapshot)
+	m := newUI(root, nil, client, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", store, snapshot)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.input = []rune("remember me")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -632,7 +633,7 @@ func TestUICancelPendingApprovalDoesNotRecordCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", store, snapshot)
+	m := newUI(root, nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", store, snapshot)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.working, m.runID = true, 1
 	m.cancel = func() {}
@@ -657,7 +658,7 @@ func TestUICancelPendingApprovalDoesNotRecordCompletion(t *testing.T) {
 }
 
 func TestUISpaceRemainsInPrompt(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("two")})
 	m.Update(tea.KeyMsg{Type: tea.KeySpace})
@@ -668,7 +669,7 @@ func TestUISpaceRemainsInPrompt(t *testing.T) {
 }
 
 func TestUIRequiresFullDiffReviewBeforeApproval(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
 	m.working, m.runID = true, 1
 	m.cancel = func() {}
@@ -689,7 +690,7 @@ func TestUIRequiresFullDiffReviewBeforeApproval(t *testing.T) {
 }
 
 func TestUIRejectsCommandWithoutReviewingAllPages(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
 	m.working, m.runID = true, 1
 	m.cancel = func() {}
@@ -705,7 +706,7 @@ func TestUIReviewKeepsDecisionsAndPositionVisibleAtTerminalSizes(t *testing.T) {
 	for _, size := range [][2]int{{80, 24}, {40, 12}} {
 		for _, kind := range []string{"edit", "command"} {
 			t.Run(fmt.Sprintf("%s-%dx%d", kind, size[0], size[1]), func(t *testing.T) {
-				m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+				m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 				m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 				m.working, m.runID = true, 1
 				m.cancel = func() {}
@@ -785,7 +786,7 @@ func TestUIReviewKeepsDecisionsAndPositionVisibleAtTerminalSizes(t *testing.T) {
 }
 
 func TestUIResizeRequiresReviewingTheNewPageLayout(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.working, m.runID = true, 1
 	m.cancel = func() {}
@@ -848,7 +849,7 @@ func setupCursorOnChatgpt(t *testing.T, m *ui) int {
 }
 
 func TestSetupOAuthProviderOpensBrowserLoginStage(t *testing.T) {
-	m := newUI("/sample", nil, nil, "", connection{setup: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Setup: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	setupCursorOnChatgpt(t, m)
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -883,7 +884,7 @@ func TestSetupOAuthProviderOpensBrowserLoginStage(t *testing.T) {
 }
 
 func TestSetupOAuthLoginMsgSuccessMovesToModelStage(t *testing.T) {
-	m := newUI("/sample", nil, nil, "", connection{setup: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Setup: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	setupCursorOnChatgpt(t, m)
 	m.setup.stage = setupLogin
@@ -913,7 +914,7 @@ func TestSetupOAuthLoginMsgSuccessMovesToModelStage(t *testing.T) {
 }
 
 func TestSetupOAuthLoginMsgErrorStaysAndRetries(t *testing.T) {
-	m := newUI("/sample", nil, nil, "", connection{setup: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Setup: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	setupCursorOnChatgpt(t, m)
 	m.setup.stage = setupLogin
@@ -933,7 +934,7 @@ func TestSetupOAuthLoginMsgErrorStaysAndRetries(t *testing.T) {
 }
 
 func TestSetupOAuthLoginMsgIgnoredAfterEsc(t *testing.T) {
-	m := newUI("/sample", nil, nil, "", connection{setup: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Setup: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	setupCursorOnChatgpt(t, m)
 	m.setup.stage = setupLogin
@@ -952,7 +953,7 @@ func TestSetupOAuthLoginMsgIgnoredAfterEsc(t *testing.T) {
 
 func TestSetupFinishStoresOAuthCredentialForChatGPT(t *testing.T) {
 	stateDir := t.TempDir()
-	m := newUI("/sample", nil, nil, "", connection{setup: true}, stateDir, nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Setup: true}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.setup.cursor = setupCursorOnChatgpt(t, m)
 	m.setup.stage = setupModel
@@ -969,13 +970,13 @@ func TestSetupFinishStoresOAuthCredentialForChatGPT(t *testing.T) {
 	if m.mode != modeMain {
 		t.Fatalf("setup did not complete: mode=%q", m.mode)
 	}
-	if _, ok, err := storedOAuth(stateDir, "chatgpt"); err != nil || !ok {
+	if _, ok, err := providers.StoredOAuth(stateDir, "chatgpt"); err != nil || !ok {
 		t.Fatalf("OAuth credential not stored: ok=%t err=%v", ok, err)
 	}
-	if key, err := storedKey(stateDir, "chatgpt"); err != nil || key != "" {
+	if key, err := providers.StoredKey(stateDir, "chatgpt"); err != nil || key != "" {
 		t.Fatalf("OAuth provider stored an API key: %q %v", key, err)
 	}
-	cfg, err := loadStoredConfig(stateDir)
+	cfg, err := providers.LoadStoredConfig(stateDir)
 	if err != nil || cfg.Provider != "chatgpt" || cfg.Model != model.ChatGPTModels[0] {
 		t.Fatalf("stored config: %+v %v", cfg, err)
 	}
@@ -1016,7 +1017,7 @@ func TestUsageFooterShowsCodexRateLimits(t *testing.T) {
 	if usage == "" {
 		t.Fatal("usage summary not captured from the response headers")
 	}
-	m := newUI("/sample", nil, client, "gpt-5.5", connection{provider: "ChatGPT (Plus/Pro)", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "gpt-5.5", providers.Connection{Provider: "ChatGPT (Plus/Pro)", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	if !strings.Contains(m.View(), usage) {
 		t.Fatalf("usage summary not shown in the footer: %q", m.View())
@@ -1027,7 +1028,7 @@ func TestUsageFooterShowsCodexRateLimits(t *testing.T) {
 // logo — no repository line — and scrolls away with content: later pages
 // never contain it.
 func TestStartupLogoBlockOpensFreshSessionAndScrollsAway(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	first := stripANSI(m.View())
 	if !strings.Contains(first, "____   ___  __") {
@@ -1047,7 +1048,7 @@ func TestStartupLogoBlockOpensFreshSessionAndScrollsAway(t *testing.T) {
 	}
 	// Narrow terminals skip the block; the compact header line carries
 	// identity instead.
-	narrow := newUI("/sample", nil, nil, "local", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	narrow := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	narrow.Update(tea.WindowSizeMsg{Width: 50, Height: 24})
 	narrowView := stripANSI(narrow.View())
 	if strings.Contains(narrowView, "____   ___  __") {
@@ -1070,7 +1071,7 @@ func TestStartupLogoBlockNeverPersistsOrReappearsOnResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, nil, "local", connection{provider: "OpenAI", verified: true}, "", store, snapshot)
+	m := newUI(root, nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true}, "", store, snapshot)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.entries = append(m.entries, entry{role: "You", content: "hello there"})
 	m.persist()
@@ -1086,7 +1087,7 @@ func TestStartupLogoBlockNeverPersistsOrReappearsOnResume(t *testing.T) {
 	if len(saved.Entries) != 1 || saved.Entries[0].Content != "hello there" {
 		t.Fatalf("logo exclusion dropped or duplicated entries: %+v", saved.Entries)
 	}
-	resumed := newUI(root, nil, nil, "local", connection{provider: "OpenAI", verified: true}, "", store, saved)
+	resumed := newUI(root, nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true}, "", store, saved)
 	resumed.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	if strings.Contains(resumed.View(), "____   ___  __") {
 		t.Fatalf("resumed session redrew the logo block: %q", resumed.View())
@@ -1108,7 +1109,7 @@ func TestUsageAccumulatesFromProviderStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, client, "local", connection{provider: "Local OpenAI-compatible", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.startTurn("first question")
 	defer m.cancel()
@@ -1129,7 +1130,7 @@ func TestUsageAccumulatesFromProviderStream(t *testing.T) {
 }
 
 func TestUpdateAvailableMsgSetsVersion(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(updateAvailableMsg{version: "v9.9.9"})
 	if m.updateVersion != "v9.9.9" {
@@ -1172,7 +1173,7 @@ func TestToolResultRefreshesGitCountsWhenEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	run("add", "staged.txt")
-	m := newUI(root, nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true, statusLine: storedStatusLineConfig{Changes: true, Staged: true}}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI(root, nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true, StatusLine: providers.StoredStatusLineConfig{Changes: true, Staged: true}}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.working, m.runID = true, 1
 	m.cancel = func() {}
@@ -1184,7 +1185,7 @@ func TestToolResultRefreshesGitCountsWhenEnabled(t *testing.T) {
 }
 
 func TestDebugPagingTemp(t *testing.T) {
-	m := newUI("/sample", nil, nil, "", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/help")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1213,7 +1214,7 @@ func sendRunes(m *ui, text string) {
 }
 
 func TestCommandPopupOpensFiltersCompletesAndSends(t *testing.T) {
-	m := newUI("/sample", nil, nil, "", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// A mid-draft slash never opens the popup; only a leading one does.
@@ -1311,7 +1312,7 @@ func TestCommandPopupExclusiveWithMentionPopup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, repo, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI(root, repo, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// The slash popup opens and closes the @ popup...
@@ -1347,7 +1348,7 @@ func TestCompactRefusalsChangeNothing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	m := newUI("/sample", nil, nil, "", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// No provider configured.
@@ -1432,7 +1433,7 @@ func TestCompactSummarizesReplacesHistoryAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, client, "compactor", connection{provider: "OpenAI", verified: true}, t.TempDir(), store, snapshot)
+	m := newUI(root, nil, client, "compactor", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), store, snapshot)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.history = []model.Message{
 		{Role: "user", Content: "first question"},
@@ -1506,7 +1507,7 @@ func TestCompactFailureKeepsHistoryAndRetries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, nil, client, "compactor", connection{provider: "OpenAI", verified: true}, t.TempDir(), store, snapshot)
+	m := newUI(root, nil, client, "compactor", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), store, snapshot)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.history = []model.Message{
 		{Role: "user", Content: "first question"},
@@ -1556,7 +1557,7 @@ func TestCompactEscCancelsWithoutTouchingHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI("/sample", nil, client, "compactor", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, client, "compactor", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.history = []model.Message{{Role: "user", Content: "first question"}}
 	original := append([]model.Message(nil), m.history...)
@@ -1672,7 +1673,7 @@ func walkPages(t *testing.T, m *ui) {
 // already cover).
 func TestBodyNeverOverflowsTheViewport(t *testing.T) {
 	for _, width := range []int{40, 80, 121, 141, 200} {
-		m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+		m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
 		m.entries = append(m.entries, pathologicalEntries()...)
 		walkPages(t, m)
@@ -1692,7 +1693,7 @@ func TestBodyNeverOverflowsTheViewport(t *testing.T) {
 // reachable page-by-page (never blocked by the overflow guard).
 func TestPendingReviewNeverOverflowsTheViewport(t *testing.T) {
 	for _, width := range []int{80, 150} {
-		m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+		m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
 		m.working, m.runID = true, 1
 		m.cancel = func() {}
@@ -1725,7 +1726,7 @@ func TestLogoLinesStayWithinTheViewport(t *testing.T) {
 	// At the 40-column minimum the logo is skipped from the RENDER (sub-56
 	// rule; the entry still exists in m.entries for later resize), so
 	// assert the rendered page instead: no logo line appears in the frame.
-	narrow := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	narrow := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	narrow.Update(tea.WindowSizeMsg{Width: minWidth, Height: minHeight})
 	frame := stripANSI(narrow.View())
 	for _, line := range strings.Split(logo, "\n") {
@@ -1734,7 +1735,7 @@ func TestLogoLinesStayWithinTheViewport(t *testing.T) {
 		}
 	}
 	assertRowsWithinViewport(t, narrow)
-	wide := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	wide := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	wide.Update(tea.WindowSizeMsg{Width: 56, Height: minHeight})
 	assertRowsWithinViewport(t, wide)
 }
@@ -1745,17 +1746,17 @@ func TestLogoLinesStayWithinTheViewport(t *testing.T) {
 // existing too-narrow provider-column drop must keep working instead of
 // overflowing.
 func TestDialogFitsCJKLabelsAndDropsProviderColumnWhenNecessary(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
 	current := "模型标签 Probe"
 	m.dialog = dialogState{kind: dialogModels, open: true, cursor: 0, loading: false}
 	m.dialogItems = []string{strings.Repeat("词", 60), current, "another one"}
 	m.modelName = current
-	m.conn.provider = "A very long local OpenAI-compatible relay"
+	m.conn.Provider = "A very long local OpenAI-compatible relay"
 	m.rebuild() // dialogView() overlays m.mainView() output and asserts nothing about the dialog itself, so lay out first
 	view := m.dialogView()
 	plain := stripANSI(view)
-	if !strings.Contains(plain, m.conn.provider) {
+	if !strings.Contains(plain, m.conn.Provider) {
 		t.Fatalf("provider column dropped although the 60-column box has room: %q", plain)
 	}
 	dialogRows := plainFrameOf(view, 24)
@@ -1770,10 +1771,10 @@ func TestDialogFitsCJKLabelsAndDropsProviderColumnWhenNecessary(t *testing.T) {
 	m.dialog.cursor = 2
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
 	m.pending = nil
-	m.conn.provider = "A very long local OpenAI-compatible relay provider name that cannot fit"
+	m.conn.Provider = "A very long local OpenAI-compatible relay provider name that cannot fit"
 	view = m.dialogView()
 	plain = stripANSI(view)
-	if strings.Contains(plain, m.conn.provider) {
+	if strings.Contains(plain, m.conn.Provider) {
 		t.Fatalf("unfittable provider name rendered anyway: %q", plain)
 	}
 	for i, row := range plainFrameOf(view, 20) {
@@ -1793,7 +1794,7 @@ func plainFrameOf(view string, _ int) []string {
 // capped width re-wrap to the narrower viewport without leaving any
 // over-wide row behind.
 func TestResizeReflowsToNewWidth(t *testing.T) {
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 141, Height: 24})
 	m.entries = append(m.entries, pathologicalEntries()...)
 	m.Update(tea.KeyMsg{Type: tea.KeyHome})

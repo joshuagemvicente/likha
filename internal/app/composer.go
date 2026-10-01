@@ -1,6 +1,7 @@
 package app
 
 import (
+	"lisa/internal/providers"
 	"strings"
 
 	"github.com/mattn/go-runewidth"
@@ -124,10 +125,10 @@ func (m *ui) composerLines() []string {
 // An unsuccessful write leaves both the active appearance and the stored
 // choice untouched. A corrupt or unreadable config is never overwritten.
 func (m *ui) applyComposerStyle(style string) {
-	cfg, err := loadStoredConfig(m.stateDir)
+	cfg, err := providers.LoadStoredConfig(m.stateDir)
 	if err == nil {
-		cfg.Composer = &storedComposerConfig{Style: style}
-		err = saveStoredConfig(m.stateDir, cfg)
+		cfg.Composer = &providers.StoredComposerConfig{Style: style}
+		err = providers.SaveStoredConfig(m.stateDir, cfg)
 	}
 	if err != nil {
 		m.status = "Error"
@@ -136,5 +137,5 @@ func (m *ui) applyComposerStyle(style string) {
 		return
 	}
 	m.composerStyle = style
-	m.conn.composerStyle = style
+	m.conn.ComposerStyle = style
 }

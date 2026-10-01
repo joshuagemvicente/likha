@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"lisa/internal/model"
+	"lisa/internal/providers"
 	"lisa/internal/repository"
 	"lisa/internal/session"
 )
@@ -104,7 +105,7 @@ func TestMentionPopupCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, repo, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI(root, repo, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// Typing @ schedules the index build; the message populates the popup.
@@ -143,7 +144,7 @@ func TestMentionPopupIgnoredWithoutMatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newUI(root, repo, nil, "local", connection{provider: "Local OpenAI-compatible", verified: true}, "", nil, session.Snapshot{})
+	m := newUI(root, repo, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("@")})
 	m.Update(fileIndexMsg{files: []string{"alpha.txt"}})

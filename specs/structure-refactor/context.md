@@ -207,3 +207,99 @@ with that spec's checklist as the authority that nothing regressed).
    (footer/view behavior), `status_sources_test.go` (pure funcs),
    `status_view_test.go` (14 tests, ex-`statusbar_test.go`),
    `status_markers_test.go` (3 tests). Phase-2 tui package inherits all four.
+
+## T0 contract amendment — frozen cross-package surface (drafted 2026-10-01, PENDING APPROVAL)
+
+Full audit: `conn\.[a-zA-Z]+` (~15 files), `connection{` (3 production +
+~40 test literals), `res\.` (run.go + run_test.go), keyfile/config symbols
+(9 files), agent-loop callers, `Version` users. No code moves under this
+amendment. Nothing below changes behavior.
+
+### Design decision: exported fields, not accessors
+
+The T0 task text proposed `Connection` with unexported fields + constructor
++ accessors. The audit rejects that: ~40 test literals plus 3 production
+rebuild sites would need a ~10-parameter constructor and ~15 accessors.
+Repo convention is exported-field structs (`model.Provider`,
+`session.Snapshot`/`Entry`, `mcp.ServerConfig`). So: **exported fields
+everywhere, zero accessors.** Test-literal migration is mechanical
+(`connection{provider:` → `providers.Connection{Provider:`).
+
+### `internal/providers` — new package (from `config.go`, `keyfile.go`, `provider.go` + 2 pure funcs)
+
+Exported types (fields verbatim, capitalized): `Connection{Provider,
+ProviderCanonical, Verified, Err, Setup, Theme, ComposerStyle, StatusLine,
+Nerd, Mcp}`, `ResolvedProvider{Endpoint, Verified, Display, Key, Creds,
+OAuth}`, `StoredComposerConfig`, `StoredStatusLineConfig`,
+`StoredProviderConfig`. Exported funcs: `ResolveProvider`,
+`LoadStoredConfig`, `SaveStoredConfig`, `ConfigFilePath`, `FlagEnabled`,
+`KeyFilePath`, `StoredKey`, `StoredOAuth`, `StoreKey`, `StoreOAuth`,
+`SwitchModelID`, `CustomEndpointTarget`. Nothing else exported.
+Imports `model` only. `Connection.Mcp` is `*mcp.McpManager` — no cycle
+(`mcp` never imports `providers`).
+
+### `internal/agent` — new package (from `agent.go`, `compaction.go`, `sessionname.go`, mentions-pure half)
+
+Exported (cross-package callers verified): `TurnEvent{Kind, Text, History,
+Approval, RunID}` (tui `Update` reads all five), `ApprovalRequest{Kind,
+Title, Body, Reply}` (tui approval keys + tests channel into `Reply`),
+`RunTurn` (tui `startTurn`), `CompactHistory` (tui `startCompaction`),
+`GenerateSessionName` (tui auto-name), `ExpandFileReferences`,
+`BuildFileIndex`, `MentionQuery`, `MentionMatches`, `CompleteMention`
+(tui mention popup calls the four helpers; `runTurn` calls expansion).
+Stays private: `dispatchTool` (callers `agent.go` + two test files, all
+moving together), `requestApproval`, `sanitizeSessionName`, mention caps
+and token regex. Imports `actions`, `model`, `repository`, `mcp`
+(`*mcp.McpManager` param). Gains no `bubbletea`/`lipgloss`.
+
+### `internal/mcp` — gains `manager.go` (whole `app/mcp.go`)
+
+Exported: `McpManager`, `NewMcpManager`, methods `Tools`, `Call`, `Stop`,
+`Status`, `Summary`, `Trusted`. Plus `NewMcpManagerForTest(servers,
+clients, trusted, failed)` — justified exception to "nothing else
+exported": tui status tests (`deterministicMcp`, asserting `mcp 1/2` rows)
+must inject a running + a crashed client, and exported mutable fields
+(incl. `sync.Mutex`) would be strictly worse. The `toolDefinition` alias
+travels only if used elsewhere (grep shows definition only — drop at
+move time if still single-use).
+
+### `internal/tui` — new package (everything UI)
+
+Receives whole: `tui.go`, `setup.go`, `dialog.go`, `view.go`, `composer.go`,
+`editor.go`, `scroll.go`, `commandcomplete.go` (TUI-only — agent never
+calls command helpers), `status_line.go`, `status_sources.go`, mentions-UI
+half (`mentionState`, `fileIndexMsg`, `startMention`, `syncMention`,
+`mentionActive`, `updateMention`, `mentionLines`), providers-UI half (all
+`*ui` methods + `keyState`/`keyCheckMsg`/`providerSwitchMsg`). Plus
+`Version` (moved from `run.go`: used by tui `Init`, `status_line.go`, and
+`run.go` via `tui.Version`). `newUI` → `NewUI(...) tea.Model` — return
+type changes so `app` never names the private `ui` struct; the
+`tea.NewProgram` call site in `run.go` is otherwise untouched.
+`updateAvailableMsg`/`waitEvent` travel inside `tui.go`. Shared helpers
+`windowList`/`fitHint` stay where they are (established Phase 1.5 rule).
+`Update` delegation order stays verbatim.
+
+### `internal/app` — composition root after split
+
+Holds only `run.go` (`Run`, `resolveModel`, `resolveRoot`,
+`deviceLoginFlow`, `usageText`) + slimmed `run_test.go`. Imports `tui`,
+`providers`, `model`, `session`, `repository`, `mcp`. `cmd/lisa/main.go`
+byte-identical.
+
+### Test dispositions (tests move with majority subject, never rewritten)
+
+- → `agent`: `agent_test`, `approval_test`, `compaction_test`,
+  `sessionname_test`, mentions-expansion/index/query/match/complete cases
+  + the `runTurn`-through-expansion test.
+- → `providers`: `resolveProvider` group + config round-trip group (out of
+  `run_test.go`), `switchModelID`/`customEndpointTarget` cases (out of
+  `providers_test.go`).
+- → `internal/mcp`: manager cases (out of `mcp_test.go`).
+- → `tui`: everything else, including `status_sources_test.go` and
+  `composer_config_test.go` whole (majority UI subject; they import
+  `providers` for config/keyfile funcs), the `/mcp` TUI surface test (out
+  of `mcp_test.go`), and all ~40 `connection{...}` literals (mechanical
+  capitalization to `providers.Connection{...}`).
+- Production rebuild literals (`setup.go:264`, `providers.go:236`) move
+  verbatim as `providers.Connection{...}`, preserving their exact
+  field subsets (including dropped fields).

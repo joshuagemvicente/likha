@@ -7,13 +7,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/mattn/go-runewidth"
+	"lisa/internal/providers"
 	"lisa/internal/session"
 )
 
 // overflowUI builds a ui instance at the given size for overflow testing.
 func overflowUI(t *testing.T, style string, width, height int) *ui {
 	t.Helper()
-	m := newUI("/sample", nil, nil, "local", connection{provider: "Local", verified: true, composerStyle: style}, t.TempDir(), nil, session.Snapshot{})
+	m := newUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local", Verified: true, ComposerStyle: style}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: width, Height: height})
 	return m
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"lisa/internal/actions"
+	"lisa/internal/mcp"
 	"lisa/internal/model"
 	"lisa/internal/repository"
 )
@@ -39,7 +40,7 @@ var agentTools = []model.ToolDefinition{
 // runTurn streams one user request and its tools. An edit or command can only
 // execute after the UI sends an explicit decision for that specific proposal.
 // mcp may be nil when no MCP servers are configured.
-func runTurn(ctx context.Context, client *model.Client, repo *repository.Repository, root string, prior []model.Message, prompt string, mcpServers *mcpManager, emit func(turnEvent)) {
+func runTurn(ctx context.Context, client *model.Client, repo *repository.Repository, root string, prior []model.Message, prompt string, mcpServers *mcp.McpManager, emit func(turnEvent)) {
 	// @file references inline repository content so the model reads context
 	// directly; unresolved tokens stay literal.
 	prompt = expandFileReferences(prompt, repo)
@@ -119,7 +120,7 @@ func appendUnexecuted(history *[]model.Message, calls []model.ToolCall) {
 	}
 }
 
-func dispatchTool(ctx context.Context, repo *repository.Repository, root string, call model.ToolCall, mcpServers *mcpManager, emit func(turnEvent)) (string, error) {
+func dispatchTool(ctx context.Context, repo *repository.Repository, root string, call model.ToolCall, mcpServers *mcp.McpManager, emit func(turnEvent)) (string, error) {
 	var args struct {
 		Path    string  `json:"path"`
 		Query   string  `json:"query"`
