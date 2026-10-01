@@ -4,9 +4,9 @@
 
 ## Context
 
-Lisa is a Go CLI with a Bubble Tea TUI (`internal/app`). The release pipeline
-(`scripts/release.sh`) stamps the tag into `internal/app.Version` via
-`-ldflags "-X lisa/internal/app.Version=$version"` and publishes four archives
+Lisa is a Go CLI with a Bubble Tea TUI (`internal/tui`). The release pipeline
+(`scripts/release.sh`) stamps the tag into `internal/tui.Version` via
+`-ldflags "-X lisa/internal/tui.Version=$version"` and publishes four archives
 plus a checksum manifest as GitHub Release assets of `gem/lisa`. The installer
 (`scripts/install.sh`) already resolves `releases/latest` via
 `https://api.github.com/repos/gem/lisa/releases/latest`, so the newest version
@@ -88,7 +88,7 @@ writes nothing except a 24-hour throttle timestamp, and stays silent offline.
            ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
            defer cancel()
            latest, err := update.Latest(ctx)
-           if err != nil || !update.Newer(app.Version, latest) { return nil }
+           if err != nil || !update.Newer(Version, latest) { return nil }
            mark(time.Now().UnixNano())
            return updateAvailableMsg{version: latest, url: "https://github.com/gem/lisa/releases/tag/" + latest}
        }

@@ -54,7 +54,7 @@ for os in darwin linux; do
     for arch in amd64 arm64; do
         target=$staging/$os-$arch
         mkdir "$target"
-        (cd "$root" && CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" GOWORK=off GOFLAGS= go build -mod=readonly -trimpath -buildvcs=false -ldflags="-s -w -X lisa/internal/app.Version=$version" -o "$target/lisa" ./cmd/lisa)
+        (cd "$root" && CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" GOWORK=off GOFLAGS= go build -mod=readonly -trimpath -buildvcs=false -ldflags="-s -w -X lisa/internal/tui.Version=$version" -o "$target/lisa" ./cmd/lisa)
         cp "$root/README.md" "$root/LICENSE" "$target/"
         chmod 755 "$target/lisa"
         archive="lisa_${version}_${os}_${arch}.tar.gz"

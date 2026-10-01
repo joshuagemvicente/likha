@@ -20,19 +20,10 @@ import (
 	"lisa/internal/providers"
 	"lisa/internal/repository"
 	"lisa/internal/session"
+	"lisa/internal/tui"
 	lisaui "lisa/internal/ui"
 )
 
-// const logo = ` _     ___ ____    _
-// | |   |_ _/ ___|  / \
-// | |    | |\___ \ / _ \
-// | |___ | | ___) / ___ \
-// |_____|___|____/_/   \_\`
-
-const logo = ` ____   ___  __ ___ __ __  _____ 
-/  _/  /___\|  |  //  |  \/  _  \
-|  |---|   ||  _ < |  _  ||  _  |
-\_____/\___/|__|__\\__|__/\__|__/`
 const usageHeader = `Usage: lisa [options] [repository]
 
 Start Lisa, an agent harness terminal UI, in a repository. Lisa talks directly
@@ -114,12 +105,9 @@ func usageText() string {
 	return b.String()
 }
 
-// Version is set from the release tag when building distribution binaries.
-var Version = "dev"
-
 // Run validates startup settings and runs the interactive terminal UI.
 func Run(args []string, stdout, stderr io.Writer) int {
-	model.UserAgent = "lisa/" + Version
+	model.UserAgent = "lisa/" + tui.Version
 	flags := flag.NewFlagSet("lisa", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() { fmt.Fprint(stdout, usageText()) }
@@ -140,7 +128,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *showVersion {
-		fmt.Fprintf(stdout, "Lisa %s\n", Version)
+		fmt.Fprintf(stdout, "Lisa %s\n", tui.Version)
 		return 0
 	}
 	if flags.NArg() > 1 {
@@ -324,7 +312,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		client.SetSessionHeader(selected.SessionHeader)
 		client.SetSession(snapshot.ID)
 	}
-	program := tea.NewProgram(newUI(root, repo, client, modelName, providers.Connection{Provider: display, ProviderCanonical: selected.Name, Verified: verified, Err: startupErr, Setup: setupNeeded, Theme: themeName, ComposerStyle: composerStyle, StatusLine: statusLine, Nerd: *nerdFlag || os.Getenv("LISA_NERD") == "1", Mcp: mcpServers}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
+	program := tea.NewProgram(tui.NewUI(root, repo, client, modelName, providers.Connection{Provider: display, ProviderCanonical: selected.Name, Verified: verified, Err: startupErr, Setup: setupNeeded, Theme: themeName, ComposerStyle: composerStyle, StatusLine: statusLine, Nerd: *nerdFlag || os.Getenv("LISA_NERD") == "1", Mcp: mcpServers}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(stderr, "lisa: terminal: %v\n", err)
 		return 1
