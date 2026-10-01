@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"context"
@@ -16,17 +16,17 @@ import (
 	"lisa/internal/repository"
 )
 
-type approvalRequest struct {
+type ApprovalRequest struct {
 	Kind, Title, Body string
 	Reply             chan bool
 }
 
-type turnEvent struct {
-	kind     string
-	text     string
-	history  []model.Message
-	approval *approvalRequest
-	runID    uint64
+type TurnEvent struct {
+	Kind     string
+	Text     string
+	History  []model.Message
+	Approval *ApprovalRequest
+	RunID    uint64
 }
 
 var agentTools = []model.ToolDefinition{
@@ -40,14 +40,14 @@ var agentTools = []model.ToolDefinition{
 // runTurn streams one user request and its tools. An edit or command can only
 // execute after the UI sends an explicit decision for that specific proposal.
 // mcp may be nil when no MCP servers are configured.
-func runTurn(ctx context.Context, client *model.Client, repo *repository.Repository, root string, prior []model.Message, prompt string, mcpServers *mcp.McpManager, emit func(turnEvent)) {
+func RunTurn(ctx context.Context, client *model.Client, repo *repository.Repository, root string, prior []model.Message, prompt string, mcpServers *mcp.McpManager, emit func(TurnEvent)) {
 	// @file references inline repository content so the model reads context
 	// directly; unresolved tokens stay literal.
-	prompt = expandFileReferences(prompt, repo)
+	prompt = ExpandFileReferences(prompt, repo)
 	history := make([]model.Message, 0, len(prior)+4)
 	history = append(history, prior...)
 	history = append(history, model.Message{Role: "user", Content: prompt})
-	fail := func(err error) { emit(turnEvent{kind: "error", text: err.Error(), history: history}) }
+	fail := func(err error) { emit(TurnEvent{Kind: "error", Text: err.Error(), History: history}) }
 	// Pre-run connection check: a dead endpoint or revoked key fails before any
 	// prompt round-trip. A successful earlier check or stream is remembered.
 	if err := client.EnsureConnected(ctx); err != nil {
@@ -65,9 +65,9 @@ func runTurn(ctx context.Context, client *model.Client, repo *repository.Reposit
 			return
 		}
 		assistant, err := client.Stream(ctx, history, tools, func(text string) {
-			emit(turnEvent{kind: "text", text: text})
+			emit(TurnEvent{Kind: "text", Text: text})
 		}, func(reasoning string) {
-			emit(turnEvent{kind: "reasoning", text: reasoning})
+			emit(TurnEvent{Kind: "reasoning", Text: reasoning})
 		})
 		if err != nil {
 			fail(err)
@@ -75,7 +75,7 @@ func runTurn(ctx context.Context, client *model.Client, repo *repository.Reposit
 		}
 		history = append(history, assistant)
 		if len(assistant.ToolCalls) == 0 {
-			emit(turnEvent{kind: "done", history: history})
+			emit(TurnEvent{Kind: "done", History: history})
 			return
 		}
 		for index, call := range assistant.ToolCalls {
@@ -88,7 +88,7 @@ func runTurn(ctx context.Context, client *model.Client, repo *repository.Reposit
 				fail(fmt.Errorf("model returned a tool call without an ID"))
 				return
 			}
-			emit(turnEvent{kind: "tool_start", text: "Request: " + call.Name + " " + call.Arguments})
+			emit(TurnEvent{Kind: "tool_start", Text: "Request: " + call.Name + " " + call.Arguments})
 			result, toolErr := dispatchTool(ctx, repo, root, call, mcpServers, emit)
 			if ctx.Err() != nil && (errors.Is(toolErr, context.Canceled) || errors.Is(toolErr, context.DeadlineExceeded)) {
 				appendUnexecuted(&history, assistant.ToolCalls[index:])
@@ -101,7 +101,7 @@ func runTurn(ctx context.Context, client *model.Client, repo *repository.Reposit
 			history = append(history, model.Message{Role: "tool", ToolCallID: call.ID, Content: result})
 			completed := append([]model.Message(nil), history...)
 			appendUnexecuted(&completed, assistant.ToolCalls[index+1:])
-			emit(turnEvent{kind: "tool_result", text: call.Name + ": " + result, history: completed})
+			emit(TurnEvent{Kind: "tool_result", Text: call.Name + ": " + result, History: completed})
 			if err := ctx.Err(); err != nil {
 				appendUnexecuted(&history, assistant.ToolCalls[index+1:])
 				fail(err)
@@ -120,7 +120,7 @@ func appendUnexecuted(history *[]model.Message, calls []model.ToolCall) {
 	}
 }
 
-func dispatchTool(ctx context.Context, repo *repository.Repository, root string, call model.ToolCall, mcpServers *mcp.McpManager, emit func(turnEvent)) (string, error) {
+func dispatchTool(ctx context.Context, repo *repository.Repository, root string, call model.ToolCall, mcpServers *mcp.McpManager, emit func(TurnEvent)) (string, error) {
 	var args struct {
 		Path    string  `json:"path"`
 		Pattern string  `json:"pattern"`
@@ -216,9 +216,9 @@ func dispatchTool(ctx context.Context, repo *repository.Repository, root string,
 	}
 }
 
-func requestApproval(ctx context.Context, kind, title, body string, emit func(turnEvent)) (bool, error) {
-	request := &approvalRequest{Kind: kind, Title: title, Body: body, Reply: make(chan bool, 1)}
-	emit(turnEvent{kind: "approval", approval: request})
+func requestApproval(ctx context.Context, kind, title, body string, emit func(TurnEvent)) (bool, error) {
+	request := &ApprovalRequest{Kind: kind, Title: title, Body: body, Reply: make(chan bool, 1)}
+	emit(TurnEvent{Kind: "approval", Approval: request})
 	select {
 	case approved := <-request.Reply:
 		return approved, nil

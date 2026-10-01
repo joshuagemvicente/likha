@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"lisa/internal/agent"
 	"lisa/internal/model"
 	"lisa/internal/providers"
 	"lisa/internal/repository"
@@ -65,12 +66,12 @@ type ui struct {
 	cancelling      bool
 	runID           uint64
 	cancel          context.CancelFunc
-	events          chan turnEvent
+	events          chan agent.TurnEvent
 	abandon         chan struct{}
 	history         []model.Message
 	store           *session.Store
 	snapshot        session.Snapshot
-	pending         *approvalRequest
+	pending         *agent.ApprovalRequest
 	reviewSeen      []bool
 	status          string
 	mode            string
@@ -183,7 +184,7 @@ func (m *ui) Init() tea.Cmd {
 	})
 }
 
-func waitEvent(events <-chan turnEvent) tea.Cmd {
+func waitEvent(events <-chan agent.TurnEvent) tea.Cmd {
 	return func() tea.Msg { return <-events }
 }
 
@@ -210,7 +211,7 @@ func (m *ui) startTurn(prompt string) tea.Cmd {
 	m.layoutWidth = 0
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-	m.events = make(chan turnEvent, 64)
+	m.events = make(chan agent.TurnEvent, 64)
 	m.abandon = make(chan struct{})
 	m.runID++
 	runID := m.runID
@@ -219,9 +220,9 @@ func (m *ui) startTurn(prompt string) tea.Cmd {
 	client, repo, root, mcp := m.client, m.repo, m.root, m.conn.Mcp
 	go func() {
 		defer close(events)
-		runTurn(ctx, client, repo, root, prior, prompt, mcp, func(ev turnEvent) {
-			ev.runID = runID
-			if ev.kind == "done" || ev.kind == "error" || ev.kind == "tool_result" {
+		agent.RunTurn(ctx, client, repo, root, prior, prompt, mcp, func(ev agent.TurnEvent) {
+			ev.RunID = runID
+			if ev.Kind == "done" || ev.Kind == "error" || ev.Kind == "tool_result" {
 				select {
 				case events <- ev:
 				case <-abandon:
@@ -242,7 +243,7 @@ func (m *ui) startTurn(prompt string) tea.Cmd {
 // replaces the summarized turns with the returned brief. It mirrors
 // startTurn's run machinery: cancellable context, an events channel drained
 // by waitEvent, and the shared working state. No text streams into the
-// conversation while it runs; the deliverable is a single turnEvent.
+// conversation while it runs; the deliverable is a single agent.TurnEvent.
 func (m *ui) startCompaction(focus string) tea.Cmd {
 	m.status = "Compacting…"
 	m.working = true
@@ -252,7 +253,7 @@ func (m *ui) startCompaction(focus string) tea.Cmd {
 	m.edit.endCaret(m.input)
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-	m.events = make(chan turnEvent, 64)
+	m.events = make(chan agent.TurnEvent, 64)
 	m.abandon = make(chan struct{})
 	m.runID++
 	runID := m.runID
@@ -261,15 +262,15 @@ func (m *ui) startCompaction(focus string) tea.Cmd {
 	client, history := m.client, m.history
 	go func() {
 		defer close(events)
-		newHistory, summary, err := compactHistory(ctx, client, history, focus, nil)
-		ev := turnEvent{runID: runID}
+		newHistory, summary, err := agent.CompactHistory(ctx, client, history, focus, nil)
+		ev := agent.TurnEvent{RunID: runID}
 		if err != nil {
 			// The failed call never touched the caller's history; carrying
 			// it in the event leaves the error handler's history swap a
 			// no-op.
-			ev.kind, ev.text, ev.history = "error", err.Error(), history
+			ev.Kind, ev.Text, ev.History = "error", err.Error(), history
 		} else {
-			ev.kind, ev.text, ev.history = "compacted", summary, newHistory
+			ev.Kind, ev.Text, ev.History = "compacted", summary, newHistory
 		}
 		select {
 		case events <- ev:
@@ -423,11 +424,11 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateVersion = v.version
 		}
 		return m, nil
-	case turnEvent:
-		if !m.working || v.runID != m.runID {
+	case agent.TurnEvent:
+		if !m.working || v.RunID != m.runID {
 			return m, nil
 		}
-		switch v.kind {
+		switch v.Kind {
 		case "reasoning":
 			// Thinking output from a reasoning model; rendered muted and
 			// closed as soon as the first real content delta arrives. Deltas
@@ -440,7 +441,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.entries = append(m.entries, entry{role: "Reasoning"})
 				m.reasoningStream = len(m.entries) - 1
 			}
-			m.reasoningBuf.WriteString(v.text)
+			m.reasoningBuf.WriteString(v.Text)
 			m.entries[m.reasoningStream].content = m.reasoningBuf.String()
 		case "text":
 			m.reasoningStream = -1 // content after thinking closes the reasoning stream
@@ -448,13 +449,13 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.entries = append(m.entries, entry{role: "Assistant"})
 				m.streaming = len(m.entries) - 1
 			}
-			m.streamBuf.WriteString(v.text)
+			m.streamBuf.WriteString(v.Text)
 			m.entries[m.streaming].content = m.streamBuf.String()
 		case "approval":
 			if m.cancelling {
 				break
 			}
-			m.pending = v.approval
+			m.pending = v.Approval
 			m.scroll = 0 // review starts at the top of the proposal screen
 			m.following = false
 			m.layoutWidth = 0
@@ -464,26 +465,26 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tool_start", "tool_result":
 			m.streamBuf.Reset()
 			m.streaming = -1
-			m.entries = append(m.entries, entry{role: "Tool", content: v.text})
+			m.entries = append(m.entries, entry{role: "Tool", content: v.Text})
 			if m.cancelling {
 				m.status = "Cancelling"
-			} else if v.kind == "tool_start" {
+			} else if v.Kind == "tool_start" {
 				m.status = "Reading repository"
 			} else {
 				m.status = "Waiting for model"
 			}
-			if v.kind == "tool_result" {
+			if v.Kind == "tool_result" {
 				if m.statusLineOpts.Changes || m.statusLineOpts.Staged || providers.FlagEnabled(m.statusLineOpts.Branch) {
 					m.git, m.gitOK = gitStatus(m.root)
 				}
-				m.history = v.history
+				m.history = v.History
 				m.persist()
 			}
 		case "compacted":
 			// The single summarize call finished: swap the summarized turns
 			// for the brief and mark the point in the conversation.
-			m.history = v.history
-			m.entries = append(m.entries, entry{role: "Lisa", content: "Conversation compacted. Summary of earlier turns:\n\n" + v.text})
+			m.history = v.History
+			m.entries = append(m.entries, entry{role: "Lisa", content: "Conversation compacted. Summary of earlier turns:\n\n" + v.Text})
 			m.status = "Ready"
 			m.working = false
 			if m.cancel != nil {
@@ -495,18 +496,18 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "done", "error":
 			m.pending = nil
-			m.history = v.history
+			m.history = v.History
 			m.working = false
 			if m.cancel != nil {
 				m.cancel()
 			}
 			m.cancel = nil
-			if m.streaming >= 0 && v.kind == "error" {
+			if m.streaming >= 0 && v.Kind == "error" {
 				m.entries = append(m.entries[:m.streaming], m.entries[m.streaming+1:]...)
 			}
 			m.streaming = -1
 			if m.cancelling {
-				for _, message := range v.history {
+				for _, message := range v.History {
 					if message.Role == "tool" && message.Content == "Error: action not executed; run interrupted" {
 						m.entries = append(m.entries, entry{role: "Tool", content: message.Content})
 					}
@@ -515,13 +516,13 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cancelling {
 				m.status = "Cancelled"
 				m.entries = append(m.entries, entry{role: "Lisa", content: "Run cancelled; no further tools will execute. Approved shell commands may leave detached processes running."})
-			} else if v.kind == "error" {
+			} else if v.Kind == "error" {
 				m.status = "Error"
-				m.entries = append(m.entries, entry{role: "Error", content: v.text})
+				m.entries = append(m.entries, entry{role: "Error", content: v.Text})
 			} else {
 				m.status = "Ready"
 			}
-			if v.kind == "done" && m.client != nil {
+			if v.Kind == "done" && m.client != nil {
 				// Provider-reported usage of the just-finished response;
 				// absent usage keeps the ctx/tokens segments at their fallback.
 				if usage, ok := m.client.LastTokenUsage(); ok {
@@ -544,7 +545,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancelling = false
 			m.persist()
 			m.refreshStatusSessionTitle()
-			if cmd := m.autoNameAfterFirstTurn(v.kind); cmd != nil {
+			if cmd := m.autoNameAfterFirstTurn(v.Kind); cmd != nil {
 				m.layoutWidth = 0
 				return m, cmd
 			}
@@ -917,7 +918,7 @@ func (m *ui) editable() bool {
 // Returns the background command for a freshly started mention index walk.
 func (m *ui) syncPopups() tea.Cmd {
 	if !m.working && m.repo != nil {
-		if _, active := mentionQuery(string(m.input)); active {
+		if _, active := agent.MentionQuery(string(m.input)); active {
 			m.commandPopup.open = false // the popups never coexist
 			if cmd := m.startMention(); cmd != nil {
 				return cmd
@@ -971,7 +972,7 @@ func (m *ui) autoNameAfterFirstTurn(kind string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		name, err := generateSessionName(ctx, client, history)
+		name, err := agent.GenerateSessionName(ctx, client, history)
 		return nameGeneratedMsg{name: name, err: err}
 	}
 }

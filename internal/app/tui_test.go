@@ -18,6 +18,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+	"lisa/internal/agent"
 	"lisa/internal/model"
 	"lisa/internal/providers"
 	"lisa/internal/repository"
@@ -98,7 +99,7 @@ func TestSetupFlowPicksProviderKeyAndModel(t *testing.T) {
 		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
 	if strings.Contains(m.View(), "sk-test-123") {
-		t.Fatalf("API key rendered in clear text: %q", m.View())
+		t.Fatalf("API key rendered in clear Text: %q", m.View())
 	}
 	if !strings.Contains(m.View(), "••••") {
 		t.Fatalf("masked key not displayed: %q", m.View())
@@ -256,7 +257,7 @@ func TestSlashCommandsDispatchWithoutModel(t *testing.T) {
 		t.Fatalf("escaped prompt = %+v", m.history)
 	}
 	// Drain: close events by ending the turn.
-	m.Update(turnEvent{runID: m.runID, kind: "done", history: m.history})
+	m.Update(agent.TurnEvent{RunID: m.runID, Kind: "done", History: m.history})
 	if m.working {
 		t.Fatal("turn did not complete")
 	}
@@ -339,7 +340,7 @@ func TestModelSwitchCommandUsesListingAndLiveClient(t *testing.T) {
 	if sawModel != "alpha" {
 		t.Fatalf("request model = %q, want alpha", sawModel)
 	}
-	m.Update(turnEvent{runID: m.runID, kind: "done", history: m.history})
+	m.Update(agent.TurnEvent{RunID: m.runID, Kind: "done", History: m.history})
 }
 
 func TestSessionsCommandListsAndResumesInPlace(t *testing.T) {
@@ -420,8 +421,8 @@ func TestReasoningStreamsMutedAndClosesOnContent(t *testing.T) {
 		t.Fatal("turn did not start")
 	}
 	// Reasoning deltas arrive first, rendered as a Reasoning entry.
-	m.Update(turnEvent{runID: m.runID, kind: "reasoning", text: "pondering the question "})
-	m.Update(turnEvent{runID: m.runID, kind: "reasoning", text: "carefully"})
+	m.Update(agent.TurnEvent{RunID: m.runID, Kind: "reasoning", Text: "pondering the question "})
+	m.Update(agent.TurnEvent{RunID: m.runID, Kind: "reasoning", Text: "carefully"})
 	found := false
 	for _, e := range m.entries {
 		if e.role == "Reasoning" && strings.Contains(e.content, "pondering the question carefully") {
@@ -433,8 +434,8 @@ func TestReasoningStreamsMutedAndClosesOnContent(t *testing.T) {
 	}
 	// Content closes the reasoning stream; further reasoning deltas do not
 	// reopen or append to it after the answer started.
-	m.Update(turnEvent{runID: m.runID, kind: "text", text: "Answer: 42."})
-	m.Update(turnEvent{runID: m.runID, kind: "reasoning", text: "late thought"})
+	m.Update(agent.TurnEvent{RunID: m.runID, Kind: "text", Text: "Answer: 42."})
+	m.Update(agent.TurnEvent{RunID: m.runID, Kind: "reasoning", Text: "late thought"})
 	for _, e := range m.entries {
 		if e.role == "Reasoning" && strings.Contains(e.content, "late thought") {
 			t.Fatalf("reasoning leaked into the answer: %+v", m.entries)
@@ -450,7 +451,7 @@ func TestReasoningStreamsMutedAndClosesOnContent(t *testing.T) {
 		t.Fatalf("assistant content = %q", assistant)
 	}
 	// The muted role renders (LineStyles aligned; Muted style present).
-	m.Update(turnEvent{runID: m.runID, kind: "done", history: []model.Message{{Role: "user", Content: "think and answer"}, {Role: "assistant", Content: "Answer: 42.", Reasoning: "pondering the question carefully"}}})
+	m.Update(agent.TurnEvent{RunID: m.runID, Kind: "done", History: []model.Message{{Role: "user", Content: "think and answer"}, {Role: "assistant", Content: "Answer: 42.", Reasoning: "pondering the question carefully"}}})
 	if m.working {
 		t.Fatal("turn did not complete")
 	}
@@ -531,12 +532,12 @@ func TestUICancellationDrainsCompletedResultBeforeEnding(t *testing.T) {
 	m.working, m.runID = true, 1
 	cancelled := false
 	m.cancel = func() { cancelled = true }
-	m.events = make(chan turnEvent, 2)
+	m.events = make(chan agent.TurnEvent, 2)
 	m.entries = append(m.entries, entry{role: "You", content: "check"})
 	m.history = []model.Message{{Role: "user", Content: "check"}}
 	completed := []model.Message{{Role: "user", Content: "check"}, {Role: "assistant", ToolCalls: []model.ToolCall{{ID: "one"}}}, {Role: "tool", ToolCallID: "one", Content: "Exit status: 0"}}
-	m.events <- turnEvent{runID: 1, kind: "tool_result", text: "run_command: Exit status: 0", history: completed}
-	m.events <- turnEvent{runID: 1, kind: "error", text: "context canceled", history: completed}
+	m.events <- agent.TurnEvent{RunID: 1, Kind: "tool_result", Text: "run_command: Exit status: 0", History: completed}
+	m.events <- agent.TurnEvent{RunID: 1, Kind: "error", Text: "context canceled", History: completed}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if !cancelled || !m.working || !m.cancelling {
 		t.Fatal("cancellation did not enter the draining state")
@@ -558,7 +559,7 @@ func TestUICancellationDrainsCompletedResultBeforeEnding(t *testing.T) {
 	}
 	m.working, m.runID = true, 2
 	before := len(m.entries)
-	m.Update(turnEvent{runID: 1, kind: "tool_result", text: "obsolete result"})
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "tool_result", Text: "obsolete result"})
 	if len(m.entries) != before {
 		t.Fatal("event from a cancelled run changed a later run")
 	}
@@ -637,14 +638,14 @@ func TestUICancelPendingApprovalDoesNotRecordCompletion(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.working, m.runID = true, 1
 	m.cancel = func() {}
-	m.events = make(chan turnEvent, 1)
+	m.events = make(chan agent.TurnEvent, 1)
 	m.history = []model.Message{{Role: "user", Content: "check"}}
 	m.entries = []entry{{role: "You", content: "check"}}
-	pending := &approvalRequest{Kind: "command", Title: "Shell command", Body: "touch marker", Reply: make(chan bool, 1)}
-	m.Update(turnEvent{runID: 1, kind: "approval", approval: pending})
+	pending := &agent.ApprovalRequest{Kind: "command", Title: "Shell command", Body: "touch marker", Reply: make(chan bool, 1)}
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "approval", Approval: pending})
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	history := []model.Message{{Role: "user", Content: "check"}, {Role: "assistant", ToolCalls: []model.ToolCall{{ID: "one"}}}, {Role: "tool", ToolCallID: "one", Content: "Error: action not executed; run interrupted"}}
-	m.Update(turnEvent{runID: 1, kind: "error", history: history})
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "error", History: history})
 	if m.pending != nil || len(pending.Reply) != 0 || m.working || !strings.Contains(m.entries[len(m.entries)-2].content, "not executed") || m.history[2].Content != history[2].Content {
 		t.Fatalf("cancelled approval incorrectly reconciled: history=%+v entries=%+v", m.history, m.entries)
 	}
@@ -673,8 +674,8 @@ func TestUIRequiresFullDiffReviewBeforeApproval(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
 	m.working, m.runID = true, 1
 	m.cancel = func() {}
-	request := &approvalRequest{Kind: "edit", Title: "Edit: work.txt", Body: strings.Repeat("-old\n+new\n", 40), Reply: make(chan bool, 1)}
-	m.Update(turnEvent{runID: 1, kind: "approval", approval: request})
+	request := &agent.ApprovalRequest{Kind: "edit", Title: "Edit: work.txt", Body: strings.Repeat("-old\n+new\n", 40), Reply: make(chan bool, 1)}
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "approval", Approval: request})
 	if m.pageCount() < 2 || !strings.Contains(m.View(), "Edit: work.txt") {
 		t.Fatal("multi-page diff review not displayed")
 	}
@@ -694,8 +695,8 @@ func TestUIRejectsCommandWithoutReviewingAllPages(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
 	m.working, m.runID = true, 1
 	m.cancel = func() {}
-	request := &approvalRequest{Kind: "command", Title: "Shell command", Body: strings.Repeat("dangerous command\n", 50), Reply: make(chan bool, 1)}
-	m.Update(turnEvent{runID: 1, kind: "approval", approval: request})
+	request := &agent.ApprovalRequest{Kind: "command", Title: "Shell command", Body: strings.Repeat("dangerous command\n", 50), Reply: make(chan bool, 1)}
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "approval", Approval: request})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	if m.pending != nil || <-request.Reply {
 		t.Fatal("command rejection was not honored immediately")
@@ -710,7 +711,7 @@ func TestUIReviewKeepsDecisionsAndPositionVisibleAtTerminalSizes(t *testing.T) {
 				m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 				m.working, m.runID = true, 1
 				m.cancel = func() {}
-				request := &approvalRequest{Kind: kind, Reply: make(chan bool, 1)}
+				request := &agent.ApprovalRequest{Kind: kind, Reply: make(chan bool, 1)}
 				if kind == "edit" {
 					request.Title = "Edit: work.txt"
 					request.Body = "--- a/work.txt\n+++ b/work.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n" + strings.Repeat("-older\n+newer\n", 30) + "END OF DIFF"
@@ -718,7 +719,7 @@ func TestUIReviewKeepsDecisionsAndPositionVisibleAtTerminalSizes(t *testing.T) {
 					request.Title = "Shell command"
 					request.Body = "Working directory: /sample\nCommand:\nprintf reviewed\n\n" + strings.Repeat("argument line\n", 30) + "Approved commands can access files outside this repository and use the network."
 				}
-				m.Update(turnEvent{runID: 1, kind: "approval", approval: request})
+				m.Update(agent.TurnEvent{RunID: 1, Kind: "approval", Approval: request})
 				if m.pageCount() < 2 {
 					t.Fatal("review should span several pages")
 				}
@@ -790,8 +791,8 @@ func TestUIResizeRequiresReviewingTheNewPageLayout(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.working, m.runID = true, 1
 	m.cancel = func() {}
-	request := &approvalRequest{Kind: "edit", Title: "Edit: work.txt", Body: strings.Repeat("-old\n+new\n", 36), Reply: make(chan bool, 1)}
-	m.Update(turnEvent{runID: 1, kind: "approval", approval: request})
+	request := &agent.ApprovalRequest{Kind: "edit", Title: "Edit: work.txt", Body: strings.Repeat("-old\n+new\n", 36), Reply: make(chan bool, 1)}
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "approval", Approval: request})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnd})
 	m.Update(tea.WindowSizeMsg{Width: 39, Height: 11})
 	assertViewport(t, m.View(), 39, 11)
@@ -1177,8 +1178,8 @@ func TestToolResultRefreshesGitCountsWhenEnabled(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.working, m.runID = true, 1
 	m.cancel = func() {}
-	m.events = make(chan turnEvent, 1)
-	m.Update(turnEvent{runID: 1, kind: "tool_result", text: "listed", history: nil})
+	m.events = make(chan agent.TurnEvent, 1)
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "tool_result", Text: "listed", History: nil})
 	if !m.gitOK || m.git.Dirty != 1 || m.git.Staged != 1 {
 		t.Fatalf("git counts not refreshed: git=%+v ok=%t", m.git, m.gitOK)
 	}
@@ -1374,10 +1375,10 @@ func TestCompactRefusalsChangeNothing(t *testing.T) {
 
 	// A pending review is resolved before compacting.
 	m.working, m.runID = true, 1
-	m.events = make(chan turnEvent, 1)
+	m.events = make(chan agent.TurnEvent, 1)
 	m.cancel = func() {}
 	m.history = []model.Message{{Role: "user", Content: "check"}}
-	m.pending = &approvalRequest{Kind: "command", Title: "Shell command", Body: "touch marker", Reply: make(chan bool, 1)}
+	m.pending = &agent.ApprovalRequest{Kind: "command", Title: "Shell command", Body: "touch marker", Reply: make(chan bool, 1)}
 	m.handleCommand("/compact")
 	last = m.entries[len(m.entries)-1]
 	// The refusal entry appears; the running turn (and its working state)
@@ -1524,14 +1525,14 @@ func TestCompactFailureKeepsHistoryAndRetries(t *testing.T) {
 		t.Fatalf("failure not surfaced: working=%t last=%+v", m.working, last)
 	}
 	if !historyEqual(m.history, original) {
-		t.Fatalf("failed compaction changed history: %+v", m.history)
+		t.Fatalf("failed compaction changed History: %+v", m.history)
 	}
 	saved, err := store.Load(snapshot.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !historyEqual(saved.History, original) {
-		t.Fatalf("failed compaction persisted a changed history: %+v", saved.History)
+		t.Fatalf("failed compaction persisted a changed History: %+v", saved.History)
 	}
 
 	// Retry succeeds and compacts normally.
@@ -1571,7 +1572,7 @@ func TestCompactEscCancelsWithoutTouchingHistory(t *testing.T) {
 		t.Fatalf("cancellation did not clear the working state: working=%t cancel=%v", m.working, m.cancel)
 	}
 	if !historyEqual(m.history, original) {
-		t.Fatalf("cancelled compaction changed history: %+v", m.history)
+		t.Fatalf("cancelled compaction changed History: %+v", m.history)
 	}
 	cancelled := false
 	for _, e := range m.entries {
@@ -1697,8 +1698,8 @@ func TestPendingReviewNeverOverflowsTheViewport(t *testing.T) {
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
 		m.working, m.runID = true, 1
 		m.cancel = func() {}
-		request := &approvalRequest{Kind: "edit", Title: "Edit: work.txt", Body: strings.Repeat(strings.Repeat("d", 300)+"\n", 40), Reply: make(chan bool, 1)}
-		m.Update(turnEvent{runID: 1, kind: "approval", approval: request})
+		request := &agent.ApprovalRequest{Kind: "edit", Title: "Edit: work.txt", Body: strings.Repeat(strings.Repeat("d", 300)+"\n", 40), Reply: make(chan bool, 1)}
+		m.Update(agent.TurnEvent{RunID: 1, Kind: "approval", Approval: request})
 		if m.pageCount() < 2 {
 			t.Fatalf("%d columns: 300-char diff lines did not paginate", width)
 		}

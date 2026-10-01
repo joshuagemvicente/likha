@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -15,4 +17,15 @@ func forceANSI(t *testing.T) {
 	previous := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.ANSI)
 	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
+}
+
+// serveModels answers the connection-check path used by client.EnsureConnected.
+func serveModels(t *testing.T, w http.ResponseWriter, r *http.Request) bool {
+	t.Helper()
+	if r.URL.Path != "/v1/models" {
+		return false
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprint(w, `{"object":"list","data":[]}`)
+	return true
 }

@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"lisa/internal/agent"
 	"lisa/internal/model"
 	"lisa/internal/providers"
 	"lisa/internal/session"
@@ -28,7 +29,7 @@ func TestConversationPersistsAndResumesWithContext(t *testing.T) {
 	m.cancel = func() {}
 	m.entries = append(m.entries, entry{role: "You", content: "What changed?"}, entry{role: "Assistant", content: "The file was updated."})
 	history := []model.Message{{Role: "user", Content: "What changed?"}, {Role: "assistant", Content: "The file was updated."}}
-	m.Update(turnEvent{runID: 1, kind: "done", history: history})
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "done", History: history})
 
 	saved, err := store.Load(snapshot.ID)
 	if err != nil {
@@ -57,8 +58,8 @@ func TestInterruptedApprovalDoesNotResumeAsPermission(t *testing.T) {
 	m.persist()
 	m.working, m.runID = true, 1
 	m.cancel = func() {}
-	pending := &approvalRequest{Kind: "command", Title: "Shell command", Body: "Working directory: " + root + "\nCommand: touch marker", Reply: make(chan bool, 1)}
-	m.Update(turnEvent{runID: 1, kind: "approval", approval: pending})
+	pending := &agent.ApprovalRequest{Kind: "command", Title: "Shell command", Body: "Working directory: " + root + "\nCommand: touch marker", Reply: make(chan bool, 1)}
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "approval", Approval: pending})
 	if m.pending == nil {
 		t.Fatal("approval did not appear")
 	}

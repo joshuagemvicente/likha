@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"lisa/internal/agent"
 	"lisa/internal/providers"
 	"lisa/internal/session"
 )
@@ -95,9 +96,9 @@ func TestComposerReviewFooterAndPageGate(t *testing.T) {
 	for _, size := range [][2]int{{100, 24}, {40, 12}} {
 		m := composerTestUI(t, "bordered", size[0], size[1])
 		m.working, m.runID = true, 1
-		m.events = make(chan turnEvent, 1)
-		request := &approvalRequest{Kind: "command", Title: "Shell command", Body: strings.Repeat("command argument\n", 45), Reply: make(chan bool, 1)}
-		m.Update(turnEvent{runID: 1, kind: "approval", approval: request})
+		m.events = make(chan agent.TurnEvent, 1)
+		request := &agent.ApprovalRequest{Kind: "command", Title: "Shell command", Body: strings.Repeat("command argument\n", 45), Reply: make(chan bool, 1)}
+		m.Update(agent.TurnEvent{RunID: 1, Kind: "approval", Approval: request})
 		if m.pageCount() < 2 {
 			t.Fatal("expected multiple review pages")
 		}
@@ -167,7 +168,7 @@ func TestComposerChooserFiltersCancelsAndPersists(t *testing.T) {
 		t.Fatal("composer chooser opened while a turn was running")
 	}
 	reopened.working = false
-	reopened.pending = &approvalRequest{Kind: "edit"}
+	reopened.pending = &agent.ApprovalRequest{Kind: "edit"}
 	reopened.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	if reopened.dialog.open {
 		t.Fatal("composer chooser opened during review")

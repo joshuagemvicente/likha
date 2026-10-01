@@ -370,7 +370,7 @@ func TestDialogRenderNoEscapedSequences(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	view := m.View()
 	if strings.Contains(view, `\u001B`) || strings.Contains(view, `\u001b`) {
-		t.Fatalf("escape sequences rendered as literal text: %q", view)
+		t.Fatalf("escape sequences rendered as literal Text: %q", view)
 	}
 	if !strings.Contains(view, "> default (current)") {
 		t.Fatalf("cursor row not rendered cleanly: %q", view)

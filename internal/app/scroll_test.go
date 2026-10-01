@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"lisa/internal/agent"
 	"lisa/internal/providers"
 	"lisa/internal/session"
 )
@@ -42,8 +43,8 @@ func TestCaretBlinksSolidWhileTyping(t *testing.T) {
 	m.working = false
 
 	// While an approval is pending the caret hides as well.
-	request := &approvalRequest{Kind: "command", Title: "c", Body: "b", Reply: make(chan bool, 1)}
-	m.Update(turnEvent{runID: 1, kind: "approval", approval: request})
+	request := &agent.ApprovalRequest{Kind: "command", Title: "c", Body: "b", Reply: make(chan bool, 1)}
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "approval", Approval: request})
 	if m.pending != nil && m.caretVisible() {
 		t.Fatal("caret rendered during a pending review")
 	}

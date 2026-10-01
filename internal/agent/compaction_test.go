@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"context"
@@ -125,7 +125,7 @@ func TestCompactHistorySuccess(t *testing.T) {
 	before := append([]model.Message(nil), history...)
 
 	var streamed []string
-	replacement, summary, err := compactHistory(context.Background(), client, history, "focus text", func(s string) {
+	replacement, summary, err := CompactHistory(context.Background(), client, history, "focus text", func(s string) {
 		streamed = append(streamed, s)
 	})
 	if err != nil {
@@ -162,7 +162,7 @@ func TestCompactHistoryNoFocus(t *testing.T) {
 		instruction = req.Messages[len(req.Messages)-1].Content
 		compactFixture(t, `{"choices":[{"delta":{"content":"`+streamedSummary+`"}}]}`, `[DONE]`)(w, r)
 	})
-	_, _, err := compactHistory(context.Background(), client, sampleHistory(), "   ", nil)
+	_, _, err := CompactHistory(context.Background(), client, sampleHistory(), "   ", nil)
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
@@ -172,16 +172,16 @@ func TestCompactHistoryNoFocus(t *testing.T) {
 }
 
 func TestCompactHistoryNilClientAndEmptyHistory(t *testing.T) {
-	if _, _, err := compactHistory(context.Background(), nil, sampleHistory(), "", nil); err == nil {
+	if _, _, err := CompactHistory(context.Background(), nil, sampleHistory(), "", nil); err == nil {
 		t.Error("nil client: want error")
 	}
-	if _, _, err := compactHistory(context.Background(), nil, nil, "", nil); err == nil {
-		t.Error("nil client and empty history: want error")
+	if _, _, err := CompactHistory(context.Background(), nil, nil, "", nil); err == nil {
+		t.Error("nil client and empty History: want error")
 	}
 	client := compactTestClient(t, func(http.ResponseWriter, *http.Request) {
 		t.Error("empty history must not reach the model")
 	})
-	if _, _, err := compactHistory(context.Background(), client, nil, "", nil); err == nil || err.Error() != "nothing to compact" {
+	if _, _, err := CompactHistory(context.Background(), client, nil, "", nil); err == nil || err.Error() != "nothing to compact" {
 		t.Errorf("empty history err = %v, want 'nothing to compact'", err)
 	}
 }
@@ -206,7 +206,7 @@ func TestCompactHistoryStreamErrors(t *testing.T) {
 			client := compactTestClient(t, tc.handler)
 			history := sampleHistory()
 			before := append([]model.Message(nil), history...)
-			_, _, err := compactHistory(context.Background(), client, history, "", nil)
+			_, _, err := CompactHistory(context.Background(), client, history, "", nil)
 			switch tc.name {
 			case "non-2xx":
 				if err == nil || !strings.Contains(err.Error(), "502") {
@@ -243,7 +243,7 @@ func TestCompactHistoryContextCancelled(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := compactHistory(ctx, client, sampleHistory(), "", nil); err == nil {
+	if _, _, err := CompactHistory(ctx, client, sampleHistory(), "", nil); err == nil {
 		t.Fatal("cancelled context: want error")
 	} else if !strings.Contains(err.Error(), "canceled") && !strings.Contains(err.Error(), "context cancel") {
 		t.Errorf("err = %v, want a context cancellation error", err)
@@ -272,7 +272,7 @@ func TestCompactHistoryAlreadyCompacted(t *testing.T) {
 		messages = req.Messages
 		compactFixture(t, `{"choices":[{"delta":{"content":"`+streamedSummary+`"}}]}`, `[DONE]`)(w, r)
 	})
-	replacement, _, err := compactHistory(context.Background(), client, prior, "", nil)
+	replacement, _, err := CompactHistory(context.Background(), client, prior, "", nil)
 	if err != nil {
 		t.Fatalf("second compact: %v", err)
 	}

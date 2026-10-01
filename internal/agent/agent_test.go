@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"context"
@@ -73,25 +73,25 @@ func TestAgentReadsFileAndReportsResultToModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var events []turnEvent
-	runTurn(context.Background(), client, repo, root, nil, "Find the answer", nil, func(ev turnEvent) { events = append(events, ev) })
+	var events []TurnEvent
+	RunTurn(context.Background(), client, repo, root, nil, "Find the answer", nil, func(ev TurnEvent) { events = append(events, ev) })
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("model requests = %d, want 2", got)
 	}
 	var text, tools string
 	for _, ev := range events {
-		if ev.kind == "error" {
-			t.Fatalf("agent error: %s", ev.text)
+		if ev.Kind == "error" {
+			t.Fatalf("agent error: %s", ev.Text)
 		}
-		if ev.kind == "text" {
-			text += ev.text
+		if ev.Kind == "text" {
+			text += ev.Text
 		}
-		if ev.kind == "tool_result" {
-			tools += ev.text
+		if ev.Kind == "tool_result" {
+			tools += ev.Text
 		}
 	}
-	if text != "The answer is 42." || !strings.Contains(tools, "the answer is 42") || events[len(events)-1].kind != "done" {
-		t.Fatalf("text = %q, tools = %q, last event = %q", text, tools, events[len(events)-1].kind)
+	if text != "The answer is 42." || !strings.Contains(tools, "the answer is 42") || events[len(events)-1].Kind != "done" {
+		t.Fatalf("text = %q, tools = %q, last event = %q", text, tools, events[len(events)-1].Kind)
 	}
 }
 
@@ -137,9 +137,9 @@ func TestAgentReportsRejectedReadWithoutLeakingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var events []turnEvent
-	runTurn(context.Background(), client, repo, root, nil, "Read outside", nil, func(ev turnEvent) { events = append(events, ev) })
-	if calls.Load() != 2 || events[len(events)-1].kind != "done" {
+	var events []TurnEvent
+	RunTurn(context.Background(), client, repo, root, nil, "Read outside", nil, func(ev TurnEvent) { events = append(events, ev) })
+	if calls.Load() != 2 || events[len(events)-1].Kind != "done" {
 		t.Fatalf("agent did not recover from rejected read: %+v", events)
 	}
 }
@@ -152,8 +152,8 @@ func TestRunCommandRejectsHiddenReviewCharactersBeforeApproval(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = dispatchTool(context.Background(), nil, t.TempDir(), model.ToolCall{Name: "run_command", Arguments: string(args)}, nil, func(ev turnEvent) {
-				if ev.kind == "approval" {
+			_, err = dispatchTool(context.Background(), nil, t.TempDir(), model.ToolCall{Name: "run_command", Arguments: string(args)}, nil, func(ev TurnEvent) {
+				if ev.Kind == "approval" {
 					approvals++
 				}
 			})
@@ -186,16 +186,16 @@ func TestCancelledPendingCommandDoesNotExecuteOrRecordCompletion(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var terminal turnEvent
-	runTurn(ctx, client, repo, root, nil, "do it", nil, func(ev turnEvent) {
-		if ev.kind == "approval" {
+	var terminal TurnEvent
+	RunTurn(ctx, client, repo, root, nil, "do it", nil, func(ev TurnEvent) {
+		if ev.Kind == "approval" {
 			cancel()
 		}
-		if ev.kind == "error" || ev.kind == "done" {
+		if ev.Kind == "error" || ev.Kind == "done" {
 			terminal = ev
 		}
 	})
-	if terminal.kind != "error" || calls.Load() != 1 || len(terminal.history) != 3 || terminal.history[2].Content != "Error: action not executed; run interrupted" {
+	if terminal.Kind != "error" || calls.Load() != 1 || len(terminal.History) != 3 || terminal.History[2].Content != "Error: action not executed; run interrupted" {
 		t.Fatalf("cancelled approval recorded incorrect outcome: event=%+v requests=%d", terminal, calls.Load())
 	}
 	if _, err := os.Stat(filepath.Join(root, "marker")); !os.IsNotExist(err) {
@@ -228,20 +228,20 @@ func TestCancelledAfterCompletedToolStillReportsOutcome(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var result, terminal turnEvent
-	runTurn(ctx, client, repo, root, nil, "edit", nil, func(ev turnEvent) {
-		if ev.kind == "approval" {
-			ev.approval.Reply <- true
+	var result, terminal TurnEvent
+	RunTurn(ctx, client, repo, root, nil, "edit", nil, func(ev TurnEvent) {
+		if ev.Kind == "approval" {
+			ev.Approval.Reply <- true
 		}
-		if ev.kind == "tool_result" {
+		if ev.Kind == "tool_result" {
 			result = ev
 			cancel()
 		}
-		if ev.kind == "error" || ev.kind == "done" {
+		if ev.Kind == "error" || ev.Kind == "done" {
 			terminal = ev
 		}
 	})
-	if result.kind != "tool_result" || result.history[2].Content != "Applied edit to ready.txt" || terminal.kind != "error" || terminal.history[2].Content != result.history[2].Content || calls.Load() != 1 {
+	if result.Kind != "tool_result" || result.History[2].Content != "Applied edit to ready.txt" || terminal.Kind != "error" || terminal.History[2].Content != result.History[2].Content || calls.Load() != 1 {
 		t.Fatalf("completed action lost on cancellation: result=%+v terminal=%+v calls=%d", result, terminal, calls.Load())
 	}
 	data, err := os.ReadFile(filepath.Join(root, "ready.txt"))

@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 
 // An actual model-protocol tool request enters the agent loop; approval is
 // given or denied only after the test observes the proposed action on disk.
-func runApprovalScenario(t *testing.T, root, name, arguments string, decide func(*approvalRequest)) string {
+func runApprovalScenario(t *testing.T, root, name, arguments string, decide func(*ApprovalRequest)) string {
 	t.Helper()
 	var calls atomic.Int32
 	var outcome string
@@ -60,14 +60,14 @@ func runApprovalScenario(t *testing.T, root, name, arguments string, decide func
 	if err != nil {
 		t.Fatal(err)
 	}
-	var events []turnEvent
-	runTurn(context.Background(), client, repo, root, nil, "make a change", nil, func(ev turnEvent) {
+	var events []TurnEvent
+	RunTurn(context.Background(), client, repo, root, nil, "make a change", nil, func(ev TurnEvent) {
 		events = append(events, ev)
-		if ev.kind == "approval" {
-			decide(ev.approval)
+		if ev.Kind == "approval" {
+			decide(ev.Approval)
 		}
 	})
-	if calls.Load() != 2 || len(events) == 0 || events[len(events)-1].kind != "done" {
+	if calls.Load() != 2 || len(events) == 0 || events[len(events)-1].Kind != "done" {
 		t.Fatalf("conversation did not complete: calls = %d, events = %+v", calls.Load(), events)
 	}
 	return outcome
@@ -80,13 +80,13 @@ func TestAgentEditRequiresApprovalAndReportsRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := `{"path":"work.txt","content":"after\n"}`
-	outcome := runApprovalScenario(t, root, "edit_file", args, func(request *approvalRequest) {
+	outcome := runApprovalScenario(t, root, "edit_file", args, func(request *ApprovalRequest) {
 		if request.Kind != "edit" || !strings.Contains(request.Body, "after") {
 			t.Fatalf("diff missing proposed edit: %+v", request)
 		}
 		content, err := os.ReadFile(path)
 		if err != nil || string(content) != "before\n" {
-			t.Fatalf("edit applied before approval: %q, %v", content, err)
+			t.Fatalf("edit applied before Approval: %q, %v", content, err)
 		}
 		request.Reply <- false
 	})
@@ -102,7 +102,7 @@ func TestAgentApprovedEditAppliesExactlyReviewedChange(t *testing.T) {
 	if err := os.WriteFile(path, []byte("before\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	outcome := runApprovalScenario(t, root, "edit_file", `{"path":"work.txt","content":"after\n"}`, func(request *approvalRequest) {
+	outcome := runApprovalScenario(t, root, "edit_file", `{"path":"work.txt","content":"after\n"}`, func(request *ApprovalRequest) {
 		if !strings.Contains(request.Body, "-before") || !strings.Contains(request.Body, "+after") {
 			t.Fatalf("review missing changed lines: %q", request.Body)
 		}
@@ -118,7 +118,7 @@ func TestAgentCommandRequiresApprovalAndReportsExit(t *testing.T) {
 	root := t.TempDir()
 	marker := filepath.Join(root, "ran.txt")
 	for _, approved := range []bool{false, true} {
-		outcome := runApprovalScenario(t, root, "run_command", `{"command":"printf executed > ran.txt"}`, func(request *approvalRequest) {
+		outcome := runApprovalScenario(t, root, "run_command", `{"command":"printf executed > ran.txt"}`, func(request *ApprovalRequest) {
 			if request.Kind != "command" || !strings.Contains(request.Body, root) || !strings.Contains(request.Body, "printf executed > ran.txt") {
 				t.Fatalf("command or cwd missing from review: %+v", request)
 			}

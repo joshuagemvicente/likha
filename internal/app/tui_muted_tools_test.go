@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"lisa/internal/agent"
 	"lisa/internal/providers"
 	"lisa/internal/session"
 	lisaui "lisa/internal/ui"
@@ -31,8 +32,8 @@ func TestToolEntriesRenderMutedLikeReasoning(t *testing.T) {
 	// m.working && matching runID, and the test drives events, not streams.
 	m.working = true
 	m.runID++
-	m.Update(turnEvent{runID: m.runID, kind: "tool_start", text: "reading internal/app/tui.go"})
-	m.Update(turnEvent{runID: m.runID, kind: "tool_result", text: "read 120 lines"})
+	m.Update(agent.TurnEvent{RunID: m.runID, Kind: "tool_start", Text: "reading internal/app/tui.go"})
+	m.Update(agent.TurnEvent{RunID: m.runID, Kind: "tool_result", Text: "read 120 lines"})
 
 	toolIdx := -1
 	for i, e := range m.entries {
@@ -66,7 +67,7 @@ func TestToolEntriesRenderMutedLikeReasoning(t *testing.T) {
 		t.Fatalf("no Tool line laid out: %v", m.lines)
 	}
 	// Reasoning stays muted too, and plain roles stay plain.
-	m.Update(turnEvent{runID: m.runID, kind: "reasoning", text: "thinking"})
+	m.Update(agent.TurnEvent{RunID: m.runID, Kind: "reasoning", Text: "thinking"})
 	m.rebuild()
 	for i, line := range m.lines {
 		style := m.lineStyles[i]

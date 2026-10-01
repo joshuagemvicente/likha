@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"context"
@@ -59,7 +59,7 @@ func TestGenerateSessionNameSuccess(t *testing.T) {
 	history := sampleHistory()
 	before := append([]model.Message(nil), history...)
 
-	name, err := generateSessionName(context.Background(), client, history)
+	name, err := GenerateSessionName(context.Background(), client, history)
 	if err != nil {
 		t.Fatalf("generateSessionName: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestGenerateSessionNameSanitize(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			client := nameTestClient(t, nameFixture(t, nameBody(tc.raw), `[DONE]`))
-			got, err := generateSessionName(context.Background(), client, sampleHistory())
+			got, err := GenerateSessionName(context.Background(), client, sampleHistory())
 			if err != nil {
 				t.Fatalf("generateSessionName: %v", err)
 			}
@@ -155,7 +155,7 @@ func TestGenerateSessionNameSanitizeRejections(t *testing.T) {
 				nameFixture(t, nameBody(tc.raw), `[DONE]`)(w, r)
 			})
 			before := append([]model.Message(nil), hist...)
-			_, err := generateSessionName(context.Background(), client, hist)
+			_, err := GenerateSessionName(context.Background(), client, hist)
 			if err == nil {
 				t.Fatalf("raw output %q: want error", tc.raw)
 			}
@@ -169,13 +169,13 @@ func TestGenerateSessionNameSanitizeRejections(t *testing.T) {
 func TestGenerateSessionNameValidationErrors(t *testing.T) {
 	hist := []model.Message{{Role: "user", Content: "fix the parser bug"}}
 
-	if name, err := generateSessionName(context.Background(), nil, sampleHistory()); err == nil {
+	if name, err := GenerateSessionName(context.Background(), nil, sampleHistory()); err == nil {
 		t.Fatalf("nil client: want error, got name %q", name)
 	}
-	if name, err := generateSessionName(context.Background(), nil, nil); err == nil {
-		t.Fatalf("nil client and empty history: want error, got name %q", name)
+	if name, err := GenerateSessionName(context.Background(), nil, nil); err == nil {
+		t.Fatalf("nil client and empty History: want error, got name %q", name)
 	}
-	if name, err := generateSessionName(context.Background(), nil, hist); err == nil {
+	if name, err := GenerateSessionName(context.Background(), nil, hist); err == nil {
 		t.Fatalf("history without an assistant message: want error, got name %q", name)
 	}
 }
@@ -213,7 +213,7 @@ func TestGenerateSessionNameStreamErrors(t *testing.T) {
 			client := nameTestClient(t, tc.handler)
 			hist := sampleHistory()
 			before := append([]model.Message(nil), hist...)
-			_, err := generateSessionName(context.Background(), client, hist)
+			_, err := GenerateSessionName(context.Background(), client, hist)
 			tc.check(t, err)
 			if !reflect.DeepEqual(hist, before) {
 				t.Errorf("input history mutated: got %+v, want %+v", hist, before)
@@ -235,7 +235,7 @@ func TestGenerateSessionNameContextCancelled(t *testing.T) {
 	before := append([]model.Message(nil), hist...)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := generateSessionName(ctx, client, hist); err == nil {
+	if _, err := GenerateSessionName(ctx, client, hist); err == nil {
 		t.Fatal("cancelled context: want error")
 	} else if !strings.Contains(err.Error(), "canceled") && !strings.Contains(err.Error(), "context cancel") {
 		t.Errorf("err = %v, want a context cancellation error", err)

@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"context"
@@ -15,7 +15,7 @@ const nameInstruction = `Generate a session name for the conversation above. 2 t
 // generateSessionName produces a short session name from the first completed
 // turn with ONE plain model call. The input history is never modified; on any
 // failure the caller keeps the derived title and shows nothing.
-func generateSessionName(ctx context.Context, client *model.Client, history []model.Message) (string, error) {
+func GenerateSessionName(ctx context.Context, client *model.Client, history []model.Message) (string, error) {
 	if client == nil {
 		return "", errors.New("no model client configured")
 	}

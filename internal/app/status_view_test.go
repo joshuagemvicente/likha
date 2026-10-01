@@ -14,6 +14,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"lisa/internal/agent"
 	"lisa/internal/model"
 	"lisa/internal/providers"
 	"lisa/internal/session"
@@ -245,8 +246,8 @@ func TestGitSegmentsRenderFromGitState(t *testing.T) {
 	write("tracked.txt", "one\ntwo\nthree\n")
 	m.working, m.runID = true, 1
 	m.cancel = func() {}
-	m.events = make(chan turnEvent, 1)
-	m.Update(turnEvent{runID: 1, kind: "tool_result", text: "listed", history: nil})
+	m.events = make(chan agent.TurnEvent, 1)
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "tool_result", Text: "listed", History: nil})
 	row = stripANSI(m.statusLineRows(1, 1)[0])
 	if !strings.Contains(row, "1 staged") || !strings.Contains(row, "1 changed") || !strings.Contains(row, "1 untracked") || !strings.Contains(row, "↑1") {
 		t.Fatalf("staged/dirty/untracked/ahead segments missing: %q", row)

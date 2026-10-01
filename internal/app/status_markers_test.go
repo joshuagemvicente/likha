@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"lisa/internal/agent"
 	"lisa/internal/providers"
 	"lisa/internal/session"
 	lisaui "lisa/internal/ui"
@@ -49,7 +50,7 @@ func TestNerdMarkersOnlyWithOptIn(t *testing.T) {
 		t.Fatalf("plain output changed or carries a nerd marker: %q", hints[0])
 	}
 	// Review markers: the pencil prefixes the review hint while pending.
-	request := &approvalRequest{Kind: "command", Title: "Shell command", Body: "b", Reply: make(chan bool, 1)}
+	request := &agent.ApprovalRequest{Kind: "command", Title: "Shell command", Body: "b", Reply: make(chan bool, 1)}
 	nerd.pending = request
 	nerd.status = "Review command before approval"
 	hints = nerd.statusHints(1, 1, false)

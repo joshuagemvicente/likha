@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"context"
@@ -19,7 +19,7 @@ const compactInstruction = `Summarize the conversation above into a compact cont
 // compactHistory summarizes the conversation with one model call and returns
 // the replacement history plus the summary text. The input slice is never
 // modified. Errors leave the caller's history untouched.
-func compactHistory(ctx context.Context, client *model.Client, history []model.Message, focus string, onText func(string)) ([]model.Message, string, error) {
+func CompactHistory(ctx context.Context, client *model.Client, history []model.Message, focus string, onText func(string)) ([]model.Message, string, error) {
 	if client == nil {
 		return nil, "", errors.New("no model client configured")
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"lisa/internal/agent"
 	"lisa/internal/mcp"
 	"lisa/internal/model"
 	"lisa/internal/providers"
@@ -141,9 +142,9 @@ func TestStatusLongDraftAndMentionPopupKeepTranscriptVisible(t *testing.T) {
 func TestStatusReviewPagesRemainReachableAfterResize(t *testing.T) {
 	m := statusTestUI(t, "bordered", 100, 24, providers.StoredStatusLineConfig{})
 	m.working, m.runID = true, 1
-	m.events = make(chan turnEvent, 1)
-	request := &approvalRequest{Kind: "command", Title: "Review command", Body: strings.Repeat("a review line\n", 70), Reply: make(chan bool, 1)}
-	m.Update(turnEvent{runID: 1, kind: "approval", approval: request})
+	m.events = make(chan agent.TurnEvent, 1)
+	request := &agent.ApprovalRequest{Kind: "command", Title: "Review command", Body: strings.Repeat("a review line\n", 70), Reply: make(chan bool, 1)}
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "approval", Approval: request})
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
 	pages := m.pageCount()
 	if pages < 2 || pages != len(m.reviewSeen) || m.bodyHeight() < 1 {
@@ -212,16 +213,16 @@ func TestStatusSessionTitleAndBranchRefresh(t *testing.T) {
 		t.Fatalf("first prompt not reflected before turn completion: %q", m.statusTitle)
 	}
 	m.working, m.runID = true, 1
-	m.events = make(chan turnEvent, 1)
+	m.events = make(chan agent.TurnEvent, 1)
 	m.cancel = func() {}
 	run("symbolic-ref", "HEAD", "refs/heads/next")
-	m.Update(turnEvent{runID: 1, kind: "tool_result", text: "done", history: m.history})
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "tool_result", Text: "done", History: m.history})
 	// An unborn branch renders "No commits yet on next"; the segment shows
 	// the bare name.
 	if !strings.Contains(m.git.Branch, "next") || !strings.Contains(stripANSI(m.statusLineRows(1, 1)[0]), "next") {
 		t.Fatalf("branch did not refresh after tool result: %q", m.git.Branch)
 	}
-	m.Update(turnEvent{runID: 1, kind: "done", history: m.history})
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "done", History: m.history})
 	if m.statusTitle != "First question" {
 		t.Fatalf("completed turn lost title: %q", m.statusTitle)
 	}
@@ -246,9 +247,9 @@ func TestStatusSessionTitleAndBranchRefresh(t *testing.T) {
 	run("commit", "-qm", "on-next", "--allow-empty")
 	run("checkout", "-q", "--detach")
 	m.working, m.runID = true, 2
-	m.events = make(chan turnEvent, 1)
+	m.events = make(chan agent.TurnEvent, 1)
 	m.cancel = func() {}
-	m.Update(turnEvent{runID: 2, kind: "tool_result", history: m.history})
+	m.Update(agent.TurnEvent{RunID: 2, Kind: "tool_result", History: m.history})
 	if !m.git.Detached || len(m.git.Branch) != 7 || !strings.Contains(stripANSI(m.statusLineRows(1, 1)[0]), m.git.Branch) {
 		t.Fatalf("detached HEAD lost its short SHA: git=%+v", m.git)
 	}
