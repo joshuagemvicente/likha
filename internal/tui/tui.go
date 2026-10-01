@@ -48,55 +48,66 @@ func contentWidth(termWidth int) int {
 }
 
 type ui struct {
-	root, modelName string
-	conn            providers.Connection
-	stateDir        string
-	repo            *repository.Repository
-	client          *model.Client
-	theme           lisaui.Theme
-	glyphs          lisaui.Glyphs
-	themeName       string
-	composerStyle   string
-	width, height   int
-	statusLineOpts  providers.StoredStatusLineConfig
-	statusFolder    string
-	statusTitle     string
-	entries         []entry
-	input           []rune
-	edit            editState // composer cursor + kill ring (specs/tool-rendering-terminal-keys)
-	escPrefix       bool      // armed after ESC: Return inside the decay window inserts a newline
-	lines           []string
-	lineStyles      []lipgloss.Style
-	streamBuf       strings.Builder
-	reasoningBuf    strings.Builder
-	reasoningStream int
-	layoutWidth     int
-	scroll          int  // top body line of the viewport; scrollMax() pins it to the newest content
-	following       bool // true: the viewport follows new lines like a chat/browser at the bottom
-	caretOn         bool // blink phase of the composer's block caret
-	caretTyped      bool // recent keystroke: caret renders solid until the blink resumes
-	streaming       int
-	working         bool
-	cancelling      bool
-	runID           uint64
-	cancel          context.CancelFunc
-	events          chan agent.TurnEvent
-	abandon         chan struct{}
-	history         []model.Message
-	store           *session.Store
-	snapshot        session.Snapshot
-	pending         *agent.ApprovalRequest
-	reviewSeen      []bool
-	status          string
-	mode            string
-	setup           setupState
-	lastModels      []string     // numbered list shown by /models
-	sessionIDs      []string     // ids from the last /sessions listing
-	mention         mentionState // @file completion popup state
-	commandPopup    commandState // /command completion popup state
-	dialogItems     []string     // display rows for the open dialog (theme names, model IDs, session titles)
-	dialog          dialogState
-	keyModal        keyState // /providers: masked API-key entry for an unconfigured provider
+	root, modelName   string
+	conn              providers.Connection
+	stateDir          string
+	repo              *repository.Repository
+	client            *model.Client
+	theme             lisaui.Theme
+	glyphs            lisaui.Glyphs
+	themeName         string
+	composerStyle     string
+	width, height     int
+	statusLineOpts    providers.StoredStatusLineConfig
+	statusFolder      string
+	statusTitle       string
+	entries           []entry
+	input             []rune
+	edit              editState // composer cursor + kill ring (specs/tool-rendering-terminal-keys)
+	escPrefix         bool      // armed after ESC: Return inside the decay window inserts a newline
+	lines             []string
+	lineStyles        []lipgloss.Style
+	lineSpans         [][]lisaui.Swatch
+	streamBuf         strings.Builder
+	reasoningBuf      strings.Builder
+	reasoningStream   int
+	layoutWidth       int
+	scroll            int  // top body line of the viewport; scrollMax() pins it to the newest content
+	following         bool // true: the viewport follows new lines like a chat/browser at the bottom
+	caretOn           bool // blink phase of the composer's block caret
+	caretTyped        bool // recent keystroke: caret renders solid until the blink resumes
+	streaming         int
+	working           bool
+	cancelling        bool
+	runID             uint64
+	cancel            context.CancelFunc
+	events            chan agent.TurnEvent
+	abandon           chan struct{}
+	history           []model.Message
+	store             *session.Store
+	snapshot          session.Snapshot
+	pending           *agent.ApprovalRequest
+	reviewSeen        []bool
+	status            string
+	mode              string
+	setup             setupState
+	lastModels        []string     // numbered list shown by /models
+	sessionIDs        []string     // ids from the last /sessions listing
+	mention           mentionState // @file completion popup state
+	commandPopup      commandState // /command completion popup state
+	dialogItems       []string     // display rows for the open dialog (theme names, session titles; /models uses dialogModelRows)
+	dialog            dialogState
+	dialogModelRows   []modelsRow              // parallel selectable rows for the /models dialog; headers render from sections, never rows
+	dialogModelsNote  string                   // muted unreachable-provider note for the /models dialog; "" when every fetch succeeded
+	modelsCache       modelsCache              // in-memory last-good sections (specs/models-perf); dies with the process
+	modelsGen         uint64                   // /models open generation; per-section arrivals carry it, stale ones drop
+	modelsPending     int                      // outstanding per-provider fetches in the current open
+	modelsNavigated   bool                     // user navigated/typed in this open; arrivals must not yank the cursor after
+	modelsArrived     map[string]modelsSection // arrived sections by provider canonical Name
+	modelsTargetOrder []string                 // target provider Names in final display order
+	modelsFailures    []string                 // failed provider display names this open
+	modelsErrSample   string                   // first fetch error text this open
+	keyModal          keyState                 // /providers: masked API-key entry for an unconfigured provider
 
 	// Session measurements and identity for the status line (spec §4).
 	started          time.Time // session start; drives the minutes segment
@@ -113,12 +124,13 @@ type ui struct {
 	nameTried        bool      // the one auto-naming attempt already launched
 }
 
-// dialogMatches returns the indices of dialogItems visible under the query:
-// a case-insensitive substring match on the display text, which for
-// providers embeds both the display name and the canonical name, and for
-// models the model id. An empty query matches everything. The cursor
-// indexes into this filtered list, so any query change moves the cursor to
-// the first visible match (filtering never re-selects the active provider).
+// dialogMatches documents the shared selection-dialog filter: a
+// case-insensitive substring match on the display text, which for providers
+// embeds both the display name and the canonical name. The /models dialog
+// filters its selectable rows over model id plus provider names instead
+// (see modelMatches). An empty query matches everything. The cursor indexes
+// into this filtered list, so any query change moves the cursor to the
+// first visible match (filtering never re-selects the active row).
 
 func NewUI(root string, repo *repository.Repository, client *model.Client, name string, conn providers.Connection, stateDir string, store *session.Store, snapshot session.Snapshot) *ui {
 	themeName := conn.Theme
@@ -346,7 +358,9 @@ func (m *ui) handleThemesCommand(arg string) tea.Cmd {
 	return nil
 }
 
-// modelsListMsg carries the provider's model list for the /models dialog.
+// modelsListMsg carries one provider's model list for the setup-adjacent
+// paths. The /models dialog itself consumes per-section modelsSectionMsg
+// values instead (specs/models-perf).
 type modelsListMsg struct {
 	models []string
 	err    error
@@ -354,34 +368,6 @@ type modelsListMsg struct {
 
 func (m *ui) handleModelsResult(msg modelsListMsg) {
 	m.layoutWidth = 0
-	if m.dialog.open && m.dialog.kind == dialogModels {
-		// The dialog asked for this list; populate it in place. A late result
-		// from an earlier open refreshes the open dialog too (idempotent) —
-		// without this it would fall through to the text dump behind the box.
-		m.dialog.loading = false
-		if msg.err != nil {
-			m.dialog.loadErr = msg.err.Error()
-			m.dialogItems = nil
-			return
-		}
-		if len(msg.models) == 0 {
-			m.dialog.loadErr = "The provider reports no models."
-			m.dialogItems = nil
-			return
-		}
-		m.lastModels = msg.models
-		m.dialogItems = msg.models
-		// Reset first: a shrunken list must not leave the cursor out of range
-		// when the live model is absent from it.
-		m.dialog.cursor = 0
-		for i, id := range msg.models {
-			if id == m.modelName {
-				m.dialog.cursor = i
-				break
-			}
-		}
-		return
-	}
 	if msg.err != nil {
 		m.entries = append(m.entries, entry{role: "Error", content: "List models: " + msg.err.Error()})
 		return
@@ -592,6 +578,18 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.handleModelsResult(v)
+		return m, nil
+	case modelsSectionMsg:
+		if m.mode != modeMain {
+			return m, nil
+		}
+		m.handleModelsSection(v)
+		return m, nil
+	case modelsProviderFailedMsg:
+		if m.mode != modeMain {
+			return m, nil
+		}
+		m.handleModelsProviderFailed(v)
 		return m, nil
 	case nameGeneratedMsg:
 		// Auto-naming (spec tui-layout 1c): a failure or a late result after

@@ -302,25 +302,32 @@ func TestModelSwitchCommandUsesListingAndLiveClient(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	stateDir := t.TempDir()
+	if err := providers.StoreKey(stateDir, "openai", "k-openai"); err != nil {
+		t.Fatal(err)
+	}
+	setProviderBaseURL(t, "openai", server.URL+"/v1")
 	client, err := model.New(server.URL+"/v1", "initial", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := NewUI("/sample", nil, client, "initial", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := NewUI("/sample", nil, client, "initial", providers.Connection{Provider: "OpenAI", ProviderCanonical: "openai", Verified: true}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// /models opens the selection dialog and fetches the list.
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	model2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	_ = model2
-	msg := cmd()
-	list, ok := msg.(modelsListMsg)
-	if !ok || list.err != nil || len(list.models) != 2 {
-		t.Fatalf("models list = %+v", msg)
+	if cmd == nil {
+		t.Fatal("models fetch did not start")
 	}
-	m.Update(msg)
-	if !m.dialog.open || m.dialog.kind != dialogModels || len(m.dialogItems) != 2 {
-		t.Fatalf("models dialog not populated: items=%+v", m.dialogItems)
+	msgs := runModelsCmds(t, m, cmd)
+	sections := arrivedSections(msgs)
+	if len(sections) != 1 || len(sections[0].models) != 2 {
+		t.Fatalf("models list = %+v", msgs)
+	}
+	if !m.dialog.open || m.dialog.kind != dialogModels || len(m.dialogModelRows) != 2 {
+		t.Fatalf("models dialog not populated: rows=%+v", m.dialogModelRows)
 	}
 	// The cursor sits on the live model ("initial" is absent from the list, so
 	// the cursor stays at 0 = alpha); Enter applies the highlighted model.
@@ -1741,24 +1748,28 @@ func TestLogoLinesStayWithinTheViewport(t *testing.T) {
 	assertRowsWithinViewport(t, wide)
 }
 
-// TestDialogFitsCJKLabelsAndDropsProviderColumnWhenNecessary sizes the
-// dialog box against wide display widths: a 60-rune CJK label with a long
-// provider name in a 60-column viewport must fit every row, and the
-// existing too-narrow provider-column drop must keep working instead of
+// TestDialogFitsCJKLabelsInSectionedDialog sizes the sectioned /models
+// dialog against wide display widths: a 60-rune CJK label and a long
+// section header in a 60-column viewport must fit every row without
 // overflowing.
-func TestDialogFitsCJKLabelsAndDropsProviderColumnWhenNecessary(t *testing.T) {
+func TestDialogFitsCJKLabelsInSectionedDialog(t *testing.T) {
 	m := NewUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
 	current := "模型标签 Probe"
-	m.dialog = dialogState{kind: dialogModels, open: true, cursor: 0, loading: false}
-	m.dialogItems = []string{strings.Repeat("词", 60), current, "another one"}
+	relay := model.Provider{Name: "relay", DisplayName: "A very long local OpenAI-compatible relay", BaseURL: "https://relay.example/v1"}
+	m.dialog = dialogState{kind: dialogModels, open: true, cursor: 2, loading: false}
+	m.dialogModelRows = []modelsRow{
+		{provider: relay, model: strings.Repeat("词", 60)},
+		{provider: relay, model: current},
+		{provider: relay, model: "another one"},
+	}
 	m.modelName = current
-	m.conn.Provider = "A very long local OpenAI-compatible relay"
+	m.conn.Provider = relay.DisplayName
 	m.rebuild() // dialogView() overlays m.mainView() output and asserts nothing about the dialog itself, so lay out first
 	view := m.dialogView()
 	plain := stripANSI(view)
-	if !strings.Contains(plain, m.conn.Provider) {
-		t.Fatalf("provider column dropped although the 60-column box has room: %q", plain)
+	if !strings.Contains(plain, relay.DisplayName) {
+		t.Fatalf("section header missing: %q", plain)
 	}
 	dialogRows := plainFrameOf(view, 24)
 	for i, row := range dialogRows {
@@ -1767,16 +1778,20 @@ func TestDialogFitsCJKLabelsAndDropsProviderColumnWhenNecessary(t *testing.T) {
 			t.Fatalf("dialog row %d is %d cells wide at 60 columns: %q", i, got, plainRow)
 		}
 	}
-	// Now an undersized box: the provider column must retire rather than
-	// overflow, leaving the model labels alone in the rows.
-	m.dialog.cursor = 2
+	// A long header still fits by wrapping within the box: every row stays
+	// inside the viewport and all three selectable rows render.
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
 	m.pending = nil
-	m.conn.Provider = "A very long local OpenAI-compatible relay provider name that cannot fit"
+	m.dialogModelRows[0].provider.DisplayName = "A very long local OpenAI-compatible relay provider name that cannot fit on one row"
+	m.dialogModelRows[1].provider.DisplayName = m.dialogModelRows[0].provider.DisplayName
+	m.dialogModelRows[2].provider.DisplayName = m.dialogModelRows[0].provider.DisplayName
+	m.conn.Provider = m.dialogModelRows[0].provider.DisplayName
 	view = m.dialogView()
 	plain = stripANSI(view)
-	if strings.Contains(plain, m.conn.Provider) {
-		t.Fatalf("unfittable provider name rendered anyway: %q", plain)
+	for _, id := range []string{current, "another one"} {
+		if !strings.Contains(plain, id) {
+			t.Fatalf("model row %q missing under a long header: %q", id, plain)
+		}
 	}
 	for i, row := range plainFrameOf(view, 20) {
 		plainRow := stripANSI(row)

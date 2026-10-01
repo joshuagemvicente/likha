@@ -1,10 +1,8 @@
 package tui
 
 import (
-	"context"
 	"strconv"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
@@ -41,12 +39,51 @@ type dialogState struct {
 func (m *ui) dialogMatches() []int {
 	indices := make([]int, 0, len(m.dialogItems))
 	q := strings.ToLower(m.dialog.query)
+	if m.dialog.kind == dialogModels {
+		return m.modelMatches(q)
+	}
 	for i, item := range m.dialogItems {
 		if q == "" || strings.Contains(strings.ToLower(item), q) {
 			indices = append(indices, i)
 		}
 	}
 	return indices
+}
+
+// modelMatches filters /models rows over model and provider text: a model
+// row matches on its id or its section's names, so a provider name narrows
+// the list to its section. A section (header included) shows iff at least
+// one of its rows matches, so filtering never leaves an orphan header.
+func (m *ui) modelMatches(q string) []int {
+	indices := make([]int, 0, len(m.dialogModelRows))
+	for i, row := range m.dialogModelRows {
+		if q == "" ||
+			strings.Contains(strings.ToLower(row.model), q) ||
+			strings.Contains(strings.ToLower(row.provider.DisplayName), q) ||
+			strings.Contains(strings.ToLower(row.provider.Name), q) {
+			indices = append(indices, i)
+		}
+	}
+	return indices
+}
+
+// modelHeaderAt reports whether a visible (match-space) position starts a
+// new provider section, returning the section's display name. Headers are
+// non-selectable: the cursor in dialogState indexes match positions, never
+// header rows, so navigation and Enter never land on one.
+func (m *ui) modelHeaderAt(matches []int, pos int) (string, bool) {
+	if m.dialog.kind != dialogModels || pos < 0 || pos >= len(matches) {
+		return "", false
+	}
+	row := m.dialogModelRows[matches[pos]]
+	if pos == 0 {
+		return row.provider.DisplayName, true
+	}
+	prev := m.dialogModelRows[matches[pos-1]]
+	if prev.provider.Name != row.provider.Name {
+		return row.provider.DisplayName, true
+	}
+	return "", false
 }
 
 // openDialog switches the UI to a selection dialog. Themes and composer
@@ -73,16 +110,10 @@ func (m *ui) openDialog(kind dialogKind) tea.Cmd {
 		}
 		return nil
 	case dialogModels:
-		// Cursor starts on the live model once the list arrives.
-		m.dialog.loading = true
-		m.status = "Listing models"
-		m.layoutWidth = 0
-		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			ids, err := model.ListModels(ctx, m.client.Base(), m.client.APIKey())
-			return modelsListMsg{models: ids, err: err}
-		}
+		// All-provider fetch (specs/all-models): cursor starts on the live
+		// model row once the sections arrive. The refusal when nothing is
+		// configured stays in handleCommand with zero network traffic.
+		return m.startModelsFetch()
 	case dialogSessions:
 		// Sessions are already local; listing is synchronous.
 		summaries, err := m.store.List()
@@ -118,7 +149,7 @@ func (m *ui) openDialog(kind dialogKind) tea.Cmd {
 }
 
 // commandHelp is the text /help prints and unknown-command errors point to.
-const commandHelp = "Commands: /compact [focus] summarize the conversation into a compact brief; /sessions [n] list or resume a saved session; /models list provider models; /providers select the provider for this session (a prompt asks for the API key when none is stored); /quit exit; /help this list. Selections open a dialog: ↑/↓ navigate, type to filter, Enter apply, Esc cancel. Unknown /commands are not sent to the model; // sends a literal slash."
+const commandHelp = "Commands: /compact [focus] summarize the conversation into a compact brief; /sessions [n] list or resume a saved session; /models list models from every configured provider; /providers select the provider for this session (a prompt asks for the API key when none is stored); /quit exit; /help this list. Selections open a dialog: ↑/↓ navigate, type to filter, Enter apply, Esc cancel. Unknown /commands are not sent to the model; // sends a literal slash."
 
 // handleCommand dispatches a leading-slash input. Reserved commands act on
 // the application and never reach the model; unknown commands restore the
@@ -163,6 +194,15 @@ func (m *ui) handleCommand(line string) tea.Cmd {
 		if m.client == nil {
 			m.entries = append(m.entries, entry{role: "Error", content: "No provider configured; complete first-run setup first."})
 			return nil
+		}
+		// Zero-network refusal when nothing is configured: no stored key
+		// or sign-in anywhere and no known live row. Otherwise the dialog
+		// lists through the live client as its active section.
+		if apis, oauth := m.modelsSources(); len(apis) == 0 && len(oauth) == 0 {
+			if _, ok := lookupProviderByBase(m.client.Base(), m.conn.ProviderCanonical); !ok {
+				m.entries = append(m.entries, entry{role: "Error", content: "No provider configured; complete first-run setup first."})
+				return nil
+			}
 		}
 		return m.openDialog(dialogModels)
 	case "providers":
@@ -242,6 +282,9 @@ func (m *ui) updateDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.dialog.query += string(r)
 		m.dialog.cursor = 0 // reset to the first visible match on query change
+		if m.dialog.kind == dialogModels {
+			m.modelsNavigated = true
+		}
 		m.previewDialogTheme(m.dialogMatches())
 		return m, nil
 	case tea.KeyBackspace:
@@ -249,25 +292,40 @@ func (m *ui) updateDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.dialog.query = string(runes[:len(runes)-1])
 			m.dialog.cursor = 0
 		}
+		if m.dialog.kind == dialogModels {
+			m.modelsNavigated = true
+		}
 		m.previewDialogTheme(m.dialogMatches())
 		return m, nil
 	}
 	matches := m.dialogMatches()
 	switch msg.String() {
 	case "up":
+		if m.dialog.kind == dialogModels {
+			m.modelsNavigated = true
+		}
 		if m.dialog.cursor > 0 {
 			m.dialog.cursor--
 		}
 		m.previewDialogTheme(matches)
 	case "down":
+		if m.dialog.kind == dialogModels {
+			m.modelsNavigated = true
+		}
 		if m.dialog.cursor < len(matches)-1 {
 			m.dialog.cursor++
 		}
 		m.previewDialogTheme(matches)
 	case "pgup":
+		if m.dialog.kind == dialogModels {
+			m.modelsNavigated = true
+		}
 		m.dialog.cursor = max(0, m.dialog.cursor-m.dialogWindow())
 		m.previewDialogTheme(matches)
 	case "pgdown":
+		if m.dialog.kind == dialogModels {
+			m.modelsNavigated = true
+		}
 		m.dialog.cursor = min(len(matches)-1, m.dialog.cursor+m.dialogWindow())
 		m.previewDialogTheme(matches)
 	case "enter":
@@ -281,6 +339,9 @@ func (m *ui) updateDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Esc clears the query first, then closes on a second Esc.
 			m.dialog.query = ""
 			m.dialog.cursor = 0
+			if m.dialog.kind == dialogModels {
+				m.modelsNavigated = true
+			}
 			if m.dialog.kind == dialogThemes {
 				m.previewTheme(m.themeName)
 			}
@@ -290,8 +351,12 @@ func (m *ui) updateDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Discard: nothing applied; the item list is dropped with the dialog
 		// so a later open starts clean and view math never indexes stale rows.
 		wasThemes := m.dialog.kind == dialogThemes
+		wasModels := m.dialog.kind == dialogModels
 		m.dialog = dialogState{}
 		m.dialogItems = nil
+		if wasModels {
+			m.dialogModelRows = nil
+		}
 		if wasThemes {
 			m.previewTheme(m.themeName)
 		}
@@ -324,7 +389,7 @@ func (m *ui) dialogWindow() int {
 // Enter while the models list is still loading does nothing, so the dialog
 // cannot be dismissed into an empty selection by accident.
 func (m *ui) confirmDialog(matches []int) tea.Cmd {
-	if m.dialog.loading {
+	if m.dialog.loading && !(m.dialog.kind == dialogModels && len(m.dialogModelRows) > 0) {
 		return nil
 	}
 	if m.dialog.cursor >= len(matches) {
@@ -332,6 +397,24 @@ func (m *ui) confirmDialog(matches []int) tea.Cmd {
 		return nil
 	}
 	origIndex := matches[m.dialog.cursor]
+	if m.dialog.kind == dialogModels {
+		// Selectable rows only: headers never enter matches, so a header
+		// can never be confirmed. Stale-list guard over the model rows.
+		if origIndex < 0 || origIndex >= len(m.dialogModelRows) {
+			m.dialog = dialogState{}
+			m.dialogModelRows = nil
+			m.dialogModelsNote = ""
+			m.layoutWidth = 0
+			return nil
+		}
+		row := m.dialogModelRows[origIndex]
+		m.dialog = dialogState{}
+		m.dialogModelRows = nil
+		m.dialogModelsNote = ""
+		m.layoutWidth = 0
+		m.applyModelRow(row)
+		return nil
+	}
 	// Guard the parallel arrays: matches were computed for the list seen at
 	// keypress time; a late refresh could have shortened it before Enter.
 	if origIndex < 0 || origIndex >= len(m.dialogItems) ||
@@ -353,10 +436,6 @@ func (m *ui) confirmDialog(matches []int) tea.Cmd {
 		m.dialogItems = nil
 		m.layoutWidth = 0
 		m.applyComposerStyle(id)
-	case dialogModels:
-		m.dialog = dialogState{}
-		m.layoutWidth = 0
-		m.applyModel(id)
 	case dialogSessions:
 		m.dialog = dialogState{}
 		m.layoutWidth = 0
@@ -393,40 +472,49 @@ func (m *ui) dialogView() string {
 	}
 	items := m.dialogItems
 	matches := m.dialogMatches()
-	if m.dialog.loading {
-		// The list is still in flight: no per-item labels exist to filter or
+	if m.dialog.loading && (m.dialog.kind != dialogModels || len(m.dialogModelRows) == 0) {
+		// Cold open: the list is still in flight with no rows to filter or
 		// label, so matches must not index the stale previous list.
 		items = []string{"Fetching model list…"}
 		matches = nil
 	}
+	isModels := m.dialog.kind == dialogModels && (!m.dialog.loading || len(m.dialogModelRows) > 0)
 	// The visible rows are the query-filtered subset; the cursor indexes
 	// into it, so the highlighted row must be resolved through the matches.
 	if m.dialog.query != "" {
 		title = "q: \"" + m.dialog.query + "\"" + title
 	}
-	visibleItems := make([]string, len(matches))
-	for i, orig := range matches {
-		visibleItems[i] = m.dialogLabel(orig, items)
+	type visibleRow struct {
+		header string // non-empty: section header, non-selectable
+		label  string // model rows only
+		pos    int    // match-space position of the model row
 	}
-	// Model rows carry the provider name right-aligned on the same row —
-	// model left, provider right, like a flex justify-between container.
-	providerName := ""
-	if m.dialog.kind == dialogModels && !m.dialog.loading && m.dialog.loadErr == "" {
-		providerName = m.conn.Provider
+	var visible []visibleRow
+	if isModels {
+		for pos, orig := range matches {
+			if header, ok := m.modelHeaderAt(matches, pos); ok {
+				visible = append(visible, visibleRow{header: header})
+			}
+			visible = append(visible, visibleRow{label: m.modelLabel(orig), pos: pos})
+		}
+	} else {
+		visible = make([]visibleRow, len(matches))
+		for i, orig := range matches {
+			visible[i] = visibleRow{label: m.dialogLabel(orig, items), pos: i}
+		}
 	}
-	providerW := runewidth.StringWidth(providerName)
 
 	// Box width tracks the widest item so nothing is truncated; padding and
 	// borders account for the two-space gutter. Measure by display width,
 	// not len(): `len` counts UTF-8 bytes, so a CJK label (3 bytes/cell)
 	// inflates the box and a long label can even shift the box off-center.
 	boxWidth := runewidth.StringWidth(title)
-	for _, item := range visibleItems {
-		w := runewidth.StringWidth(item) + 12
-		if providerName != "" {
-			w += providerW + 2
+	for _, row := range visible {
+		text := row.label
+		if row.header != "" {
+			text = row.header
 		}
-		if w > boxWidth {
+		if w := runewidth.StringWidth(text) + 12; w > boxWidth {
 			boxWidth = w
 		}
 	}
@@ -435,11 +523,6 @@ func (m *ui) dialogView() string {
 	}
 	boxWidth = min(width-4, boxWidth+4)
 	inner := boxWidth - 4 // "│ " + content + " │"
-	if providerName != "" && inner < providerW+10 {
-		// Too narrow to fit model and provider meaningfully: drop the column.
-		providerName = ""
-		providerW = 0
-	}
 
 	// Every content row is fitted to the inner width BEFORE styling; a style
 	// is never applied over an escape sequence and never re-fitted after.
@@ -450,37 +533,53 @@ func (m *ui) dialogView() string {
 		for _, line := range wrap("Error: "+m.dialog.loadErr, inner) {
 			content = append(content, m.theme.Error.Render(fit(line, inner)))
 		}
-	} else if m.dialog.loading {
+	} else if m.dialog.loading && (m.dialog.kind != dialogModels || len(m.dialogModelRows) == 0) {
 		content = append(content, m.theme.Muted.Render(fit("Fetching model list…", inner)))
-	} else if len(visibleItems) == 0 {
+	} else if len(visible) == 0 {
 		// Empty match set under a query: an explicit row instead of a blank
 		// box; Enter is a no-op while nothing is selectable.
 		content = append(content, m.theme.Muted.Render(fit("No "+m.dialogKindName()+" match \""+m.dialog.query+"\"", inner)))
-	} else {
-		visible := max(1, height-10)
-		windowed, start := windowList(len(visibleItems), m.dialog.cursor, visible)
+	} else if !isModels {
+		windowed, start := windowList(len(visible), m.dialog.cursor, max(1, height-10))
 		for i := start; i < start+windowed; i++ {
-			label := visibleItems[i]
-			if providerName != "" {
-				// Model left, provider right: the left segment is fitted to
-				// leave exactly the two-space gap plus the provider, so the
-				// row totals the inner width and the provider is flush right.
-				marker := "  "
-				if i == m.dialog.cursor {
-					marker = "> "
-				}
-				left := fit(marker+label, inner-providerW-2)
-				if i == m.dialog.cursor {
-					content = append(content, m.theme.Selected.Render(left)+m.theme.Muted.Render("  "+providerName))
-				} else {
-					content = append(content, left+m.theme.Muted.Render("  "+providerName))
-				}
-				continue
-			}
+			label := visible[i].label
 			if i == m.dialog.cursor {
 				content = append(content, m.theme.Selected.Render(fit("> "+label, inner)))
 			} else {
 				content = append(content, fit("  "+label, inner))
+			}
+		}
+	} else {
+		if m.dialogModelsNote != "" {
+			for _, line := range wrap(m.dialogModelsNote, inner) {
+				content = append(content, m.theme.Muted.Render(fit(line, inner)))
+			}
+		}
+		// Headers ride with their rows: find the visible index of the
+		// cursor row, window the full row list around it, then back up
+		// past a leading detached header so a section header never
+		// renders without at least one of its rows.
+		at := 0
+		for vi, row := range visible {
+			if row.header == "" && row.pos == m.dialog.cursor {
+				at = vi
+				break
+			}
+		}
+		windowed, start := windowList(len(visible), at, max(1, height-10))
+		end := min(len(visible), start+windowed)
+		for len(visible[start:end]) > 0 && visible[start].header != "" && (start+1 >= end || visible[start+1].header != "") {
+			start++
+		}
+		for _, row := range visible[start:end] {
+			if row.header != "" {
+				content = append(content, m.theme.Title.Render(fit(row.header, inner)))
+				continue
+			}
+			if row.pos == m.dialog.cursor {
+				content = append(content, m.theme.Selected.Render(fit("> "+row.label, inner)))
+			} else {
+				content = append(content, fit("  "+row.label, inner))
 			}
 		}
 	}
@@ -520,9 +619,8 @@ func (m *ui) dialogLabel(i int, items []string) string {
 			label += " (current)"
 		}
 	case dialogModels:
-		if label == m.modelName {
-			label += " (current)"
-		}
+		// /models renders through modelLabel (live pair only), never here.
+		return label
 	}
 	return label
 }

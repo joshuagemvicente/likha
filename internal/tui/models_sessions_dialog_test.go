@@ -32,11 +32,18 @@ func TestModelsDialogSelection(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
+	// The live client's base URL is the fake server's; point the openai
+	// row at it so the fetch set resolves and lists through it. Table
+	// mutation is test-local and restored on cleanup.
+	setProviderBaseURL(t, "openai", server.URL+"/v1")
+	if err := providers.StoreKey(stateDir, "openai", "k-openai"); err != nil {
+		t.Fatal(err)
+	}
 	client, err := model.New(server.URL+"/v1", "beta", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := NewUI("/sample", nil, client, "beta", providers.Connection{Provider: "OpenAI", Verified: true}, stateDir, nil, session.Snapshot{})
+	m := NewUI("/sample", nil, client, "beta", providers.Connection{Provider: "OpenAI", ProviderCanonical: "openai", Verified: true}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// A bare /models opens the dialog with the cursor on the live model.
@@ -48,14 +55,16 @@ func TestModelsDialogSelection(t *testing.T) {
 	if !strings.Contains(m.View(), "Model selection") {
 		t.Fatalf("view missing dialog title: %q", m.View())
 	}
-	msg := cmd()
-	list, ok := msg.(modelsListMsg)
-	if !ok || list.err != nil || len(list.models) != 3 {
-		t.Fatalf("models list = %+v", msg)
+	msgs := runModelsCmds(t, m, cmd)
+	sections := arrivedSections(msgs)
+	if len(sections) != 1 || len(sections[0].models) != 3 {
+		t.Fatalf("models list = %+v", msgs)
 	}
-	m.Update(msg)
-	if len(m.dialogItems) != 3 || !strings.Contains(m.View(), "> beta (current)") {
-		t.Fatalf("cursor not on the live model: items=%+v view=%q", m.dialogItems, m.View())
+	if len(m.dialogModelRows) != 3 || !strings.Contains(m.View(), "> beta (current)") {
+		t.Fatalf("cursor not on the live model: rows=%+v view=%q", m.dialogModelRows, m.View())
+	}
+	if !strings.Contains(m.View(), "OpenAI") {
+		t.Fatalf("section header missing: %q", m.View())
 	}
 
 	// Down moves the selection; nothing applies before Enter.
@@ -85,12 +94,11 @@ func TestModelsDialogSelection(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	_ = cmd // the fetch runs; the reopened dialog keeps navigation responsive
-	msg = cmd()
-	list, ok = msg.(modelsListMsg)
-	if !ok || list.err != nil {
-		t.Fatalf("reopened dialog list = %+v", msg)
+	msgs = runModelsCmds(t, m, cmd)
+	sections = arrivedSections(msgs)
+	if len(sections) != 1 {
+		t.Fatalf("reopened dialog list = %+v", msgs)
 	}
-	m.Update(msg)
 	if m.dialog.cursor != 2 {
 		t.Fatalf("cursor after reopen = %d, want 2 (gamma)", m.dialog.cursor)
 	}
@@ -113,6 +121,10 @@ func TestModelsDialogSelection(t *testing.T) {
 }
 
 func TestModelsDialogBlocksPromptInput(t *testing.T) {
+	stateDir := t.TempDir()
+	if err := providers.StoreKey(stateDir, "openai", "k-openai"); err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/models" {
 			w.Header().Set("Content-Type", "application/json")
@@ -127,7 +139,7 @@ func TestModelsDialogBlocksPromptInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := NewUI("/sample", nil, client, "", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := NewUI("/sample", nil, client, "", providers.Connection{Provider: "OpenAI", ProviderCanonical: "openai", Verified: true}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -156,6 +168,10 @@ func TestModelsDialogBlocksPromptInput(t *testing.T) {
 // TestModelsDialogListError surfaces a failed fetch inside the dialog; Esc
 // closes without changing the live model.
 func TestModelsDialogListErrorStaysOpen(t *testing.T) {
+	stateDir := t.TempDir()
+	if err := providers.StoreKey(stateDir, "openai", "k-openai"); err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -164,16 +180,17 @@ func TestModelsDialogListErrorStaysOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := NewUI("/sample", nil, client, "test", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := NewUI("/sample", nil, client, "test", providers.Connection{Provider: "OpenAI", ProviderCanonical: "openai", Verified: true}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	msg := cmd()
-	list, ok := msg.(modelsListMsg)
-	if !ok || list.err == nil {
-		t.Fatalf("expected a fetch error, got %+v", msg)
+	if cmd == nil {
+		t.Fatal("models fetch did not start")
 	}
-	m.Update(msg)
+	msgs := runModelsCmds(t, m, cmd)
+	if len(arrivedSections(msgs)) != 0 || m.dialog.loadErr == "" {
+		t.Fatalf("expected a failed fetch, got %+v", msgs)
+	}
 	if !m.dialog.open || m.dialog.loadErr == "" {
 		t.Fatalf("error not surfaced in dialog: %+v", m.dialog)
 	}
@@ -377,11 +394,15 @@ func TestDialogRenderNoEscapedSequences(t *testing.T) {
 	}
 }
 
-// TestModelsDialogShowsProviderRight verifies the model rows carry the
-// provider name right-aligned on the same row: model left, provider right,
-// with the row still exactly the box's inner width.
-func TestModelsDialogShowsProviderRight(t *testing.T) {
+// TestModelsDialogGroupsSectionsUnderHeaders verifies the sectioned layout:
+// one non-selectable display-name header per provider, model ids only on
+// the rows, no per-row provider column.
+func TestModelsDialogGroupsSectionsUnderHeaders(t *testing.T) {
 	forceANSI(t)
+	stateDir := t.TempDir()
+	if err := providers.StoreKey(stateDir, "openai", "k-openai"); err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/models" {
 			w.Header().Set("Content-Type", "application/json")
@@ -391,20 +412,25 @@ func TestModelsDialogShowsProviderRight(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
+	setProviderBaseURL(t, "openai", server.URL+"/v1")
 	client, err := model.New(server.URL+"/v1", "alpha", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := NewUI("/sample", nil, client, "alpha", providers.Connection{Provider: "OpenCode Go", Verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := NewUI("/sample", nil, client, "alpha", providers.Connection{Provider: "OpenAI", ProviderCanonical: "openai", Verified: true}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m.Update(cmd())
-	if !strings.Contains(m.View(), "OpenCode Go") {
-		t.Fatalf("provider name not shown: %q", m.View())
+	if cmd == nil {
+		t.Fatal("models fetch did not start")
+	}
+	runModelsCmds(t, m, cmd)
+	view := m.View()
+	if !strings.Contains(stripANSI(view), "OpenAI") {
+		t.Fatalf("section header not shown: %q", view)
 	}
 	rows := 0
-	for _, line := range strings.Split(m.View(), "\n") {
+	for _, line := range strings.Split(view, "\n") {
 		plain := stripANSI(line)
 		if !strings.Contains(plain, " │") {
 			continue // not a dialog row (header, footer, borders)
@@ -414,9 +440,8 @@ func TestModelsDialogShowsProviderRight(t *testing.T) {
 				continue
 			}
 			rows++
-			end := strings.LastIndex(plain, " │")
-			if end < 0 || !strings.HasSuffix(strings.TrimRight(plain[:end], " "), "OpenCode Go") {
-				t.Fatalf("provider not flush right on row %q", plain)
+			if strings.Contains(plain, "OpenAI "+modelID) || strings.Contains(plain, modelID+" OpenAI") {
+				t.Fatalf("per-row provider column rendered anyway: %q", plain)
 			}
 			if strings.Contains(plain, "> "+modelID) && modelID == "beta" {
 				t.Fatalf("non-cursor row carries the cursor marker: %q", plain)
@@ -433,6 +458,10 @@ func TestModelsDialogShowsProviderRight(t *testing.T) {
 // second fetch is in flight, and render. The loading view must not resolve
 // matches against the stale previous list.
 func TestModelsDialogReopenDuringLoadNoPanic(t *testing.T) {
+	stateDir := t.TempDir()
+	if err := providers.StoreKey(stateDir, "openai", "k-openai"); err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/models" {
 			w.Header().Set("Content-Type", "application/json")
@@ -442,31 +471,34 @@ func TestModelsDialogReopenDuringLoadNoPanic(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
+	setProviderBaseURL(t, "openai", server.URL+"/v1")
 	client, err := model.New(server.URL+"/v1", "alpha", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := NewUI("/sample", nil, client, "alpha", providers.Connection{Provider: "OpenCode Go", Verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := NewUI("/sample", nil, client, "alpha", providers.Connection{Provider: "OpenAI", ProviderCanonical: "openai", Verified: true}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// First open: the list arrives and the dialog shows it.
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	_, first := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m.Update(first())
-	if len(m.dialogItems) != 3 {
-		t.Fatalf("list not populated: %+v", m.dialogItems)
+	runModelsCmds(t, m, first)
+	if len(m.dialogModelRows) != 3 {
+		t.Fatalf("list not populated: %+v", m.dialogModelRows)
 	}
 	// Esc closes and drops the list.
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if m.dialog.open || m.dialogItems != nil {
-		t.Fatalf("close state wrong: open=%t items=%+v", m.dialog.open, m.dialogItems)
+	if m.dialog.open || m.dialogModelRows != nil {
+		t.Fatalf("close state wrong: open=%t rows=%+v", m.dialog.open, m.dialogModelRows)
 	}
+	// The per-ui cache would serve the second open instantly; clear it to
+	// exercise the cold loading path this regression guards.
+	m.modelsCache = modelsCache{}
 
 	// Reopen: still loading, so rendering must show the placeholder and never
 	// index stale rows.
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	_, second := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	_ = second
 	if !m.dialog.loading {
 		t.Fatal("second open not loading")
 	}
@@ -479,19 +511,24 @@ func TestModelsDialogReopenDuringLoadNoPanic(t *testing.T) {
 	}
 	// The second fetch arrives; the dialog populates with the cursor on the
 	// live model, exactly like the first open.
-	m.Update(second())
-	if m.dialog.loading || len(m.dialogItems) != 3 || m.dialog.cursor != 0 {
-		t.Fatalf("second open failed to populate: loading=%t items=%+v cursor=%d", m.dialog.loading, m.dialogItems, m.dialog.cursor)
+	runModelsCmds(t, m, second)
+	if m.dialog.loading || len(m.dialogModelRows) != 3 || m.dialog.cursor != 0 {
+		t.Fatalf("second open failed to populate: loading=%t rows=%+v cursor=%d", m.dialog.loading, m.dialogModelRows, m.dialog.cursor)
 	}
 	if !strings.Contains(m.View(), "> alpha (current)") {
 		t.Fatalf("cursor not on the live model after reopen: %q", m.View())
 	}
 }
 
-// TestModelsDialogLateResultRefreshesOpenDialog verifies a late result from an
-// earlier open refreshes the currently open dialog instead of dumping text
-// behind it, and resets the cursor when the list shrank.
+// TestModelsDialogLateResultRefreshesOpenDialog verifies gen isolation: a
+// stale-generation section arriving after reopen is discarded, while the
+// fresh open's own arrivals populate the dialog and clamp the cursor when
+// the list shrank.
 func TestModelsDialogLateResultRefreshesOpenDialog(t *testing.T) {
+	stateDir := t.TempDir()
+	if err := providers.StoreKey(stateDir, "openai", "k-openai"); err != nil {
+		t.Fatal(err)
+	}
 	var responses []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/models" {
@@ -502,32 +539,45 @@ func TestModelsDialogLateResultRefreshesOpenDialog(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
+	setProviderBaseURL(t, "openai", server.URL+"/v1")
 	client, err := model.New(server.URL+"/v1", "only", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := NewUI("/sample", nil, client, "only", providers.Connection{Provider: "OpenCode Go", Verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m := NewUI("/sample", nil, client, "only", providers.Connection{Provider: "OpenAI", ProviderCanonical: "openai", Verified: true}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	// First open: three models.
 	responses = []string{`[{"id":"alpha"},{"id":"beta"},{"id":"gamma"}]`}
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	_, first := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m.Update(first())
-	if len(m.dialogItems) != 3 {
-		t.Fatalf("first list missing: %+v", m.dialogItems)
+	if first == nil {
+		t.Fatal("first fetch did not start")
 	}
-	// Esc, reopen: the second fetch reports only one model.
-	responses = []string{`[{"id":"only"}]`}
+	firstMsgs := runModelsCmds(t, m, first)
+	if len(m.dialogModelRows) != 3 {
+		t.Fatalf("first list missing: %+v", m.dialogModelRows)
+	}
+	// Esc, reopen cold: the second fetch reports only one model.
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.modelsCache = modelsCache{}
+	responses = []string{`[{"id":"only"}]`}
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	_, second := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	// The stale first result arrives after the dialog reopened; it must not
-	// panic on render, and the fresh (shrunken) list replaces it with the
+	if second == nil {
+		t.Fatal("second fetch did not start")
+	}
+	// A stale first-generation arrival after the reopen is discarded: the
+	// dialog stays loading with no rows, and rendering must not panic.
+	m.Update(firstMsgs[0])
+	if !m.dialog.loading || len(m.dialogModelRows) != 0 {
+		t.Fatalf("stale generation applied: loading=%t rows=%+v", m.dialog.loading, m.dialogModelRows)
+	}
+	// The fresh open's own arrivals populate the shrunken list with the
 	// cursor clamped back into range.
-	m.Update(second())
-	if m.dialog.loading || len(m.dialogItems) != 1 {
-		t.Fatalf("shrunken list not applied: loading=%t items=%+v", m.dialog.loading, m.dialogItems)
+	runModelsCmds(t, m, second)
+	if m.dialog.loading || len(m.dialogModelRows) != 1 {
+		t.Fatalf("shrunken list not applied: loading=%t rows=%+v", m.dialog.loading, m.dialogModelRows)
 	}
 	if m.dialog.cursor != 0 {
 		t.Fatalf("cursor out of range after shrink: %d", m.dialog.cursor)
@@ -540,6 +590,10 @@ func TestModelsDialogLateResultRefreshesOpenDialog(t *testing.T) {
 // TestModelsDialogEnterDuringLoadDoesNothing verifies the empty-selection
 // guard: Enter while the list is loading leaves the dialog open.
 func TestModelsDialogEnterDuringLoadDoesNothing(t *testing.T) {
+	stateDir := t.TempDir()
+	if err := providers.StoreKey(stateDir, "openai", "k-openai"); err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/models" {
 			w.Header().Set("Content-Type", "application/json")
@@ -553,7 +607,8 @@ func TestModelsDialogEnterDuringLoadDoesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := NewUI("/sample", nil, client, "test", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
+	setProviderBaseURL(t, "openai", server.URL+"/v1")
+	m := NewUI("/sample", nil, client, "test", providers.Connection{Provider: "OpenAI", ProviderCanonical: "openai", Verified: true}, stateDir, nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})

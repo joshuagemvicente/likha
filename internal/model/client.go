@@ -130,6 +130,12 @@ func noRedirectHTTPClient() *http.Client {
 	}}
 }
 
+// sharedListClient backs the read-only /models fetch so repeated model-list
+// opens reuse keep-alive connections instead of a fresh TLS handshake.
+var sharedListClient = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
+}}
+
 // SetSessionHeader names the header a provider requires for per-conversation
 // routing (e.g. OpenCode's x-opencode-session).
 func (c *Client) SetSessionHeader(name string) {
@@ -676,7 +682,7 @@ func fetchModelList(ctx context.Context, base, apiKey string) ([]byte, error) {
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	resp, err := noRedirectHTTPClient().Do(req)
+	resp, err := sharedListClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}

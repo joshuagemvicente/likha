@@ -55,7 +55,10 @@ specs/
 | Plan mode (/plan read-only) | [plan-mode/](plan-mode/spec.md) | draft |
 | Custom commands / skills | [custom-commands/](custom-commands/spec.md) | draft |
 | Text transforms (/transform, Wispr-Flow style) | [text-transforms/](text-transforms/spec.md) | draft |
-| TUI layout (status bar enrichment, header declutter, scrollbar fix, role backgrounds) | [tui-layout/](tui-layout/spec.md) | implemented (local) — phases 1–2 done (phase 1: header declutter + mini logo, status-bar enrichment incl. git/env/spend/ctx, auto session names, folder/branch default-on; phase 2: content-width breakpoints + per-path no-overflow invariant tests); phase 3 (role backgrounds) pending |
+| TUI layout (status bar enrichment, header declutter, scrollbar fix, role backgrounds) | [tui-layout/](tui-layout/spec.md) | implemented (local) — phases 1–3 done (phase 1: header declutter + mini logo, status-bar enrichment incl. git/env/spend/ctx, auto session names, folder/branch default-on; phase 2: content-width breakpoints + per-path no-overflow invariant tests; phase 3: role backgrounds via adaptive-themes); real-terminal walkthroughs pending |
 | Muted tool rendering + terminal-native composer keys | [tool-rendering-terminal-keys/](tool-rendering-terminal-keys/spec.md) | in progress — M1 (muted tools) and M2 (composer keys) implemented (local); Ctrl+Delete chord unbindable on bubbletea v1.3.10, carried by Alt+D |
 | Repository structure refactor (phased package split) | [structure-refactor/](structure-refactor/spec.md) | implemented (local) — Phase 1 + Phase 1.5 landed 2026-10-01; Phase 2 parked |
-| Adaptive themes (live preview + full-surface color) | [adaptive-themes/](adaptive-themes/spec.md) | planned |
+| Agent tool loop (read-only search steering + round-cap auto-continue; first slice of agent-harness) | [agent-loop/](agent-loop/spec.md) | planned |
+| Adaptive themes (live preview + full-surface color) | [adaptive-themes/](adaptive-themes/spec.md) | implemented (local) — M1 preview, M2 adaptive helpers, M3 bands landed 2026-10-01; live Ghostty/terminal walkthrough outstanding |
+| All-provider models in `/models` | [all-models/](all-models/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
+| Fast `/models` open (cache + progressive render) | [models-perf/](models-perf/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |

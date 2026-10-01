@@ -1018,3 +1018,62 @@ func TestOAuthConcurrentStreamsShareOneRefresh(t *testing.T) {
 		}
 	}
 }
+
+func TestListModelsDoesNotFollowRedirect(t *testing.T) {
+	var leaked bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		leaked = true
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":[{"id":"a"}]}`)
+	}))
+	t.Cleanup(target.Close)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	t.Cleanup(server.Close)
+	_, err := ListModels(context.Background(), server.URL+"/v1", "")
+	if !errors.Is(err, ErrUnexpectedResponse) {
+		t.Fatalf("ListModels redirect error = %v, want ErrUnexpectedResponse", err)
+	}
+	if leaked {
+		t.Fatal("ListModels followed redirect to target server")
+	}
+}
+
+func TestListModelsErrorClasses(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		body    string
+		wantErr error
+		wantIDs []string
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized, body: `{}`, wantErr: ErrUnauthorized},
+		{name: "server error", status: http.StatusInternalServerError, body: `{}`, wantErr: ErrUnexpectedResponse},
+		{name: "not json", status: http.StatusOK, body: `not-json`, wantErr: ErrUnexpectedResponse},
+		{name: "valid", status: http.StatusOK, body: `{"data":[{"id":"a"}]}`, wantIDs: []string{"a"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				fmt.Fprint(w, tc.body)
+			}))
+			t.Cleanup(server.Close)
+			ids, err := ListModels(context.Background(), server.URL+"/v1", "")
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("ListModels error = %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ListModels error = %v, want nil", err)
+			}
+			if !reflect.DeepEqual(ids, tc.wantIDs) {
+				t.Fatalf("ListModels ids = %v, want %v", ids, tc.wantIDs)
+			}
+		})
+	}
+}
