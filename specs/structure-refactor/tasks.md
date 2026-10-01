@@ -66,120 +66,60 @@ per task.
 
 ## Phase 2 — split `internal/app` (contract first, then moves)
 
-6. **T0 — freeze the cross-package contract.** Before moving any file, audit
-   `connection` field traffic: `grep -n 'conn\.' internal/app/*.go` (reads
-   and writes — known sites include `run.go:321` construction with all ten
-   fields, `providers.go:236` and `tui.go:544` rebuild-literals preserving
-   theme/nerd/mcp/composerStyle, `status_line.go:184` `m.conn.mcp.Summary()`,
-   `tui.go:606,724` `m.conn.mcp`). Same audit for `resolvedProvider`
-   (`grep -n 'res\.' internal/app/run.go` — known: `res.key` in tests) and
-   for keyfile/config symbols (call-site tables are in `context.md`). Then
-   write the contract as the package headers demand it:
-   - `internal/providers`: exported `Connection` (unexported fields) +
-     constructor covering all three construction sites' fields +
-     accessors/mutators for every audited `conn.` use; `ResolveProvider`
-     (+ exported result type/fields); `LoadStoredConfig`,
-     `SaveStoredConfig`, `StoredConfig` (exported fields touched
-     cross-package), `StatusLineConfig` + `FlagEnabled`, `ComposerConfig`;
-     `StoreKey`, `StoredKey`, `StoreOAuth`, `StoredOAuth`, `KeyFilePath`.
-     Nothing else exported.
-   - `internal/agent`: exported `TurnEvent`, `ApprovalRequest`,
-     `RunTurn`, `DispatchTool` (only if called outside the package —
-     verify; else keep private), `CompactHistory`, `GenerateSessionName`,
-     `ExpandFileReferences` + mention helpers.
-   - `internal/mcp`: exported `McpManager`, `NewMcpManager`, methods
-     `Tools`, `Call`, `Stop`, `Status`, `Summary`, `Trusted`.
-   Append the finalized accessor table to `context.md` as an amendment
-   (date it). No code moves in this task.
-   Verified: contract reviewed against the audit table; every `conn.` /
-   `res.` site maps to exactly one constructor arg or accessor.
+6. **T0 — freeze the cross-package contract.** [x] DONE 2026-10-01 —
+   Full audit (`conn.*`, `connection{`, `res.`, keyfile/config, agent-loop
+   callers, `Version`) recorded as the T0 amendment in `context.md`;
+   user-approved via questionnaire (exported fields not accessors,
+   `Version` in `tui`, `NewMcpManagerForTest` exception allowed).
+   Key reversal from the draft: exported fields everywhere instead of
+   unexported + constructor + accessors (~40 test literals + 3 rebuild
+   sites made accessors pure ceremony; matches `model.Provider` /
+   `session.Snapshot` precedent). No code moved in this task.
 
-7. **T1 — create `internal/providers`.** Move `config.go`, `keyfile.go`,
-   `provider.go` whole (new package header, apply T0 exports). Update
-   consumers: `run.go` (193, 230, 252, 259, 278, 405, 413), `composer.go`
-   (127–130), `tui.go` (~10 sites incl. 81, 513–532, 559–562, 899–901,
-   1002–1004), `status_line.go` (`flagEnabled`), `provider.go`'s internal
-   users unchanged. Split `run_test.go`: `resolveProvider` cases move with
-   the subject to `internal/providers/provider_test.go` (package header +
-   imports only); `resolveModel`/`resolveRoot` cases stay.
-   Verified: `go build ./... && go test ./internal/app/ ./internal/providers/`;
-   `run_test.go` in `app` contains zero `resolveProvider` references.
+7. **T1 — create `internal/providers`.** [x] DONE 2026-10-01 — Files moved
+   whole with exported fields; 17 consumers codemodded; resolve/config +
+   `SwitchModelID` tests moved to `internal/providers/provider_test.go`.
+   Full suite green.
 
-8. **T2 — create `internal/agent` core.** Move `agent.go`, `compaction.go`,
-   `sessionname.go` whole (apply T0 exports). `agent.go` keeps its imports
-   of `actions`/`model`/`repository` and gains none of `bubbletea`/
-   `lipgloss`/`internal/tui`. Move `agent_test.go`, `approval_test.go`,
-   `compaction_test.go`, `sessionname_test.go` with their subjects
-   (headers + imports only). `tui.go` keeps its channel/closure half
-   (`events`, `waitEvent`, `pending`, `case turnEvent`); approval semantics
-   unchanged per FR-06/07/08.
-   Verified: `go build ./... && go test ./internal/agent/ ./internal/app/`;
-   `grep -rn charmbracelet internal/agent/` → empty (the import gate);
-   `approval_test.go` passes unmodified.
+8. **T2 — create `internal/agent` core.** [x] DONE 2026-10-01 —
+   `agent.go` (`RunTurn`, `TurnEvent`, `ApprovalRequest` exported),
+   `compaction.go`, `sessionname.go` moved whole. `TurnEvent` fields
+   exported (`Kind/Text/History/Approval/RunID`) — required by tui
+   `Update` and tests. No `bubbletea`/`lipgloss` in agent (verified).
+   Tests moved with subjects; `serveModels` duplicated to app helpers.
 
-9. **T3 — split `mentions.go`.** Cut between `completeMention` (line ~144)
-   and `mentionState` (line ~154): pure half (`mentionToken`, caps,
-   `expandFileReferences`, `buildFileIndex`, `mentionQuery`,
-   `mentionMatches`, `completeMention`) → `internal/agent/mentions.go`;
-   UI half (`mentionState`, `fileIndexMsg`, all `(m *ui)` methods) stays in
-   `app` (Phase-2 `internal/tui`). Split `mentions_test.go` by symbol along
-   the same line; no test logic changes. `agent.go:45`
-   `expandFileReferences` call becomes same-package.
-   Verified: `go build ./... && go test ./internal/agent/ ./internal/app/`;
-   @-reference expansion cases pass from the agent package.
+9. **T3 — split `mentions.go`.** [x] DONE 2026-10-01 — Pure half
+   (`ExpandFileReferences`, `BuildFileIndex`, `MentionQuery`,
+   `MentionMatches`, `CompleteMention`) → `internal/agent/mentions.go`;
+   UI half stays (now `internal/tui/mentions.go`), calling `agent.*`.
+   Expansion + index + runTurn-through-expansion tests moved to agent.
 
-10. **T4 — move the MCP manager into `internal/mcp`.** Move `app/mcp.go`
-    whole to `internal/mcp/manager.go` (apply T0 exports; alias
-    `toolDefinition = model.ToolDefinition` travels). Update the five
-    external sites: `agent.go` (`Tools`, `Call` + approve closure),
-    `run.go:287,292` (`newMcpManager`→`NewMcpManager`, `Stop`),
-    `status_line.go:184` (`Summary`), `tui.go:606,724` (`Status`).
-    Move manager cases from `app/mcp_test.go` to `internal/mcp/`
-    (headers + imports only).
-    Verified: `go build ./... && go test ./internal/mcp/ ./internal/agent/
-    ./internal/app/`; FR-16 first-call approval flow covered by moved tests.
+10. **T4 — move the MCP manager into `internal/mcp`.** [x] DONE 2026-10-01
+    — As `McpManager` (+ approved `NewMcpManagerForTest`); single-use
+    `toolDefinition` alias dropped. Findings: package fake server echoes
+    raw args (one assertion updated to the package's own format);
+    `Status()` never started servers (pre-existing) — kept verbatim,
+    surface test starts the server eagerly via `Tools()`. Manager cases →
+    `internal/mcp`; `/mcp` surface test stays in tui. FR-16 covered.
 
-11. **T5 — split `providers.go` and finish the TUI half.** Pure
-    catalog/resolution logic → `internal/providers` (boundary rule: anything
-    returning/taking `tea.Cmd`/`tea.KeyMsg` or on `*ui` stays). UI half
-    (`keyState`, `keyCheckMsg`, key modal, provider-switch messages,
-    dialogs) stays in `app`. Split `providers_test.go` (812 lines) by
-    symbol along the same boundary. Rename `tui_m2_keys_test.go` →
-    `tui_keys_test.go` (milestone-suffix cleanup; function names unchanged).
-    Verified: `go build ./... && go test ./internal/providers/
-    ./internal/app/`; `/providers`, `/models`, key-modal, and setup flows
-    covered by tests in their final homes.
+11. **T5 — split `providers.go` and finish the TUI half.** [x] DONE
+    2026-10-01 — Pure catalog funcs moved (T1); UI half verified clean in
+    `internal/tui/providers.go`. `tui_m2_keys_test.go` rename deferred —
+    owning feature `tool-rendering-terminal-keys` is `in progress`
+    (recorded in architecture-phase-1 §2).
 
-12. **T6 — form `internal/tui` and shrink `app`.** Move the UI files
-    (`tui.go`, `composer.go`, `editor.go`, `scroll.go`, `status_line.go`,
-    `status_sources.go`, `commandcomplete.go`, remaining modal/mention
-    halves) plus their tests (`tui_test.go`, `tui_keys_test.go`,
-    `tui_muted_tools_test.go`, `models_sessions_dialog_test.go`,
-    `dialog_test_helpers_test.go`, `themes_modal_test.go`, `composer*`,
-    `editor_test.go`, `scroll_test.go`, all four `status_*_test.go`,
-    `session_test.go` → renamed `tui_session_test.go`) into `internal/tui`.
-    `internal/app` retains only `run.go` (composition: `Run`,
-    `resolveModel`, `resolveRoot`, `deviceLoginFlow`, the single
-    `tea.NewProgram`/`newUI` call site at ex-`run.go:321`) and whatever
-    wiring the compiler demands — nothing else. `cmd/lisa/main.go`
-    untouched.
-    Verified: `go build ./...`; `go list ./...` shows
-    `lisa/internal/{agent,providers,tui}` and a small `lisa/internal/app`;
-    full `go test ./...` green.
+12. **T6 — form `internal/tui` and shrink `app`.** [x] DONE 2026-10-01 —
+    12 UI sources + all UI tests → `internal/tui`; `NewUI` exported;
+    `Version` + `logo` → `tui`; `run.go` reads `tui.Version`;
+    release.sh ldflags → `lisa/internal/tui.Version` (verified with a
+    stamped `--version` run). `internal/app` holds only `run.go` +
+    `run_test.go`; `cmd/lisa/main.go` byte-identical. Suite + race green.
 
-13. **T7 — Phase 2 gate + docs.** Full baseline suite plus integration:
-    `go build ./... && go vet ./... && go test ./... && go test -race ./...
-    && go test ./tests/integration/`, `gofmt -l` clean. Manual TUI
-    walkthrough on the refactored tree (same steps as the release smoke in
-    `specs/feature-test-plan.md`: approve + reject an `edit_file`, approve
-    + reject a `run_command`, `/themes`, `/models`, `/providers`,
-    first-run setup path, session resume) — identical visible behavior.
-    Write `ARCHITECTURE.md` at root: package-dependency diagram
-    (`cmd` → `app` → `agent`/`providers`/`tui` + leaves), one paragraph per
-    package (owns / may-not-import), and the "where do I add X" table (a
-    tool, a provider, a keybinding, a status segment, a dialog). Point
-    README's structure section at it. Status becomes `implemented (local)`
-    only after this gate.
+13. **T7 — Phase 2 gate + docs.** [x] DONE 2026-10-01 — `go build`,
+    `go vet`, `go test ./...` (11 packages), `go test -race` on
+    `tui`/`agent`/`providers`/`mcp`, `gofmt -l` clean. `ARCHITECTURE.md`
+    written (diagram, owns/may-not-import, where-do-I-add-X, history);
+    README points to it. Phase 2 `implemented (local)`.
 
 ## Explicitly not tasks
 

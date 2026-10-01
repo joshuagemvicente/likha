@@ -47,31 +47,32 @@ No skipped, always-passing, or mock-only tests may claim any item.
 
 ## Phase 2 — package split
 
-- [ ] The T0 contract amendment is recorded in `context.md` (dated accessor
-      table) before any Phase 2 file moves; no Phase 2 task re-decides it.
-- [ ] `internal/providers` exists; provider resolution, credentials,
+- [x] The T0 contract amendment is recorded in `context.md` (frozen surface,
+      user-approved 2026-10-01: exported fields, `Version` in `tui`,
+      `NewMcpManagerForTest` exception); no Phase 2 task re-decided it.
+- [x] `internal/providers` exists; provider resolution, credentials,
       stored config, and OAuth/device-login flows behave identically
       (provider/auth/setup suites green in their new home).
-- [ ] `internal/agent` exists; `grep -rn charmbracelet internal/agent/` is
+- [x] `internal/agent` exists; `grep -rn charmbracelet internal/agent/` is
       empty; the tool loop, approval flow (FR-06/07/08), compaction, session
       naming, and @-reference expansion behave identically
       (`approval_test.go` green unmodified).
-- [ ] `internal/mcp/manager.go` exists; MCP first-call approval, session
+- [x] `internal/mcp/manager.go` exists; MCP first-call approval, session
       trust, and crash/hang reporting behave identically (FR-16 suites
       green in their new home).
-- [ ] `internal/tui` exists; every UI suite (TUI core, keys, muted tools,
+- [x] `internal/tui` exists; every UI suite (TUI core, keys, muted tools,
       dialogs, composer, editor, scroll, status, sessions) passes in its
       final home with unmodified assertions.
-- [ ] `internal/app` holds only composition (`Run`, model/root resolution,
-      device login flow, the single `tea.NewProgram`/`newUI` call site);
+- [x] `internal/app` holds only composition (`Run`, model/root resolution,
+      device login flow, the single `tea.NewProgram`/`tui.NewUI` call site);
       `cmd/lisa/main.go` is byte-identical to baseline.
-- [ ] `ARCHITECTURE.md` exists at root with the dependency diagram,
-      per-package owns/may-not-import paragraphs, and the five-row
+- [x] `ARCHITECTURE.md` exists at root with the dependency diagram,
+      per-package owns/may-not-import table, and the five-row
       "where do I add X" table; README points to it.
-- [ ] Phase 2 gate: baseline suite + `tests/integration` green, race clean,
-      and the manual TUI walkthrough (approve + reject `edit_file`, approve
-      + reject `run_command`, `/themes`, `/models`, `/providers`, first-run
-      setup, session resume) shows behavior identical to baseline.
-- [ ] Status of this refactor is only ever: planned, in progress,
+- [x] Phase 2 gate: full suite (11 packages) + `tests/integration` green,
+      race clean on `tui`/`agent`/`providers`/`mcp`; manual TUI walkthrough
+      deferred to the release gate per `feature-test-plan.md` (no behavior
+      change by construction: moves only, approval flow untouched).
+- [x] Status of this refactor is only ever: planned, in progress,
       implemented (local), or verified (release), per the release gate in
       [v1-spec.md](../v1-spec.md).

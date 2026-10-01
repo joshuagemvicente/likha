@@ -208,7 +208,7 @@ with that spec's checklist as the authority that nothing regressed).
    `status_view_test.go` (14 tests, ex-`statusbar_test.go`),
    `status_markers_test.go` (3 tests). Phase-2 tui package inherits all four.
 
-## T0 contract amendment — frozen cross-package surface (drafted 2026-10-01, PENDING APPROVAL)
+## T0 contract amendment — frozen cross-package surface (drafted 2026-10-01, APPROVED via questionnaire same day)
 
 Full audit: `conn\.[a-zA-Z]+` (~15 files), `connection{` (3 production +
 ~40 test literals), `res\.` (run.go + run_test.go), keyfile/config symbols
