@@ -54,7 +54,7 @@ func TestStatusOptionalOrderAndNarrowControls(t *testing.T) {
 		Branch: statusFlag(true), Changes: true, Staged: true, MCP: true,
 		Session: true, Minutes: true, Tokens: true, Version: true, Update: true,
 	}
-	m := statusTestUI(t, "minimal", 200, 24, allOn)
+	m := statusTestUI(t, "minimal", 280, 24, allOn)
 	m.statusFolder = "~/work"
 	m.git, m.gitOK = gitState{Branch: "feature", Staged: 1, Dirty: 3}, true
 	m.statusTitle = "First prompt"
@@ -172,7 +172,7 @@ func TestStatusTitleUpdatesOnPromptSubmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := newUI(t.TempDir(), nil, client, "local", connection{provider: "Local", statusLine: storedStatusLineConfig{Session: true}}, t.TempDir(), nil, session.Snapshot{ID: "fresh-session"})
-	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.Update(tea.WindowSizeMsg{Width: 130, Height: 24})
 	m.startTurn("First real prompt")
 	defer m.cancel()
 	defer close(m.abandon)
@@ -201,7 +201,7 @@ func TestStatusSessionTitleAndBranchRefresh(t *testing.T) {
 	run("commit", "-qm", "initial", "--allow-empty")
 	options := storedStatusLineConfig{Branch: statusFlag(true), Session: true}
 	m := newUI(root, nil, nil, "local", connection{provider: "Local", statusLine: options}, t.TempDir(), nil, session.Snapshot{ID: "new-session-id"})
-	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.Update(tea.WindowSizeMsg{Width: 130, Height: 24})
 	if !m.gitOK || m.git.Branch != "first" || !strings.Contains(stripANSI(m.statusLineRows(1, 1)[0]), "first") {
 		t.Fatalf("configured git branch not displayed: git=%+v ok=%t", m.git, m.gitOK)
 	}

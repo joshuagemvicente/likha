@@ -49,13 +49,14 @@ func (m *ui) composerLines() []string {
 		caret = "█"
 	}
 	if m.pending != nil {
-		text = "Review before approval"
 		if m.status == "Review every page before approving" {
-			text = "Read all pages before approving"
+			text = m.reviewMark("Read all pages before approving")
+		} else {
+			text = m.reviewMark("Review before approval")
 		}
 		placeholder = false
 	} else if placeholder {
-		text = "Ask Lisa… // escapes a slash"
+		text = "Ask Likha… // escapes a slash"
 		if caret != "" {
 			// An empty draft renders the caret before the placeholder, like
 			// a browser's placeholder with a focused empty input.
@@ -75,7 +76,7 @@ func (m *ui) composerLines() []string {
 		input = input[len(input)-limit:]
 	}
 	rows := make([]string, 0, len(input)+fixed)
-	gap := fit("", width)
+	gap := m.theme.Base.Render(fit("", width))
 	rows = append(rows, gap)
 	if style == "minimal" {
 		rows = append(rows, m.theme.Border.Render(strings.Repeat("─", width)))
@@ -85,11 +86,11 @@ func (m *ui) composerLines() []string {
 	for i, line := range input {
 		switch style {
 		case "bordered":
-			inner := fit(line, width-4)
+			inner := withBase(m.theme.Base, m.theme.Base).Render(fit(line, width-4))
 			if placeholder {
-				inner = m.theme.Muted.Render(inner)
+				inner = withBase(m.theme.Muted, m.theme.Base).Render(fit(line, width-4))
 			} else if m.pending != nil {
-				inner = m.theme.Warning.Render(inner)
+				inner = withBase(m.theme.Warning, m.theme.Base).Render(fit(line, width-4))
 			}
 			rows = append(rows, m.theme.Border.Render("│ ")+inner+m.theme.Border.Render(" │"))
 		case "chatter":
@@ -97,19 +98,19 @@ func (m *ui) composerLines() []string {
 			if i == 0 {
 				prefix = "You › "
 			}
-			content := fit(line, inputWidth)
+			content := withBase(m.theme.Base, m.theme.Base).Render(fit(line, inputWidth))
 			if placeholder {
-				content = m.theme.Muted.Render(content)
+				content = withBase(m.theme.Muted, m.theme.Base).Render(fit(line, inputWidth))
 			} else if m.pending != nil {
-				content = m.theme.Warning.Render(content)
+				content = withBase(m.theme.Warning, m.theme.Base).Render(fit(line, inputWidth))
 			}
 			rows = append(rows, m.theme.Selected.Render(prefix)+content)
 		default:
-			content := fit(line, width)
+			content := withBase(m.theme.Base, m.theme.Base).Render(fit(line, width))
 			if placeholder {
-				content = m.theme.Muted.Render(content)
+				content = withBase(m.theme.Muted, m.theme.Base).Render(fit(line, width))
 			} else if m.pending != nil {
-				content = m.theme.Warning.Render(content)
+				content = withBase(m.theme.Warning, m.theme.Base).Render(fit(line, width))
 			}
 			rows = append(rows, content)
 		}

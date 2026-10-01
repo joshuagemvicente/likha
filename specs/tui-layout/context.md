@@ -14,8 +14,8 @@ Phase 1 code (all verified present and exercised by the current suite).
 | `internal/app/config.go` | `storedStatusLineConfig` with `Folder`/`Branch` as `*bool` (`nil` = default-on) and `flagEnabled` as the single resolution point. |
 | `internal/app/run.go` | Bare ASCII `logo` constant (no repository line); builds the fresh `ui` with the flipped defaults. |
 | `internal/session/session.go` | Snapshot `NamedTitle` storage; naming writes through the existing Save path. |
-| `internal/app/statusbar_test.go`, `status_line_test.go`, `status_sources_test.go`, `sessionname_test.go` | The automated phase-1 coverage: header collapse, pure logo, mark placement/retirement, ctx formats, display name, env, git-state rendering/parsing, spend pricing, pointer defaults, and the four naming tests (apply+persist, silent failure, resumed-skip, exit-before-completion). |
-| `ui/theme.go` | Theme roles, `HasDarkBackground`, per-theme palettes — gains background roles in phase 3. |
+| `internal/app/status_view_test.go`, `status_line_test.go`, `status_sources_test.go`, `sessionname_test.go` | The automated phase-1 coverage: header collapse, pure logo, mark placement/retirement, ctx formats, display name, env, git-state rendering/parsing, spend pricing, pointer defaults, and the four naming tests (apply+persist, silent failure, resumed-skip, exit-before-completion). |
+| `internal/ui/theme.go` (moved from `ui/` by structure-refactor Phase 1) | Seven style roles (`Named`/`Resolve`/`fromPalette`, `HasDarkBackground`), per-family light/dark palettes — phase 3 adds `BgBase`/`BgUser`/`BgTool`/`BgModel` here plus `internal/ui/adaptive.go` (`mix`, `legible`, AdaptiveColor constructors) per adaptive-themes M2. |
 | `specs/v1-spec.md` | FR-12 and §7 amended before implementation (zero-line header, pure logo, bottom-right mark, narrow identity line). |
 
 ## Related specs
@@ -31,8 +31,7 @@ Phase 1 code (all verified present and exercised by the current suite).
 - Resize re-layout already exists (`layoutWidth = 0`), so breakpoints are a
   pure function of `m.width` at rebuild time — phase 2 is a pure
   render-path audit.
-- Status row count depends only on width (`statusLineRows`), so phase 3
-  background bands cannot shift page boundaries.
+- Phase 3 entry styling lands in `rebuild()`'s role switch (`internal/app/tui.go:1415-1430`; `"You"`/`"Assistant"`/`"Tool"`/`"Reasoning"`/`"Error"`/`"Lisa"`/`"Logo"` — role strings in `tui.go:244,309,768,776,795,839`), mapped to the new band roles; full-width bands need no layout math (`mainView` already renders `style.Render(fit(line, width))`); the phase-2 overflow suite is the regression gate. Status row count depends only on width (`statusLineRows`), so phase 3 background bands cannot shift page boundaries. `specs/adaptive-themes/spec.md` is the buildable contract: M1 live preview (`updateDialog`/`confirmDialog` at `tui.go:295,358`, `applyTheme` at `tui.go:406`, `applySetupTheme` in `setup.go:270`), M2 adaptive helpers, M3 band map.
 - Phase 1's only unvalidated surface is real-terminal rendering (mark
   position, narrow-degradation glyph widths, scrollbar absence); the
   README/CHANGELOG wording already matches the tested behavior.

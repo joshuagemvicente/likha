@@ -12,6 +12,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"lisa/internal/model"
+	lisaui "lisa/internal/ui"
 )
 
 // statusSegment is measured as plain terminal cells before any theme styling.
@@ -39,21 +40,53 @@ func (m *ui) refreshStatusSessionTitle() {
 	m.statusTitle = statusSessionTitle(snapshot)
 }
 
+// statusState marks the status state with the opted-in Nerd Font marker
+// (FR-15, themes spec): icons appear only as status and review markers and
+// only under --nerd-fonts; plain output stays identical without the flag.
+func (m *ui) statusState() string {
+	state := m.status
+	if !m.conn.nerd || m.pending != nil {
+		return state
+	}
+	switch {
+	case state == "Waiting for model" || state == "Compacting…":
+		return m.glyphs.Waiting + " " + state
+	case state == "Reading repository" || strings.HasPrefix(state, "Executing approved "):
+		return m.glyphs.Working + " " + state
+	case state == "Ready":
+		return m.glyphs.Done + " " + state
+	case state == "Error" || state == "Not connected" || state == "Session save failed":
+		return m.glyphs.Error + " " + state
+	case state == "Resumed session":
+		return m.glyphs.Resume + " " + state
+	}
+	return state
+}
+
+// reviewKind prefixes a review label with the pencil marker under the Nerd
+// Font opt-in; plain terminals keep the bare label.
+func (m *ui) reviewMark(kind string) string {
+	if !m.conn.nerd {
+		return kind
+	}
+	return m.glyphs.Review + " " + kind
+}
+
 func (m *ui) statusHints(page, pages int, narrow bool) []string {
 	position := fmt.Sprintf("Page %d/%d", page, pages)
 	if m.pending != nil {
 		if m.status == "Review every page before approving" {
 			return []string{"Read all pages " + position + " Y/N PgUp/PgDn", "Review " + position + " Y/N PgUp/PgDn ^C"}
 		}
-		kind := "Review"
+		kind := m.reviewMark("Review")
 		if m.pending.Kind == "command" {
-			kind = "Command review"
+			kind = m.reviewMark("Command review")
 		} else if m.pending.Kind == "mcp" {
-			kind = "MCP review"
+			kind = m.reviewMark("MCP review")
 		}
 		return []string{kind + " · " + position + " · Y/N PgUp/PgDn ^C", "Review " + position + " Y/N PgUp/PgDn ^C"}
 	}
-	state := m.status
+	state := m.statusState()
 	if narrow {
 		if m.working {
 			return []string{state + " " + position + " PgUp/PgDn ^C", position + " PgUp/PgDn ^C"}
@@ -241,6 +274,12 @@ func (m *ui) statusIdentity(maxWidth int, usage string) []statusSegment {
 	provider := statusField(m.conn.provider, m.width)
 	if provider == "" {
 		provider = "Provider"
+	} else if !m.conn.verified {
+		// v1 spec §3: an endpoint outside the accepted list runs with a
+		// visible unverified warning. The identity row is the provider
+		// display; the tight-width abbreviation below may drop the marker
+		// before it ever clips page controls.
+		provider += " (unverified)"
 	}
 	modelName := statusField(model.ModelDisplayName(m.modelName), m.width)
 	if modelName == "" {
@@ -308,8 +347,21 @@ func (m *ui) statusMarkWidth() int {
 	}
 	return 0
 }
-
 func (m *ui) renderStatusRow(left []statusSegment, right string, warning bool) string {
+	return m.renderStatusCells(left, right, warning)
+}
+
+// renderStatusCanvas paints a fully-laid-out status row onto the theme
+// canvas. mainView is the only caller: tests keep calling renderStatusRow
+// and statusLineRows for plain measurable rows.
+func (m *ui) renderStatusCanvas(row string) string {
+	// Pad to full width first (plain spaces), then paint the canvas behind
+	// the whole row: role colors survive because PaintRow re-applies the bg
+	// around each SGR span instead of re-styling text.
+	return lisaui.PaintRow(row, m.width, m.theme.BaseBG())
+}
+
+func (m *ui) renderStatusCells(left []statusSegment, right string, warning bool) string {
 	var b strings.Builder
 	for i, part := range left {
 		if i > 0 {
@@ -387,9 +439,11 @@ func (m *ui) statusLineRows(page, pages int) []string {
 				break
 			}
 		}
-	} else if len(m.statusOptional()) == 0 {
-		// Decoration-only rows also use the shortest usable hint;
-		// otherwise retain the most informative wording that fits full identity.
+	} else {
+		// Without a rate window, retain the most informative hint that fits
+		// the full identity — the state text (Waiting for model, Cancelling,
+		// Ready) is the footer's status string and must not be pinned to the
+		// shortest variant just because optional segments share the row.
 		for _, hint := range hints {
 			available := m.width - runewidth.StringWidth(hint) - 3 - markWidth
 			if available >= statusWidth(m.statusIdentity(m.width, "")) {

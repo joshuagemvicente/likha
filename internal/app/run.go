@@ -18,15 +18,19 @@ import (
 	"lisa/internal/model"
 	"lisa/internal/repository"
 	"lisa/internal/session"
-	lisaui "lisa/ui"
+	lisaui "lisa/internal/ui"
 )
 
-const logo = ` _     ___ ____    _
-| |   |_ _/ ___|  / \
-| |    | |\___ \ / _ \
-| |___ | | ___) / ___ \
-|_____|___|____/_/   \_\`
+// const logo = ` _     ___ ____    _
+// | |   |_ _/ ___|  / \
+// | |    | |\___ \ / _ \
+// | |___ | | ___) / ___ \
+// |_____|___|____/_/   \_\`
 
+const logo = ` ____   ___  __ ___ __ __  _____ 
+/  _/  /___\|  |  //  |  \/  _  \
+|  |---|   ||  _ < |  _  ||  _  |
+\_____/\___/|__|__\\__|__/\__|__/`
 const usageHeader = `Usage: lisa [options] [repository]
 
 Start Lisa, an agent harness terminal UI, in a repository. Lisa talks directly

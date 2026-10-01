@@ -412,7 +412,7 @@ func (m *ui) keyModalView() string {
 		default:
 			box = m.theme.Border.Render("│ ") + content[j-1] + m.theme.Border.Render(" │")
 		}
-		base[top+j] = spliceRow(stripANSI(base[top+j]), left, boxWidth, box)
+		base[top+j] = spliceRowOn(base[top+j], left, boxWidth, box, m.theme.BaseBG())
 	}
 	return strings.Join(base[:height], "\n")
 }

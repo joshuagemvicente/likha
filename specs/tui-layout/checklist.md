@@ -68,11 +68,15 @@ gate for phase 3. Phase 2's string-viewport invariant suite is green as of
       `TestMentionPopupRowsNeverOverflow`,
       `TestCommandPopupRowsNeverOverflow`).
 
-## Phase 3 — role backgrounds
+## Phase 3 — role backgrounds (owned by adaptive-themes)
 - [ ] User input, tool output, and model output have distinguishable
-      backgrounds; reasoning keeps its muted foreground.
+      backgrounds; reasoning keeps its muted foreground. (Criterion lives in
+      `specs/adaptive-themes/spec.md` M3 — band map, contrast gate, overflow
+      regression.)
 - [ ] Backgrounds degrade to fully legible plain text on limited terminals.
-- [ ] No animation or flash is introduced (FR-15).
+      (adaptive-themes limited-profile criterion.)
+- [ ] No animation or flash is introduced (FR-15). (Both specs; no new
+      keybindings or chords in either.)
 
 ## Gates
 - [x] `go test ./...` passes; no skipped or mock-only tests claimed as

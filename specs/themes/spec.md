@@ -1,6 +1,6 @@
 # Feature: Themes and optional Nerd Font icons
 
-**Status:** implemented (local). Palette registry covers all eleven families with
+**Status:** implemented (local). Palette registry covers all twenty-two families with
 light/dark variants; the setup theme stage, `/themes` command, `--theme`/`LISA_THEME`
 precedence, Nerd Font opt-in glyphs, and muted reasoning rendering are wired and
 covered by tests (theme resolution, setup theme stage, reasoning stream/close rules).

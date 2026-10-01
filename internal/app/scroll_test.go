@@ -131,3 +131,38 @@ func TestSmoothScrollLineGranular(t *testing.T) {
 		t.Fatalf("pinned view drifted: scroll=%d max=%d", m.scroll, m.scrollMax())
 	}
 }
+
+// The scrollbar column must not depend on a row's styling (user-reported
+// overlap): rendered rows carry SGR escapes whose bytes occupy no cells, so
+// splicing measures by visible text only. With a color profile active, a
+// muted Reasoning block keeps the bar at the far-right column on every body
+// row and loses no text to the splice cut.
+func TestScrollbarStaysAtTheRightEdgeOnStyledRows(t *testing.T) {
+	forceANSI(t)
+	t.Cleanup(func() {})
+	m := newUI("/sample", nil, nil, "local", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.entries = append(m.entries,
+		entry{role: "Reasoning", content: strings.Repeat("the reasoning paragraph wraps well inside the viewport width. ", 40)},
+		entry{role: "Assistant", content: "short answer"})
+	m.layoutWidth = 0
+	rows := strings.Split(m.View(), "\n")
+	body := m.bodyHeight()
+	if !m.scrollbarVisible(body) {
+		t.Fatal("test fixture must overflow the viewport")
+	}
+	for i := 0; i < body; i++ {
+		visible := stripANSI(rows[i])
+		cells := []rune(visible)
+		if len(cells) != m.width {
+			t.Fatalf("body row %d width %d, want %d: %q", i, len(cells), m.width, visible)
+		}
+		if last := cells[m.width-1]; last != '│' && last != '█' {
+			t.Fatalf("body row %d lost the right-edge scrollbar: %q", i, visible)
+		}
+	}
+	// The reasoning text survives the splice uncut.
+	if !strings.Contains(stripANSI(strings.Join(rows[:body], "\n")), "viewport width.") {
+		t.Fatal("styled reasoning text was truncated by the scrollbar splice")
+	}
+}

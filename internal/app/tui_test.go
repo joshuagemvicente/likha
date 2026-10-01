@@ -1029,8 +1029,8 @@ func TestUsageFooterShowsCodexRateLimits(t *testing.T) {
 func TestStartupLogoBlockOpensFreshSessionAndScrollsAway(t *testing.T) {
 	m := newUI("/sample", nil, nil, "local", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	first := m.View()
-	if !strings.Contains(first, "_     ___ ____") {
+	first := stripANSI(m.View())
+	if !strings.Contains(first, "____   ___  __") {
 		t.Fatalf("fresh session does not open with the logo block: %q", first)
 	}
 	if strings.Contains(first, "Repository:") {
@@ -1041,19 +1041,20 @@ func TestStartupLogoBlockOpensFreshSessionAndScrollsAway(t *testing.T) {
 	}
 	m.jumpBottom()
 	m.layoutWidth = 0 // direct entry mutation bypasses the Update-path cache reset
-	latest := m.View()
-	if strings.Contains(latest, "_     ___ ____") {
+	latest := stripANSI(m.View())
+	if strings.Contains(latest, "____   ___  __") {
 		t.Fatalf("logo block stayed on the newest page: %q", latest)
 	}
 	// Narrow terminals skip the block; the compact header line carries
 	// identity instead.
 	narrow := newUI("/sample", nil, nil, "local", connection{provider: "OpenAI", verified: true}, t.TempDir(), nil, session.Snapshot{})
 	narrow.Update(tea.WindowSizeMsg{Width: 50, Height: 24})
-	if strings.Contains(narrow.View(), "_     ___ ____") {
-		t.Fatalf("logo block rendered below the 56-column floor: %q", narrow.View())
+	narrowView := stripANSI(narrow.View())
+	if strings.Contains(narrowView, "____   ___  __") {
+		t.Fatalf("logo block rendered below the 56-column floor: %q", narrowView)
 	}
-	if !strings.Contains(narrow.View(), "Lisa · sample") {
-		t.Fatalf("narrow terminal lost the compact identity line: %q", narrow.View())
+	if !strings.Contains(narrowView, "Lisa · sample") {
+		t.Fatalf("narrow terminal lost the compact identity line: %q", narrowView)
 	}
 }
 
@@ -1087,7 +1088,7 @@ func TestStartupLogoBlockNeverPersistsOrReappearsOnResume(t *testing.T) {
 	}
 	resumed := newUI(root, nil, nil, "local", connection{provider: "OpenAI", verified: true}, "", store, saved)
 	resumed.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	if strings.Contains(resumed.View(), "_     ___ ____") {
+	if strings.Contains(resumed.View(), "____   ___  __") {
 		t.Fatalf("resumed session redrew the logo block: %q", resumed.View())
 	}
 }
@@ -1594,13 +1595,13 @@ func historyEqual(a, b []model.Message) bool {
 	return true
 }
 
-// contentWidthBreakpoints pins the phase-2 wrap widths: two padding columns
-// below the cap, the 120-column measure above 140-col terminals.
+// contentWidthBreakpoints pins the wrap width: the viewport minus two
+// padding columns at every width — no capped measure on wide terminals.
 func TestContentWidthBreakpoints(t *testing.T) {
 	cases := []struct {
 		term, want int
 	}{
-		{1, 1}, {40, 38}, {41, 39}, {120, 118}, {140, 138}, {141, 120}, {200, 120},
+		{1, 1}, {40, 38}, {41, 39}, {120, 118}, {140, 138}, {141, 139}, {200, 198},
 	}
 	for _, tc := range cases {
 		if got := contentWidth(tc.term); got != tc.want {
@@ -1675,11 +1676,11 @@ func TestBodyNeverOverflowsTheViewport(t *testing.T) {
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
 		m.entries = append(m.entries, pathologicalEntries()...)
 		walkPages(t, m)
-		if width > 140 {
-			for _, line := range m.lines {
-				if got := runewidth.StringWidth(stripANSI(line)); got > 120 {
-					t.Fatalf("%d columns capped wrap leaked a %d-cell line: %q", width, got, line)
-				}
+		// The wrap width is the viewport minus two padding columns at every
+		// size — no capped measure — but no line may exceed the viewport.
+		for _, line := range m.lines {
+			if got := runewidth.StringWidth(stripANSI(line)); got > width-2 {
+				t.Fatalf("%d columns leaked a %d-cell line: %q", width, got, line)
 			}
 		}
 	}

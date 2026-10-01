@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"lisa/internal/session"
-	lisaui "lisa/ui"
+	lisaui "lisa/internal/ui"
 )
 
 // Muted tool entries (specs/tool-rendering-terminal-keys M1): a Tool entry

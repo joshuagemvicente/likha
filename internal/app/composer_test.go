@@ -23,7 +23,7 @@ func TestComposerStylesAndNarrowDegradation(t *testing.T) {
 		m := composerTestUI(t, style, 100, 24)
 		view := m.View()
 		assertViewport(t, view, 100, 24)
-		if !strings.Contains(view, "Ask Lisa… // escapes a slash") {
+		if !strings.Contains(stripANSI(view), "Ask Likha… // escapes a slash") {
 			t.Fatalf("%s placeholder missing: %q", style, view)
 		}
 		wide[style] = stripANSI(strings.Join(m.composerLines(), "\n"))
@@ -33,7 +33,7 @@ func TestComposerStylesAndNarrowDegradation(t *testing.T) {
 				t.Fatalf("minimal rule missing: %q", wide[style])
 			}
 		case "bordered":
-			if !strings.Contains(wide[style], "╭") || !strings.Contains(wide[style], "╰") || (!strings.Contains(wide[style], "│ Ask Lisa") && !strings.Contains(wide[style], "│ █Ask Lisa")) {
+			if !strings.Contains(wide[style], "╭") || !strings.Contains(wide[style], "╰") || (!strings.Contains(wide[style], "│ Ask Likha") && !strings.Contains(wide[style], "│ █Ask Likha")) {
 				t.Fatalf("bordered outline missing: %q", wide[style])
 			}
 		case "borderless":
@@ -41,7 +41,7 @@ func TestComposerStylesAndNarrowDegradation(t *testing.T) {
 				t.Fatalf("borderless separator missing: %q", wide[style])
 			}
 		case "chatter":
-			if !strings.Contains(wide[style], "You › Ask Lisa") && !strings.Contains(wide[style], "You › █Ask Lisa") {
+			if !strings.Contains(wide[style], "You › Ask Likha") && !strings.Contains(wide[style], "You › █Ask Likha") {
 				t.Fatalf("chatter prefix missing: %q", wide[style])
 			}
 		}

@@ -121,7 +121,7 @@ Rules:
 
 ## 5. Visual design guidelines
 
-- **Roles only, no new styles:** reuse the existing `lisa/ui` theme roles.
+- **Roles only, no new styles:** reuse the existing `lisa/internal/ui` theme roles.
   The banner renders with the **Warning** role (bold; palette-dependent
   color) — the role already reserved for user-attention markers (pending
   reviews) — while the command token `lisa update` renders inside the same

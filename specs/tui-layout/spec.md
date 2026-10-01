@@ -30,8 +30,9 @@ phases 1–2 render in a real terminal (see checklist.md).
   (`ModelDisplayName` + curated catalog) feeds the display-name map and
   `internal/model/pricing.go` (`TurnCost`) prices the spend segment.
 - Body content hard-wraps at `contentWidth(m.width)` in `rebuild()` — the
-  viewport minus two padding columns, capped at 120 above 140 columns
-  (phase 2); resize re-flows via `layoutWidth = 0`.
+  viewport minus two padding columns at every width (the phase-2 120-column
+  cap was removed: lines reach the right edge); resize re-flows via
+  `layoutWidth = 0`.
 - Themes (`ui/theme.go`) use foreground-only roles; reasoning/tools differ
   by muted foreground only (phase 3 territory).
 
@@ -158,13 +159,13 @@ User-visible behavior:
 
 Unchanged from the approved plan, now verified by the suite:
 
-- **Content width stepped by breakpoint.** `contentWidth(termWidth)` is the
-  viewport minus two padding columns, capped at a 120-column measure above
-  140 columns — long lines stop stretching across an ultrawide terminal and
-  text keeps a readable measure. `rebuild()` applies it to conversation
-  entries, pending review bodies, and the narrow-header fallback re-wrap.
-  The status bar, composer, and popups keep rendering at the full terminal
-  width.
+- **Content width at every width.** `contentWidth(termWidth)` is the
+  viewport minus two padding columns with no capped measure (the original
+  120-column cap above 140 terminals was removed: long lines reach the
+  right edge instead of stopping short of it). `rebuild()` applies it to
+  conversation entries, pending review bodies, and the narrow-header
+  fallback re-wrap. The status bar, composer, and popups keep rendering at
+  the full terminal width.
 - **Logo guard.** The startup logo block is raw, pre-formatted ASCII that
   skips `rebuild()`'s wrapper; as a safety net its raw lines now hard-wrap
   at content width if any line is wider than the viewport (a no-op for the
@@ -180,8 +181,8 @@ Unchanged from the approved plan, now verified by the suite:
   exceeds the viewport" in display cells, asserted by
   `assertRowsWithinViewport` on ANSI-stripped rows:
   - Conversation body with unbreakable tokens, CJK, control/zero-width
-    runes, at widths 40–200 including both side of the cap
-    (`TestBodyNeverOverflowsTheViewport`, also pinning the 120-column cap).
+    runes, at widths 40–200 (`TestBodyNeverOverflowsTheViewport`, pinning
+    the viewport-minus-two wrap bound).
   - Pending multi-page reviews (`TestPendingReviewNeverOverflowsTheViewport`).
   - Logo lines (`TestLogoLinesStayWithinTheViewport`).
   - Dialogs (`TestDialogFits…`, both CJK-wide and narrow-drop cases).
@@ -202,11 +203,42 @@ Unchanged from the approved plan, now verified by the suite:
 The real-terminal scrollbar-absence walkthrough stays pending (checklist).
 
 ## Phase 3 — Differentiated backgrounds for user / tool / model content
-
-Unchanged from the approved plan: new background roles (`BgUser`, `BgTool`,
-`BgModel`) with light/dark palette variants, full-width bands, muted
-foregrounds preserved, plain-text degradation (FR-15). Open decisions:
-tints per theme; tool-activity vs tool-result bands; reasoning background.
++
+Status: **absorbed by `specs/adaptive-themes/spec.md`** (read that spec as
+the buildable contract for this phase). This section stays as the
+requirements record; the adaptive-themes spec owns the design that closed
+the three open decisions:
++
+- Tints: derived via `mix()` (accent toward base canvas, ~8–12%) with a
+  per-family override map only where a derived tint fails the contrast
+  gate — no hand-picked 88-cell table.
+- Tool activity vs result: one shared `BgTool` band; distinction stays in
+  prefix text.
+- Reasoning background: none — `Muted` foreground only; the quietest layer
+  stays flat.
++
+Required behavior (unchanged): `BgUser`/`BgTool`/`BgModel` (+ `BgBase`
+canvas) roles with light/dark variants via `lipgloss.AdaptiveColor`;
+full-width bands (padding paints for free in `mainView`'s
+`style.Render(fit(line, width))`); muted foregrounds preserved; `Error`
+fails by foreground; `Lisa`/system + logo sit on `BgBase`; status bar,
+composer, scrollbar, and dialogs render on `BgBase`; composer input uses
+`Normal` fg; degradation under limited profiles collapses bands to legible
+plain text with `You:`/`Tool:`/… labels and fg roles intact (FR-15).
++
+## Post-refactor path map (verified 2026-09-30)
++
+The system-architecture and Phase 1.5 changes (see
+`specs/structure-refactor/`) moved the files this spec named. Phase 3
+touch points, current locations:
++
+| Old path (this spec's history) | Current path |
+| --- | --- |
+| `ui/theme.go` (`Named`/`Resolve`/`fromPalette`, `Theme` roles, families) | `internal/ui/theme.go` — new roles land here; new file `internal/ui/adaptive.go` (`mix`, `legible`, AdaptiveColor constructors) per adaptive-themes M2 |
+| `internal/app/tui.go:1697-1708` (`rebuild()` entry→style switch: `Reasoning`/`Tool` → Muted, `Error` → Error, rest bare) | `internal/app/tui.go:1415-1430` — the exact switch phase 3 re-maps (`You` → Normal-on-BgUser, `Assistant` → Normal-on-BgModel, `Tool` → Muted-on-BgTool) |
+| `internal/app/tui.go` `mainView` + `lineStyles` | Unchanged mechanism: full-width bands need no new layout math; adding backgrounds cannot alter visible widths (`stripANSI`/`splitAtWidth` at `internal/app/tui.go:1667-1712`), but the phase-2 overflow suite is re-run as the regression gate |
+| `internal/app/tui.go` `updateDialog`/`confirmDialog`/`applyTheme` (preview per adaptive-themes M1) | Same file post-1.5 UNLESS Phase 1.5 landed meanwhile — then `setup.go`/`dialog.go`/`view.go` per `specs/structure-refactor/architecture-phase-1.md` §11; resolve by symbol name, not line number |
+| Entry roles consumed by the band map | `"You"` (tui.go:309), `"Assistant"` (tui.go:776), `"Tool"` (tui.go:795,839), `"Reasoning"` (tui.go:768), `"Error"`, `"Lisa"`, `"Logo"` — role strings unchanged by phase 3 |
 
 ## Acceptance criteria (phases 1–2 verified locally via `go test ./...`)
 
@@ -271,8 +303,8 @@ terminal render is left unchecked pending the TUI walkthrough.
 ### Phases 2–3
 - [x] Phase 2: no horizontal overflow at any tested width, pinned per render
       path — conversation body with pathological tokens/CJK/control runes at
-      widths 40–200 (`TestBodyNeverOverflowsTheViewport`, which also pins the
-      120-column cap), pending reviews
+      widths 40–200 (`TestBodyNeverOverflowsTheViewport`, pinning the
+      viewport-minus-two wrap bound), pending reviews
       (`TestPendingReviewNeverOverflowsTheViewport`), logo lines
       (`TestLogoLinesStayWithinTheViewport`), dialogs
       (`TestDialogFitsCJKLabelsAndDropsProviderColumnWhenNecessary`),
@@ -285,6 +317,9 @@ terminal render is left unchecked pending the TUI walkthrough.
       ANSI-stripped render output; scrollbar absence on a real terminal is
       still the walkthrough item.)*
 - [ ] Phase 3: role backgrounds distinguishable and degrading to plain text.
+  (Owned by `specs/adaptive-themes/spec.md` acceptance criteria — M3 band map,
+  contrast gate, limited-profile legibility, and the phase-2 overflow-suite
+  regression. This box closes when adaptive-themes lands.)
 - [x] `go test ./...` passes for every phase before it is described as done
       (green as of the phase 2 implementation).
 
@@ -297,24 +332,26 @@ terminal render is left unchecked pending the TUI walkthrough.
    hide when unknown; `$0.00` for the subscription row.
 5. Phase 1c generation: after the first completed turn, with the session's
    configured model; early exit keeps the derived title.
-6. Phase 2 content-width cap: 120 columns above 140-col terminals.
+6. Phase 2 content-width cap: removed — the transcript wraps to the
+   viewport minus two padding columns at every width.
 
 All phase 1a–1c decisions are resolved and implemented; the two wording
 deviations from this questionnaire's original assumptions are recorded
-above ("Documented deviations"). Remaining open decisions gate phase 3
-only (palette tints, tool-band split, reasoning background).
+above ("Documented deviations"). Phase 3's three items (palette tints,
+tool-band split, reasoning background) were closed by
+`specs/adaptive-themes/spec.md` "Resolved decisions": derived tints via
+`mix()` + override-only-on-failure, one shared `BgTool` band, no reasoning
+background. The adaptive-themes spec is authoritative for those three; this
+spec keeps the requirements record only.
 
-## Remaining open decisions (phase 3 only)
-
-1. Palette tints per theme for the three background roles.
-2. Whether tool ACTIVITY (`tool_start`) and tool RESULT share one band.
-3. Whether reasoning gains its own background or stays foreground-muted.
-
-## What remains for phase 3 (unchanged from the approved plan)
+## What remains for phase 3 (owned by adaptive-themes)
 
 - The real-terminal walkthrough that retires the walkthrough items noted in
   the acceptance criteria and checklist — for phase 2 it covers the absence
   of a horizontal scrollbar at the tested widths (the invariant is pinned
   against rendered string output only).
-- Phase 3: background roles (`BgUser`/`BgTool`/`BgModel`), palettes, and
-  plain-text degradation, gated on the three open decisions above.
+- Phase 3 implementation itself: `BgBase`/`BgUser`/`BgTool`/`BgModel` roles,
+  palettes via `internal/ui/adaptive.go`, band wiring in `rebuild()` +
+  `mainView()`, plain-text degradation, and the M1 live preview — all owned
+  by `specs/adaptive-themes/spec.md` (acceptance criteria and open items
+  there). This spec's phase-3 box closes when adaptive-themes lands.

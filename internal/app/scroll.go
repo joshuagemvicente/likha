@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -167,21 +166,42 @@ func (m *ui) spliceScrollbar(rows []string, header int, body int) {
 }
 
 // truncateRow cuts a rendered row to n display columns on cell boundaries.
+// SGR escape sequences never occupy cells, so their bytes are neither cut
+// nor counted toward the width: a styled row measures by its visible text
+// alone, and a cut never splits a sequence or misplaces the scrollbar.
 func truncateRow(row string, width int) string {
-	if runewidth.StringWidth(row) <= width {
-		return row
-	}
-	var b strings.Builder
+	var buf []byte
 	w := 0
+	escaping := false
+	escStart := 0
 	for _, r := range row {
+		if escaping {
+			buf = append(buf, string(r)...)
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '\\' {
+				escaping = false // final byte of the sequence
+			}
+			continue
+		}
+		if r == '\x1b' {
+			escaping = true
+			escStart = len(buf)
+			buf = append(buf, string(r)...)
+			continue
+		}
 		rw := runewidth.RuneWidth(r)
 		if w+rw > width {
+			// Cell budget exhausted: drop everything after, including any
+			// escape sequence already in progress, so a dangling ESC cannot
+			// corrupt the following row's styling.
+			if escaping {
+				buf = buf[:escStart]
+			}
 			break
 		}
-		b.WriteRune(r)
+		buf = append(buf, string(r)...)
 		w += rw
 	}
-	return b.String()
+	return string(buf)
 }
 
 // updateScrollbarMouse handles clicks and drags on the scrollbar column: the
