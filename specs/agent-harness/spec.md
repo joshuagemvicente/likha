@@ -38,7 +38,7 @@ session store can distinguish harness-owned context from user-owned history.
   editable without touching logic. Content sections, in order:
   1. **Identity** — "You are Lisa's agent: a terminal coding agent working
      in one repository."
-  2. **Tool contract** — when to use `read_file`/`search_files` vs guessing;
+  2. **Tool contract** — when to use `read`/`grep` vs guessing;
      that `edit_file` proposes full-file replacements shown as diffs; that
      `run_command` is approval-gated and not sandboxed; MCP tools likewise.
   3. **Workflow rules** — read before editing; smallest change that satisfies

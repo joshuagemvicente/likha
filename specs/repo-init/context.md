@@ -7,7 +7,7 @@ this spec yet (status: draft).
 
 | Path | Relevance |
 | --- | --- |
-| `internal/app/agent.go` | `runTurn` and the agent tool set (`list_files`, `read_file`, `search_files`, edit tools). `/init` is a normal turn here; the survey prompt and the draft-as-edit-proposal flow land on this loop. Command recognition/interception may live nearby (`internal/app/tui.go`). |
+| `internal/app/agent.go` | `runTurn` and the agent tool set (`read`, `read`, `grep`, edit tools). `/init` is a normal turn here; the survey prompt and the draft-as-edit-proposal flow land on this loop. Command recognition/interception may live nearby (`internal/app/tui.go`). |
 | `internal/app/tui.go` | Command dispatch for reserved slash commands: add `/init` to the reserved list next to `/sessions`/`/models`/`/model`/`/quit`/`/help`; inertness during a run or pending approval follows the existing rule. |
 | `internal/actions/edit.go` | Edit proposal/diff preview and stale-proposal detection — the path the drafted `AGENTS.md` proposal flows through unchanged. |
 | `internal/repository/repository.go` | Read/list/search path confinement (FR-05) already validates repo-scoped paths; `AGENTS.md`-rooted read/write is just another repo path. |

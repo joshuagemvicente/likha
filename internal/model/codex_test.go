@@ -65,13 +65,13 @@ func TestBuildCodexRequestFullConversation(t *testing.T) {
 		{Role: "developer", Content: "second developer block"},
 		{Role: "user", Content: "list things"},
 		{Role: "assistant", Content: "done", Reasoning: "secret reasoning that must never be sent", ToolCalls: []ToolCall{
-			{ID: "call_1", Name: "list_files", Arguments: `{"path":"/tmp"}`},
+			{ID: "call_1", Name: "glob", Arguments: `{"path":"/tmp"}`},
 		}},
 		{Role: "tool", ToolCallID: "call_1", Content: "a.txt\nb.txt"},
 	}
 	tools := []ToolDefinition{{
-		Name:        "list_files",
-		Description: "list directory contents",
+		Name:        "glob",
+		Description: "match repository paths by pattern",
 		Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`),
 	}}
 	payload, err := BuildCodexRequest("codex-mini", messages, tools)
@@ -111,7 +111,7 @@ func TestBuildCodexRequestFullConversation(t *testing.T) {
 	if len(parts) != 1 || parts[0]["type"] != "output_text" || parts[0]["text"] != "done" {
 		t.Errorf("assistant content = %v, want single output_text part", parts)
 	}
-	if items[2]["type"] != "function_call" || items[2]["call_id"] != "call_1" || items[2]["name"] != "list_files" || items[2]["arguments"] != `{"path":"/tmp"}` {
+	if items[2]["type"] != "function_call" || items[2]["call_id"] != "call_1" || items[2]["name"] != "glob" || items[2]["arguments"] != `{"path":"/tmp"}` {
 		t.Errorf("item2 = %v, want function_call", items[2])
 	}
 	if items[3]["type"] != "function_call_output" || items[3]["call_id"] != "call_1" || items[3]["output"] != "a.txt\nb.txt" {
@@ -122,7 +122,7 @@ func TestBuildCodexRequestFullConversation(t *testing.T) {
 		t.Fatalf("tools = %v, want one entry", body["tools"])
 	}
 	tool := rawTools[0].(map[string]any)
-	if tool["type"] != "function" || tool["name"] != "list_files" || tool["description"] != "list directory contents" {
+	if tool["type"] != "function" || tool["name"] != "glob" || tool["description"] != "match repository paths by pattern" {
 		t.Errorf("tool = %v, want function definition", tool)
 	}
 	if params, ok := tool["parameters"].(map[string]any); !ok || params["type"] != "object" {
@@ -314,11 +314,11 @@ func TestConsumeCodexStreamTextAndReasoning(t *testing.T) {
 
 func TestConsumeCodexStreamFunctionCall(t *testing.T) {
 	// added → delta → done → completed: done and completed are authoritative.
-	sse := codexFrame("response.output_item.added", `{"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"list_files","arguments":""}}`) +
+	sse := codexFrame("response.output_item.added", `{"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"glob","arguments":""}}`) +
 		codexFrame("response.function_call_arguments.delta", `{"item_id":"item_1","delta":"{\"pa"}`) +
 		codexFrame("response.function_call_arguments.delta", `{"item_id":"item_1","delta":"th\":\"drift\"}"}`) +
-		codexFrame("response.output_item.done", `{"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"list_files","arguments":"{\"path\":\"a\"}"}}`) +
-		codexFrame("response.completed", `{"response":{"output":[{"type":"function_call","call_id":"call_1","name":"list_files","arguments":"{\"path\":\"a\"}"},{"type":"message","content":[{"type":"output_text","text":"x"}]}]}}`)
+		codexFrame("response.output_item.done", `{"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"glob","arguments":"{\"path\":\"a\"}"}}`) +
+		codexFrame("response.completed", `{"response":{"output":[{"type":"function_call","call_id":"call_1","name":"glob","arguments":"{\"path\":\"a\"}"},{"type":"message","content":[{"type":"output_text","text":"x"}]}]}}`)
 	msg, _, err := codexRunStream(sse)
 	if err != nil {
 		t.Fatalf("ConsumeCodexStream: %v", err)
@@ -327,7 +327,7 @@ func TestConsumeCodexStreamFunctionCall(t *testing.T) {
 		t.Fatalf("tool calls = %+v, want one", msg.ToolCalls)
 	}
 	call := msg.ToolCalls[0]
-	if call.ID != "call_1" || call.Name != "list_files" || call.Arguments != `{"path":"a"}` {
+	if call.ID != "call_1" || call.Name != "glob" || call.Arguments != `{"path":"a"}` {
 		t.Errorf("tool call = %+v, want authoritative completed arguments", call)
 	}
 }
@@ -634,11 +634,11 @@ func TestConsumeCodexStreamRealWorldTurn(t *testing.T) {
 		codexFrame("response.output_item.added", `{"item":{"type":"message","id":"msg_1"}}`) +
 		codexFrame("response.output_text.delta", `{"delta":"Found "}`) +
 		codexFrame("response.output_text.delta", `{"delta":"three files"}`) +
-		codexFrame("response.output_item.added", `{"item":{"type":"function_call","id":"fc_1","call_id":"call_z9","name":"read_file","arguments":""}}`) +
+		codexFrame("response.output_item.added", `{"item":{"type":"function_call","id":"fc_1","call_id":"call_z9","name":"read","arguments":""}}`) +
 		codexFrame("response.output_item.added", `{"item":{"type":"function_call","id":"fc_2","call_id":"call_k1","name":"list_dir","arguments":"{}"}}`) +
 		codexFrame("response.function_call_arguments.delta", `{"item_id":"fc_1","delta":"{\"path\":\"/x\"}"}`) +
-		codexFrame("response.output_item.done", `{"item":{"type":"function_call","id":"fc_1","call_id":"call_z9","name":"read_file","arguments":"{\"path\":\"/x\"}"}}`) +
-		codexFrame("response.completed", `{"response":{"output":[{"type":"reasoning","id":"rs_1"},{"type":"message","id":"msg_1"},{"type":"function_call","call_id":"call_z9","name":"read_file","arguments":"{\"path\":\"/x\"}"},{"type":"function_call","call_id":"call_k1","name":"list_dir","arguments":"{}"}]}}`)
+		codexFrame("response.output_item.done", `{"item":{"type":"function_call","id":"fc_1","call_id":"call_z9","name":"read","arguments":"{\"path\":\"/x\"}"}}`) +
+		codexFrame("response.completed", `{"response":{"output":[{"type":"reasoning","id":"rs_1"},{"type":"message","id":"msg_1"},{"type":"function_call","call_id":"call_z9","name":"read","arguments":"{\"path\":\"/x\"}"},{"type":"function_call","call_id":"call_k1","name":"list_dir","arguments":"{}"}]}}`)
 	msg, rec, err := codexRunStream(sse)
 	if err != nil {
 		t.Fatalf("ConsumeCodexStream: %v", err)
@@ -652,8 +652,8 @@ func TestConsumeCodexStreamRealWorldTurn(t *testing.T) {
 	if len(msg.ToolCalls) != 2 {
 		t.Fatalf("tool calls = %+v, want two", msg.ToolCalls)
 	}
-	if msg.ToolCalls[0].ID != "call_z9" || msg.ToolCalls[0].Name != "read_file" || msg.ToolCalls[0].Arguments != `{"path":"/x"}` {
-		t.Errorf("tool call 0 = %+v, want read_file with path /x", msg.ToolCalls[0])
+	if msg.ToolCalls[0].ID != "call_z9" || msg.ToolCalls[0].Name != "read" || msg.ToolCalls[0].Arguments != `{"path":"/x"}` {
+		t.Errorf("tool call 0 = %+v, want read with path /x", msg.ToolCalls[0])
 	}
 	if msg.ToolCalls[1].ID != "call_k1" || msg.ToolCalls[1].Name != "list_dir" || msg.ToolCalls[1].Arguments != `{}` {
 		t.Errorf("tool call 1 = %+v, want list_dir with {}", msg.ToolCalls[1])

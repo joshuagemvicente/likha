@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -22,6 +23,7 @@ const (
 	MaxSearchDepth   = 64
 	MaxSearchResults = 100
 	MaxListEntries   = 1000
+	MaxGlobResults   = 1000
 	MaxQueryBytes    = 4096
 )
 
@@ -149,30 +151,230 @@ func (r *Repository) open(path string, directory bool) (*os.File, error) {
 	return current, nil
 }
 
-// List returns the immediate children's repository-relative paths in sorted order.
-func (r *Repository) List(path string) ([]string, error) {
-	dir, err := r.open(path, true)
+// Glob matches repository file paths against a glob pattern and returns the
+// matching repository-relative paths in sorted order. A pattern is a
+// repository-relative path expression: `*`, `?`, and `[...]` match within
+// one path segment (never across separators), a bare `**` segment spans
+// zero or more directories, and only regular files match. `.git` entries
+// and symlinks are never traversed. Limits fail explicitly rather than
+// returning an incomplete set.
+func (r *Repository) Glob(pattern string) ([]string, error) {
+	segments, err := compileGlob(pattern)
 	if err != nil {
 		return nil, err
 	}
-	defer dir.Close()
-	names, err := dir.Readdirnames(MaxListEntries + 1)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("list %q: %w", path, err)
+	root, err := r.openRoot()
+	if err != nil {
+		return nil, err
 	}
-	if len(names) > MaxListEntries {
-		return nil, fmt.Errorf("list %q: more than %d entries: %w", path, MaxListEntries, ErrLimit)
+	defer root.Close()
+	var matches []string
+	var dirs int
+	var walk func(*os.File, string, int) error
+	walk = func(dir *os.File, prefix string, depth int) error {
+		dirs++
+		if dirs > MaxSearchDirs || depth > MaxSearchDepth {
+			return fmt.Errorf("glob directory %q: directory count or depth limit exceeded: %w", prefix, ErrLimit)
+		}
+		entries, err := dir.ReadDir(MaxListEntries + 1)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return fmt.Errorf("glob directory %q: %w", prefix, err)
+		}
+		if len(entries) > MaxListEntries {
+			return fmt.Errorf("glob directory %q: more than %d entries: %w", prefix, MaxListEntries, ErrLimit)
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		for _, entry := range entries {
+			name := entry.Name()
+			if name == ".git" || entry.Type()&os.ModeSymlink != 0 {
+				continue
+			}
+			path := filepath.Join(prefix, name)
+			if entry.IsDir() {
+				child, err := openChild(dir, name, true)
+				if err != nil {
+					return fmt.Errorf("glob %q: %w", path, err)
+				}
+				err = walk(child, path, depth+1)
+				child.Close()
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			if !entry.Type().IsRegular() && entry.Type() != 0 {
+				continue
+			}
+			parts := strings.Split(path, string(os.PathSeparator))
+			if globMatch(segments, parts) {
+				if len(matches) == MaxGlobResults {
+					return fmt.Errorf("glob: more than %d matches: %w", MaxGlobResults, ErrLimit)
+				}
+				matches = append(matches, path)
+			}
+		}
+		return nil
 	}
-	sort.Strings(names)
-	base := filepath.Clean(path)
-	for i, name := range names {
-		if base == "." {
-			names[i] = name
-		} else {
-			names[i] = filepath.Join(base, name)
+	if err := walk(root, "", 0); err != nil {
+		return nil, err
+	}
+	sort.Strings(matches)
+	return matches, nil
+}
+
+// compileGlob validates a repository-relative glob pattern and returns its
+// path segments for matching. Absolute paths, empty patterns, parent
+// traversal, and malformed `[...]` classes are rejected up front so a bad
+// pattern cannot match or walk anything.
+func compileGlob(pattern string) ([]string, error) {
+	if pattern == "" || len(pattern) > MaxQueryBytes {
+		return nil, fmt.Errorf("glob pattern must contain 1 to %d bytes", MaxQueryBytes)
+	}
+	if filepath.IsAbs(pattern) || strings.HasPrefix(pattern, "/") {
+		return nil, fmt.Errorf("%q: %w", pattern, ErrInvalidPath)
+	}
+	// Reject parent traversal on the RAW pattern: cleaning would collapse
+	// `sub/../sub` and hide the traversal attempt.
+	for _, raw := range strings.Split(pattern, string(os.PathSeparator)) {
+		if raw == ".." {
+			return nil, fmt.Errorf("%q: %w", pattern, ErrInvalidPath)
 		}
 	}
-	return names, nil
+	parts := strings.Split(filepath.Clean(pattern), string(os.PathSeparator))
+	for _, part := range parts {
+		if part == "**" {
+			continue
+		}
+		// Malformed classes surface as ErrBadPattern only during matching;
+		// probe one empty name to force the parse error now.
+		if _, err := filepath.Match(part, ""); err != nil {
+			return nil, fmt.Errorf("glob pattern %q: %w", pattern, err)
+		}
+	}
+	return parts, nil
+}
+
+// globMatch reports whether the path's segments match the pattern's:
+// a bare `**` segment spans zero or more path segments, and every other
+// pattern segment matches exactly one with filepath.Match semantics.
+func globMatch(pattern, path []string) bool {
+	if len(pattern) == 0 || len(path) == 0 {
+		return len(pattern) == 0 && len(path) == 0
+	}
+	if pattern[0] == "**" {
+		if len(pattern) == 1 {
+			return true
+		}
+		for i := range path {
+			if globMatch(pattern[1:], path[i:]) {
+				return true
+			}
+		}
+		return false
+	}
+	ok, err := filepath.Match(pattern[0], path[0])
+	if err != nil || !ok {
+		return false
+	}
+	return globMatch(pattern[1:], path[1:])
+}
+
+// Grep performs a regular-expression search over regular UTF-8 text files.
+// The pattern uses Go regexp syntax, applied per line and case-sensitive
+// unless it carries an in-pattern `(?i)` flag. Symlinks and `.git` entries
+// are not traversed. Limits fail explicitly rather than returning an
+// incomplete result set.
+func (r *Repository) Grep(pattern string) ([]Match, error) {
+	if pattern == "" || len(pattern) > MaxQueryBytes {
+		return nil, fmt.Errorf("grep pattern must contain 1 to %d bytes", MaxQueryBytes)
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("invalid grep pattern: %w", err)
+	}
+	root, err := r.openRoot()
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	var matches []Match
+	var files, dirs int
+	var bytesRead int64
+	var walk func(*os.File, string, int) error
+	walk = func(dir *os.File, prefix string, depth int) error {
+		dirs++
+		if dirs > MaxSearchDirs || depth > MaxSearchDepth {
+			return fmt.Errorf("grep directory %q: directory count or depth limit exceeded: %w", prefix, ErrLimit)
+		}
+		entries, err := dir.ReadDir(MaxListEntries + 1)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return fmt.Errorf("grep directory %q: %w", prefix, err)
+		}
+		if len(entries) > MaxListEntries {
+			return fmt.Errorf("grep directory %q: more than %d entries: %w", prefix, MaxListEntries, ErrLimit)
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		for _, entry := range entries {
+			name := entry.Name()
+			if name == ".git" || entry.Type()&os.ModeSymlink != 0 {
+				continue
+			}
+			path := filepath.Join(prefix, name)
+			if entry.IsDir() {
+				child, err := openChild(dir, name, true)
+				if err != nil {
+					return fmt.Errorf("grep %q: %w", path, err)
+				}
+				err = walk(child, path, depth+1)
+				child.Close()
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			if !entry.Type().IsRegular() && entry.Type() != 0 {
+				continue
+			}
+			files++
+			if files > MaxSearchFiles {
+				return fmt.Errorf("grep: more than %d files: %w", MaxSearchFiles, ErrLimit)
+			}
+			file, err := openChild(dir, name, false)
+			if err != nil {
+				return fmt.Errorf("grep %q: %w", path, err)
+			}
+			text, size, err := readText(file, path, MaxReadBytes)
+			file.Close()
+			bytesRead += size
+			if bytesRead > MaxSearchBytes {
+				return fmt.Errorf("grep: more than %d bytes: %w", MaxSearchBytes, ErrLimit)
+			}
+			if errors.Is(err, ErrBinary) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			for line, remaining := 1, text; len(remaining) > 0; line++ {
+				content, rest, hasNext := strings.Cut(remaining, "\n")
+				if re.MatchString(content) {
+					if len(matches) == MaxSearchResults {
+						return fmt.Errorf("grep: more than %d matches: %w", MaxSearchResults, ErrLimit)
+					}
+					matches = append(matches, Match{Path: path, Line: line, Text: strings.TrimSuffix(content, "\r")})
+				}
+				if !hasNext {
+					break
+				}
+				remaining = rest
+			}
+		}
+		return nil
+	}
+	if err := walk(root, "", 0); err != nil {
+		return nil, err
+	}
+	return matches, nil
 }
 
 func readText(file *os.File, path string, max int64) (string, int64, error) {
@@ -222,96 +424,4 @@ func (r *Repository) IsDir(path string) (bool, error) {
 		return false, nil
 	}
 	return false, err
-}
-
-// Search performs a literal, case-sensitive search over regular UTF-8 files.
-// Symlinks and .git entries are not traversed. Limits fail explicitly rather
-// than returning an incomplete result set.
-func (r *Repository) Search(query string) ([]Match, error) {
-	if query == "" || len(query) > MaxQueryBytes {
-		return nil, fmt.Errorf("search query must contain 1 to %d bytes", MaxQueryBytes)
-	}
-	root, err := r.openRoot()
-	if err != nil {
-		return nil, err
-	}
-	defer root.Close()
-	var matches []Match
-	var files, dirs int
-	var bytesRead int64
-	var walk func(*os.File, string, int) error
-	walk = func(dir *os.File, prefix string, depth int) error {
-		dirs++
-		if dirs > MaxSearchDirs || depth > MaxSearchDepth {
-			return fmt.Errorf("search directory %q: directory count or depth limit exceeded: %w", prefix, ErrLimit)
-		}
-		entries, err := dir.ReadDir(MaxListEntries + 1)
-		if err != nil && !errors.Is(err, io.EOF) {
-			return fmt.Errorf("search directory %q: %w", prefix, err)
-		}
-		if len(entries) > MaxListEntries {
-			return fmt.Errorf("search directory %q: more than %d entries: %w", prefix, MaxListEntries, ErrLimit)
-		}
-		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-		for _, entry := range entries {
-			name := entry.Name()
-			if name == ".git" || entry.Type()&os.ModeSymlink != 0 {
-				continue
-			}
-			path := filepath.Join(prefix, name)
-			if entry.IsDir() {
-				child, err := openChild(dir, name, true)
-				if err != nil {
-					return fmt.Errorf("search %q: %w", path, err)
-				}
-				err = walk(child, path, depth+1)
-				child.Close()
-				if err != nil {
-					return err
-				}
-				continue
-			}
-			if !entry.Type().IsRegular() && entry.Type() != 0 {
-				continue
-			}
-			files++
-			if files > MaxSearchFiles {
-				return fmt.Errorf("search: more than %d files: %w", MaxSearchFiles, ErrLimit)
-			}
-			file, err := openChild(dir, name, false)
-			if err != nil {
-				return fmt.Errorf("search %q: %w", path, err)
-			}
-			text, size, err := readText(file, path, MaxReadBytes)
-			file.Close()
-			bytesRead += size
-			if bytesRead > MaxSearchBytes {
-				return fmt.Errorf("search: more than %d bytes: %w", MaxSearchBytes, ErrLimit)
-			}
-			if errors.Is(err, ErrBinary) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			for line, remaining := 1, text; len(remaining) > 0; line++ {
-				content, rest, hasNext := strings.Cut(remaining, "\n")
-				if strings.Contains(content, query) {
-					if len(matches) == MaxSearchResults {
-						return fmt.Errorf("search: more than %d matches: %w", MaxSearchResults, ErrLimit)
-					}
-					matches = append(matches, Match{Path: path, Line: line, Text: strings.TrimSuffix(content, "\r")})
-				}
-				if !hasNext {
-					break
-				}
-				remaining = rest
-			}
-		}
-		return nil
-	}
-	if err := walk(root, "", 0); err != nil {
-		return nil, err
-	}
-	return matches, nil
 }

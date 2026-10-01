@@ -15,9 +15,9 @@ This plan applies to the requirements in [v1-spec.md](v1-spec.md). A feature is 
 **Implemented:** `internal/repository` confines list/read/literal-search operations to the selected repository, rejects traversal and symlink escapes, enforces size/result limits, and returns errors for unreadable or binary content. `internal/app/agent.go` exposes only these tools and reports both success and failure to the model and TUI.
 
 - **Automated entry point:** `go test ./...` exercises real temporary repositories, path escape attempts, limits, the full tool-call conversation, and a rejected read sent back to the model. No dummy tool results are used.
-- **Observed smoke:** A local protocol server requested `list_files`; the TUI displayed the request, actual repository entries, and a final assistant response after the tool result.
-- **Real-model walkthrough (2026-09-29):** Completed the documented flow against real local Ollama 0.34.4 with `qwen3:4b` — structured `list_files` call returned real repository entries, an `edit_file` proposal rendered as a diff review, approval applied the displayed change (file contents verified), and the completed session was listed and resumed with full conversation context; a follow-up `read_file` on the resumed session confirmed persisted state. The documented real-model model combination is **verified locally**.
-- **Release validation still required:** Repeat list/read/search and inaccessible-path cases with a live-verified hosted provider.
+- **Observed smoke:** A local protocol server requested `read`; the TUI displayed the request, actual repository entries, and a final assistant response after the tool result.
+- **Real-model walkthrough (2026-09-29):** Completed the documented flow against real local Ollama 0.34.4 with `qwen3:4b` — structured `read` call returned real repository entries, an `edit_file` proposal rendered as a diff review, approval applied the displayed change (file contents verified), and the completed session was listed and resumed with full conversation context; a follow-up `read` on the resumed session confirmed persisted state. The documented real-model model combination is **verified locally**.
+- **Release validation still required:** Repeat glob/read/grep and inaccessible-path cases with a live-verified hosted provider.
 
 ## Feature 3 — Reviewed edits and commands (FR-06–09)
 

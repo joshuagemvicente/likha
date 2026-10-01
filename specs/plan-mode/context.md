@@ -6,7 +6,7 @@ Code paths and precedent this feature touches. No code changes yet
 ## Code paths to touch at implementation time
 
 - `internal/app/agent.go` — `dispatchTool` (line ~119) is the single checkout
-  for every tool call: reads (`list_files`, `read_file`, `search_files`),
+  for every tool call: reads (`read`, `read`, `grep`),
   mutation tools (`edit_file`, `run_command`), and the MCP fallback
   (`mcpManager.Call`). The plan-mode gate goes before the mutation cases so
   refusals return as failed tool results (FR-09 reporting) instead of

@@ -29,7 +29,11 @@ func newFixture(t *testing.T, root string) *Repository {
 	return repo
 }
 
-func TestListReadSearch(t *testing.T) {
+// globRepository builds a repository with the same layout for every glob
+// and grep test: a top-level text file, a nested one, an ignored .git entry,
+// a binary file, and a symlink.
+func globRepository(t *testing.T) (*Repository, string) {
+	t.Helper()
 	root := t.TempDir()
 	writeFixture(t, filepath.Join(root, "notes.txt"), "needle first\nother\nneedle third\n")
 	writeFixture(t, filepath.Join(root, "sub", "story.txt"), "another needle\n")
@@ -38,31 +42,101 @@ func TestListReadSearch(t *testing.T) {
 	if err := os.Symlink(filepath.Join(root, "notes.txt"), filepath.Join(root, "link.txt")); err != nil {
 		t.Fatal(err)
 	}
-	repo := newFixture(t, root)
-	listed, err := repo.List(".")
-	if err != nil {
-		t.Fatal(err)
+	return newFixture(t, root), root
+}
+
+func TestGlobPatterns(t *testing.T) {
+	repo, _ := globRepository(t)
+	for _, tc := range []struct {
+		pattern string
+		want    []string
+	}{
+		{"*.txt", []string{"notes.txt"}},
+		{"**/*.txt", []string{"notes.txt", filepath.Join("sub", "story.txt")}},
+		{"sub/*", []string{filepath.Join("sub", "story.txt")}},
+		{"notes.txt", []string{"notes.txt"}},
+		{"no?.txt", nil},
+		{"*.dat", []string{"binary.dat"}},
+		{"link.txt", nil}, // symlinks never match or traverse
+		{"**", []string{"binary.dat", "notes.txt", filepath.Join("sub", "story.txt")}},
+		{"sub/**", []string{filepath.Join("sub", "story.txt")}},
+		{"note[sS].txt", []string{"notes.txt"}},
+		{"note[^s].txt", nil},
+	} {
+		got, err := repo.Glob(tc.pattern)
+		if err != nil {
+			t.Fatalf("Glob(%q): %v", tc.pattern, err)
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("Glob(%q) = %q, want %q", tc.pattern, got, tc.want)
+		}
 	}
-	wantList := []string{".git", "binary.dat", "link.txt", "notes.txt", "sub"}
-	if !reflect.DeepEqual(listed, wantList) {
-		t.Fatalf("list = %q, want %q", listed, wantList)
+}
+
+func TestGlobRejectsBadPatterns(t *testing.T) {
+	repo, _ := globRepository(t)
+	for _, pattern := range []string{
+		"../secret.txt",
+		"sub/../sub/allowed.txt",
+		"/etc/*",
+	} {
+		if _, err := repo.Glob(pattern); !errors.Is(err, ErrInvalidPath) {
+			t.Errorf("Glob(%q): want invalid path, got %v", pattern, err)
+		}
 	}
-	listed, err = repo.List("sub")
-	if err != nil || !reflect.DeepEqual(listed, []string{filepath.Join("sub", "story.txt")}) {
-		t.Fatalf("list sub = %q, %v", listed, err)
+	for _, pattern := range []string{
+		"",                                   // empty: its own validation error
+		"[a-",                                // malformed class
+		strings.Repeat("q", MaxQueryBytes+1), // oversized
+	} {
+		if _, err := repo.Glob(pattern); err == nil {
+			t.Errorf("Glob(%q) succeeded, want a validation error", pattern)
+		}
 	}
+}
+
+func TestGlobSilentOnAbsentPathsAndSkipsHidden(t *testing.T) {
+	repo, _ := globRepository(t)
+	// A glob never errors on directories or patterns that match nothing —
+	// "no matches" is a valid answer (conventional glob behavior).
+	got, err := repo.Glob("absent/*.txt")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("absent directory glob = %q, %v", got, err)
+	}
+	// .git content never matches.
+	if got, _ := repo.Glob(".git/*"); len(got) != 0 {
+		t.Fatalf("glob traversed .git: %q", got)
+	}
+}
+
+func TestGrepAndRead(t *testing.T) {
+	repo, _ := globRepository(t)
 	text, err := repo.Read("notes.txt")
 	if err != nil || text != "needle first\nother\nneedle third\n" {
 		t.Fatalf("read = %q, %v", text, err)
 	}
-	matches, err := repo.Search("needle")
+	matches, err := repo.Grep("n(e+)dle")
 	wantMatches := []Match{
 		{Path: "notes.txt", Line: 1, Text: "needle first"},
 		{Path: "notes.txt", Line: 3, Text: "needle third"},
 		{Path: filepath.Join("sub", "story.txt"), Line: 1, Text: "another needle"},
 	}
 	if err != nil || !reflect.DeepEqual(matches, wantMatches) {
-		t.Fatalf("search = %#v, %v; want %#v", matches, err, wantMatches)
+		t.Fatalf("grep = %#v, %v; want %#v", matches, err, wantMatches)
+	}
+	// Case-sensitive by default; the in-pattern flag opts out.
+	if matches, _ := repo.Grep("Needle"); len(matches) != 0 {
+		t.Fatalf("case-sensitive grep matched: %#v", matches)
+	}
+	if matches, _ := repo.Grep("(?i)needle"); len(matches) != 3 {
+		t.Fatalf("insensitive grep = %#v", matches)
+	}
+	// Binary and .git files are skipped, not matched or surfaced.
+	if matches, _ := repo.Grep("needle"); len(matches) != len(wantMatches) {
+		t.Fatalf("grep picked up skipped files: %#v", matches)
+	}
+	if _, err := repo.Grep("[unclosed"); err == nil {
+		t.Fatal("invalid regex accepted")
 	}
 }
 
@@ -78,12 +152,12 @@ func TestRejectPathsAndMissingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := newFixture(t, root)
-	for _, path := range []string{"../secret.txt", "sub/../sub/allowed.txt", filepath.Join(outside, "secret.txt"), ""} {
+	for _, path := range []string{"../secret.txt", "sub/../sub/allowed.txt", filepath.Join(outside, "secret.txt")} {
 		if _, err := repo.Read(path); !errors.Is(err, ErrInvalidPath) {
 			t.Errorf("Read(%q): want invalid path, got %v", path, err)
 		}
-		if _, err := repo.List(path); !errors.Is(err, ErrInvalidPath) {
-			t.Errorf("List(%q): want invalid path, got %v", path, err)
+		if _, err := repo.Glob(path); !errors.Is(err, ErrInvalidPath) {
+			t.Errorf("Glob(%q): want invalid path, got %v", path, err)
 		}
 	}
 	for _, path := range []string{"escape/secret.txt", "secret-link"} {
@@ -91,20 +165,11 @@ func TestRejectPathsAndMissingFiles(t *testing.T) {
 			t.Errorf("Read(%q): %q, %v; want symlink error", path, data, err)
 		}
 	}
-	if _, err := repo.List("escape"); !errors.Is(err, ErrSymlink) {
-		t.Errorf("List symlink: %v", err)
-	}
 	if _, err := repo.Read("absent.txt"); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("Read missing file: %v", err)
 	}
-	if _, err := repo.List("absent"); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("List missing directory: %v", err)
-	}
 	if _, err := repo.Read("sub"); err == nil {
 		t.Error("Read directory succeeded")
-	}
-	if _, err := repo.List("sub/allowed.txt"); err == nil {
-		t.Error("List regular file succeeded")
 	}
 }
 
@@ -129,7 +194,7 @@ func TestRootCanonicalizedAndReplacementRejected(t *testing.T) {
 	if err := os.Symlink(t.TempDir(), root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.List("."); err == nil {
+	if _, err := repo.Glob("*"); err == nil {
 		t.Error("replaced repository root was accepted")
 	}
 }
@@ -147,8 +212,8 @@ func TestBinaryAndSizeBoundaries(t *testing.T) {
 	if _, err := repo.Read("oversized.txt"); !errors.Is(err, ErrTooLarge) {
 		t.Errorf("oversized read: %v", err)
 	}
-	if _, err := repo.Search("no match"); !errors.Is(err, ErrTooLarge) {
-		t.Errorf("oversized search: %v", err)
+	if _, err := repo.Grep("no match"); !errors.Is(err, ErrTooLarge) {
+		t.Errorf("oversized grep: %v", err)
 	}
 	for _, path := range []string{"invalid.dat", "nul.dat"} {
 		if _, err := repo.Read(path); !errors.Is(err, ErrBinary) {
@@ -157,44 +222,41 @@ func TestBinaryAndSizeBoundaries(t *testing.T) {
 	}
 }
 
-func TestSearchAndListLimits(t *testing.T) {
+func TestGrepAndGlobLimits(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, filepath.Join(root, "matches.txt"), strings.Repeat("match\n", MaxSearchResults+1))
 	repo := newFixture(t, root)
-	if _, err := repo.Search("match"); !errors.Is(err, ErrLimit) {
-		t.Errorf("search result cap: %v", err)
+	if _, err := repo.Grep("match"); !errors.Is(err, ErrLimit) {
+		t.Errorf("grep result cap: %v", err)
 	}
-	if _, err := repo.Search(""); err == nil {
-		t.Error("empty search succeeded")
+	if _, err := repo.Grep(""); err == nil {
+		t.Error("empty grep succeeded")
 	}
-	if _, err := repo.Search(strings.Repeat("q", MaxQueryBytes+1)); err == nil {
-		t.Error("oversized query succeeded")
+	if _, err := repo.Grep(strings.Repeat("q", MaxQueryBytes+1)); err == nil {
+		t.Error("oversized grep succeeded")
 	}
-	for i := range MaxListEntries {
-		writeFixture(t, filepath.Join(root, "entry", strconv.Itoa(i)), "")
+	// Glob's result cap: more matching files than the limit.
+	for i := range MaxGlobResults + 1 {
+		writeFixture(t, filepath.Join(root, "many", strconv.Itoa(i)+".dat"), "")
 	}
-	if listed, err := repo.List("entry"); err != nil || len(listed) != MaxListEntries {
-		t.Fatalf("maximum list length %d: %v", len(listed), err)
-	}
-	writeFixture(t, filepath.Join(root, "entry", "extra"), "")
-	if _, err := repo.List("entry"); !errors.Is(err, ErrLimit) {
-		t.Errorf("oversized list: %v", err)
+	if _, err := repo.Glob("many/*.dat"); !errors.Is(err, ErrLimit) {
+		t.Errorf("glob result cap: %v", err)
 	}
 }
 
-func TestSearchBudgetIncludesBinaryFiles(t *testing.T) {
+func TestGrepBudgetIncludesBinaryFiles(t *testing.T) {
 	root := t.TempDir()
 	binary := strings.Repeat("x", MaxReadBytes-1) + "\x00"
 	for i := range MaxSearchBytes/MaxReadBytes + 1 {
 		writeFixture(t, filepath.Join(root, "binary"+string(rune('a'+i))), binary)
 	}
 	repo := newFixture(t, root)
-	if _, err := repo.Search("unmatched"); !errors.Is(err, ErrLimit) {
-		t.Errorf("search byte budget: %v", err)
+	if _, err := repo.Grep("unmatched"); !errors.Is(err, ErrLimit) {
+		t.Errorf("grep byte budget: %v", err)
 	}
 }
 
-func TestSearchRejectsExcessiveDepth(t *testing.T) {
+func TestGrepAndGlobRejectExcessiveDepth(t *testing.T) {
 	root := t.TempDir()
 	path := root
 	for range MaxSearchDepth + 1 {
@@ -204,8 +266,11 @@ func TestSearchRejectsExcessiveDepth(t *testing.T) {
 		}
 	}
 	repo := newFixture(t, root)
-	if _, err := repo.Search("anything"); !errors.Is(err, ErrLimit) {
-		t.Errorf("deep search: %v", err)
+	if _, err := repo.Grep("anything"); !errors.Is(err, ErrLimit) {
+		t.Errorf("deep grep: %v", err)
+	}
+	if _, err := repo.Glob("**"); !errors.Is(err, ErrLimit) {
+		t.Errorf("deep glob: %v", err)
 	}
 }
 

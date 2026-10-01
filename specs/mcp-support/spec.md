@@ -11,8 +11,7 @@ running a real fake server as a child process.
 Lisa is a BYOK agent harness (v1-spec.md §2/§5). To move from "toy" to
 daily-driver, it needs the same extensibility surface top agent harnesses
 have: MCP servers. An MCP server is a separate process/service the harness
-talks to; its **tools** join Lisa's built-in tool loop (`list_files`,
-`read_file`, `search_files`, `edit_file`, `run_command`) and go through the
+talks to; its **tools** join Lisa's built-in tool loop (`glob`, `read`, `grep`, `edit_file`, `run_command`) and go through the
 same approval-gated execution path. Lisa hosts no models and runs no MCP
 servers of its own — servers come from the user's config.
 

@@ -35,7 +35,7 @@ const (
 // expandFileReferences returns prompt with each @path token expanded: a file
 // reference inlines the file's content as a fenced block; a folder reference
 // inlines its tree listing (paths only, capped). Unresolvable tokens stay
-// literal: the model can still use read_file, and a wrong token must not
+// literal: the model can still use read, and a wrong token must not
 // fail the turn. Content is capped at mentionMaxTotal; later references are
 // left literal once the cap is reached.
 func expandFileReferences(prompt string, repo *repository.Repository) string {

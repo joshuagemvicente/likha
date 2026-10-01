@@ -30,9 +30,9 @@ type turnEvent struct {
 }
 
 var agentTools = []model.ToolDefinition{
-	{Name: "list_files", Description: "List immediate entries in a repository directory. Path is relative to the repository; use . for its root.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)},
-	{Name: "read_file", Description: "Read a text file inside the repository, using a repository-relative path.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)},
-	{Name: "search_files", Description: "Search repository text files for a literal string and return paths, line numbers, and matching lines.", Parameters: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}`)},
+	{Name: "glob", Description: "Match repository file paths by glob pattern: `*`, `?`, and `[...]` match within one path segment (never across `/`), a bare `**` segment spans zero or more directories, and only regular files match. Pattern is repository-relative. Returns matching paths sorted, one per line.", Parameters: json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]}`)},
+	{Name: "read", Description: "Read a text file inside the repository, using a repository-relative path (UTF-8 text, up to 1 MiB).", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)},
+	{Name: "grep", Description: "Search repository text files with a regular expression (Go regexp syntax, per line; case-sensitive unless the pattern uses (?i)). Returns `path:line: text` for each match. Binary files and symlinks are skipped.", Parameters: json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]}`)},
 	{Name: "edit_file", Description: "Propose replacing the full content of a repository text file (or creating a new file). The user reviews the complete diff before any write.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}`)},
 	{Name: "run_command", Description: "Request a shell command in the repository. The exact command and working directory require explicit user approval.", Parameters: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}`)},
 }
@@ -123,7 +123,7 @@ func appendUnexecuted(history *[]model.Message, calls []model.ToolCall) {
 func dispatchTool(ctx context.Context, repo *repository.Repository, root string, call model.ToolCall, mcpServers *mcp.McpManager, emit func(turnEvent)) (string, error) {
 	var args struct {
 		Path    string  `json:"path"`
-		Query   string  `json:"query"`
+		Pattern string  `json:"pattern"`
 		Content *string `json:"content"`
 		Command *string `json:"command"`
 	}
@@ -131,13 +131,13 @@ func dispatchTool(ctx context.Context, repo *repository.Repository, root string,
 		return "", fmt.Errorf("invalid tool arguments: %w", err)
 	}
 	switch call.Name {
-	case "list_files":
-		paths, err := repo.List(args.Path)
+	case "glob":
+		paths, err := repo.Glob(args.Pattern)
 		return strings.Join(paths, "\n"), err
-	case "read_file":
+	case "read":
 		return repo.Read(args.Path)
-	case "search_files":
-		matches, err := repo.Search(args.Query)
+	case "grep":
+		matches, err := repo.Grep(args.Pattern)
 		if err != nil {
 			return "", err
 		}

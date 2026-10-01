@@ -33,7 +33,7 @@ model. Unresolvable tokens stay literal, so typos are visible, never silent.
   not persisted, so resumed sessions replay the original prompt and current
   references apply per turn.
 - The reference content reaches the model without tool rounds, so obvious
-  context costs nothing extra; the model can still use `read_file` for
+  context costs nothing extra; the model can still use `read` for
   anything too large to inline.
 
 ## Tests

@@ -5,8 +5,8 @@
 ## Context
 
 Lisa already separates repository reads from gated writes. In
-`internal/app/agent.go`, `dispatchTool` executes `list_files`, `read_file`, and
-`search_files` directly (repository-scoped per
+`internal/app/agent.go`, `dispatchTool` executes `read`, `read`, and
+`grep` directly (repository-scoped per
 [v1-spec.md](../v1-spec.md) FR-05), while `edit_file`, `run_command`, and MCP
 tool calls pass through the approval coordinator (FR-06/07/08) before anything
 changes the machine. Plan mode therefore needs no new execution machinery: it
@@ -49,8 +49,8 @@ agent from proposing (and after approval, applying) edits in the same turn.
    history reads `edit refused (plan mode)` / `command refused (plan mode)`
    rather than an opaque error.
 
-4. Plan mode does **not** change read behavior. `list_files`, `read_file`, and
-   `search_files` run exactly as in normal mode under the same FR-05
+4. Plan mode does **not** change read behavior. `read`, `read`, and
+   `grep` run exactly as in normal mode under the same FR-05
    repository-scoping rules, so the agent can still survey the codebase.
 
 5. MCP tool calls in plan mode: **open decision — mark as decision.** The safe
