@@ -337,8 +337,13 @@ func TestAllModelsCurrentMarksLivePairOnly(t *testing.T) {
 		t.Fatalf("rows = %+v", m.dialogModelRows)
 	}
 	view := stripANSI(m.View())
-	if got := strings.Count(view, "shared (current)"); got != 1 {
-		t.Fatalf("(current) rendered %d times: %q", got, view)
+	// Both providers report "shared"; colliding ids carry their provider
+	// name, and only the live pair carries (current).
+	if got := strings.Count(view, "shared · OpenAI (current)"); got != 1 {
+		t.Fatalf("(current) marker wrong: %d, label = %q", got, view)
+	}
+	if strings.Count(view, "shared · OpenRouter (current)") != 0 {
+		t.Fatalf("foreign pair carried the marker: %q", view)
 	}
 	if m.dialog.cursor != 0 {
 		t.Fatalf("cursor = %d, want 0 (live pair)", m.dialog.cursor)

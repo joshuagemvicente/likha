@@ -306,12 +306,15 @@ func (m *ui) handleModelsProviderFailed(msg modelsProviderFailedMsg) {
 func (m *ui) applyModelsSections(sections []modelsSection) {
 	rows := make([]modelsRow, 0)
 	flat := make([]string, 0)
+	counts := make(map[string]int)
 	for _, s := range sections {
 		for _, id := range s.models {
 			rows = append(rows, modelsRow{provider: s.provider, model: id})
 			flat = append(flat, id)
+			counts[id]++
 		}
 	}
+	m.dialogModelCounts = counts
 	m.lastModels = flat
 	m.dialogModelRows = rows
 	if !m.modelsNavigated {
@@ -390,13 +393,20 @@ func (m *ui) isLiveProvider(p model.Provider) bool {
 
 // modelLabel renders one /models row: the id plus the live-pair marker.
 // Only the live provider+model pair carries (current); a bare id match
-// under another provider does not.
+// under another provider does not. When the same id is listed by more
+// than one section (a proxy re-lists its upstream models, so two
+// providers report the same ids), the id renders with its provider name
+// — otherwise identical rows read like duplicates of each other.
 func (m *ui) modelLabel(orig int) string {
 	row := m.dialogModelRows[orig]
-	if row.model == m.modelName && m.isLiveProvider(row.provider) {
-		return row.model + " (current)"
+	label := row.model
+	if m.dialogModelCounts[row.model] > 1 {
+		label = row.model + " · " + row.provider.DisplayName
 	}
-	return row.model
+	if row.model == m.modelName && m.isLiveProvider(row.provider) {
+		return label + " (current)"
+	}
+	return label
 }
 
 // applyModelRow switches to the selected row. The dialog is already closed

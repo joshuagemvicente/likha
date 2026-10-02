@@ -98,6 +98,7 @@ type ui struct {
 	dialogItems       []string     // display rows for the open dialog (theme names, session titles; /models uses dialogModelRows)
 	dialog            dialogState
 	dialogModelRows   []modelsRow              // parallel selectable rows for the /models dialog; headers render from sections, never rows
+	dialogModelCounts map[string]int           // model id → occurrence count across sections; >1 rows render the id with its provider name
 	dialogModelsNote  string                   // muted unreachable-provider note for the /models dialog; "" when every fetch succeeded
 	modelsCache       modelsCache              // in-memory last-good sections (specs/models-perf); dies with the process
 	modelsGen         uint64                   // /models open generation; per-section arrivals carry it, stale ones drop

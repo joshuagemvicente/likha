@@ -255,3 +255,49 @@ func TestModelsDialogClippedWindowPinsSectionTitle(t *testing.T) {
 		t.Fatalf("dialagram rows render under %q title with the window clipped:\n%s", title, view)
 	}
 }
+
+// TestModelsDialogSharedIdsDisambiguate covers the router-proxy shape the
+// user hit: the active provider (dialagram) re-lists its upstream's
+// models, so identical ids appear under two sections. Each colliding row
+// renders `id · Provider` so the duplicates read as honest per-provider
+// listings, while unique ids and the (current) marker keep today's labels.
+func TestModelsDialogSharedIdsDisambiguate(t *testing.T) {
+	stateDir := t.TempDir()
+	storedProviderKey(t, stateDir, "opencode-go", "k-go")
+	storedProviderKey(t, stateDir, "dialagram", "k-dia")
+	if err := providers.SaveStoredConfig(stateDir, providers.StoredProviderConfig{Provider: "dialagram", Model: "nexum-router"}); err != nil {
+		t.Fatal(err)
+	}
+	prev := listModelsFunc
+	listModelsFunc = func(ctx context.Context, base, apiKey string) ([]string, error) {
+		switch {
+		case strings.Contains(base, "opencode.ai/zen/go"):
+			return []string{"go-alpha", "go-beta", "go-gamma"}, nil
+		case strings.Contains(base, "dialagram.me"):
+			// The router's list carries its own model plus the upstream
+			// ids — the reported duplicate shape.
+			return []string{"nexum-router", "go-alpha", "go-beta", "go-gamma"}, nil
+		default:
+			return nil, fmt.Errorf("unexpected base %q", base)
+		}
+	}
+	t.Cleanup(func() { listModelsFunc = prev })
+	client, err := model.New("https://dialagram.me/router/v1", "nexum-router", "k-dia")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := modelsTestUI(t, client, "nexum-router", providers.Connection{Provider: "Dialagram", ProviderCanonical: "dialagram", Verified: true}, stateDir)
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	runModelsCmds(t, m, cmd)
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "go-alpha · Dialagram") || !strings.Contains(view, "go-alpha · Opencode Go") {
+		t.Fatalf("colliding ids not labeled per provider: %q", view)
+	}
+	if !strings.Contains(view, "nexum-router (current)") {
+		t.Fatalf("unique id lost its bare label or live marker: %q", view)
+	}
+	if countHeaderLines(view, "Dialagram") != 1 || countHeaderLines(view, "Opencode Go") != 1 {
+		t.Fatalf("section headers wrong: %q", view)
+	}
+}
