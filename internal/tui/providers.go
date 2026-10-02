@@ -2,26 +2,35 @@ package tui
 
 import (
 	"context"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-runewidth"
 
 	"lisa/internal/model"
 	"lisa/internal/providers"
 )
 
-// /providers implements in-session provider switching: a selection dialog
-// over the predefined providers, an inline key-entry modal for providers
-// without a stored key, and a live build-verify-activate swap that never
-// touches config.json (session-only; setup remains the defaults path).
+// /providers implements the connection manager: a selection dialog over the
+// predefined providers where Enter opens that provider's auth surface — the
+// masked key-entry modal for providers without a stored key, an auth-state
+// view for configured ones. A passing connection check stores the key and
+// returns to the dialog; nothing on this surface ever switches the live
+// provider (activation happens through /models) and config.json is never
+// read or written here (setup remains the defaults path).
 
-// keyState is the dedicated API-key entry screen for an unconfigured
-// provider. The key is stored only after the connection check passes.
+// keyState backs the provider auth overlay: either the auth-state view of a
+// configured provider (auth) or the dedicated API-key entry screen for an
+// unconfigured one. The key is stored only after the connection check passes.
 type keyState struct {
 	open     bool
+	auth     bool // auth-state view: the stored credential, not key entry
 	provider model.Provider
+	signedIn bool   // auth view (OAuth): a stored login is present
+	source   string // auth view (key): where the stored key came from
 	input    []rune
 	checking bool
 	err      string
@@ -31,29 +40,80 @@ type keyState struct {
 type keyCheckMsg struct {
 	provider model.Provider
 	key      string
-	models   []string
 	err      error
 }
 
 // openKeyModal switches to the key-entry screen for a provider with no
-// stored key. Esc is the only exit besides success.
+// stored key. Esc is the only exit besides a passing check.
 func (m *ui) openKeyModal(p model.Provider) {
 	m.keyModal = keyState{open: true, provider: p}
 	m.status = "Provider key required"
 	m.layoutWidth = 0
 }
 
-// closeKeyModal discards the modal and returns to the provider dialog with
+// closeKeyModal discards the overlay and returns to the provider dialog with
 // nothing changed: no stored key, no client swap.
 func (m *ui) closeKeyModal() {
 	m.keyModal = keyState{}
 	m.layoutWidth = 0
 }
 
-// updateKeyModal handles keys while the key-entry modal is open. The input
-// mirrors the setup flow's masked field; Enter checks, Esc cancels.
+// openProviderAuth routes one provider row to its auth surface and never
+// switches anything: a configured key provider opens the auth-state view, an
+// unconfigured one the key-entry modal, and an OAuth provider the sign-in
+// state view (the switcher cannot sign in interactively).
+func (m *ui) openProviderAuth(p model.Provider) tea.Cmd {
+	m.layoutWidth = 0
+	if p.Auth == model.AuthOAuth {
+		_, signedIn, err := providers.StoredOAuth(m.stateDir, p.Name)
+		if err != nil {
+			m.entries = append(m.entries, entry{role: "Error", content: "Read stored credentials: " + err.Error()})
+			return nil
+		}
+		m.keyModal = keyState{open: true, auth: true, provider: p, signedIn: signedIn}
+		return nil
+	}
+	key, err := providers.StoredKey(m.stateDir, p.Name)
+	if err != nil {
+		m.entries = append(m.entries, entry{role: "Error", content: "Read stored API keys: " + err.Error()})
+		return nil
+	}
+	if key != "" {
+		m.keyModal = keyState{open: true, auth: true, provider: p,
+			source: "stored in the private state directory (providers.json)"}
+		return nil
+	}
+	if p.KeyEnv != "" && os.Getenv(p.KeyEnv) != "" {
+		m.keyModal = keyState{open: true, auth: true, provider: p,
+			source: "provided via environment variable " + p.KeyEnv}
+		return nil
+	}
+	m.openKeyModal(p)
+	return nil
+}
+
+// updateKeyModal handles keys while the provider auth overlay is open. In the
+// key-entry modal the input mirrors the setup flow's masked field: Enter
+// checks, Esc cancels. In the auth-state view Enter re-opens the key modal to
+// replace the stored key (key providers only) and Esc returns to the dialog.
 func (m *ui) updateKeyModal(msg tea.KeyMsg) tea.Cmd {
 	if !m.keyModal.open {
+		return nil
+	}
+	if m.keyModal.auth {
+		switch msg.String() {
+		case "enter":
+			if m.keyModal.provider.Auth == model.AuthOAuth {
+				// Sign-in cannot happen here: the modal is for keys only.
+				return nil
+			}
+			// Replace: the stored key stays until a new one passes the check.
+			m.keyModal = keyState{open: true, provider: m.keyModal.provider}
+			m.status = "Replace provider key"
+			m.layoutWidth = 0
+		case "esc":
+			m.closeKeyModal()
+		}
 		return nil
 	}
 	if m.keyModal.checking {
@@ -85,8 +145,8 @@ func (m *ui) updateKeyModal(msg tea.KeyMsg) tea.Cmd {
 			return func() tea.Msg {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				ids, err := model.ListModels(ctx, p.BaseURL, key)
-				return keyCheckMsg{provider: p, key: key, models: ids, err: err}
+				_, err := model.ListModels(ctx, p.BaseURL, key)
+				return keyCheckMsg{provider: p, key: key, err: err}
 			}
 		}
 	case tea.KeyEsc:
@@ -96,7 +156,9 @@ func (m *ui) updateKeyModal(msg tea.KeyMsg) tea.Cmd {
 }
 
 // handleKeyCheckMsg finishes the key modal: the key persists only after the
-// check passes, then the provider activates immediately.
+// check passes, and the flow returns to the providers dialog — the live
+// provider and model stay untouched. A failed check keeps the previously
+// stored key (if any) and shows the error in the modal.
 func (m *ui) handleKeyCheckMsg(v keyCheckMsg) {
 	if !m.keyModal.open || !m.keyModal.checking || m.keyModal.provider.Name != v.provider.Name {
 		// Late result after esc or a restart of the modal: ignore.
@@ -109,187 +171,94 @@ func (m *ui) handleKeyCheckMsg(v keyCheckMsg) {
 		return
 	}
 	p := v.provider
-	modelID := providers.SwitchModelID(p, v.models)
-	if modelID == "" {
-		m.keyModal.err = "Provider reports no models; no model to switch to."
-		m.layoutWidth = 0
-		return
-	}
 	if err := providers.StoreKey(m.stateDir, p.Name, v.key); err != nil {
 		m.keyModal.err = err.Error()
 		m.layoutWidth = 0
 		return
 	}
 	m.keyModal = keyState{}
-	m.activateProvider(p, v.key, model.OAuthCredentials{}, modelID)
-}
-
-// startProviderSwitch begins the live switch for an already-configured
-// provider: verify before anything becomes visible (async), then activate.
-// The previous provider stays active on failure. Key providers verify with a
-// model-list request; OAuth providers verify by validating the stored login,
-// which needs no network while the token is unexpired.
-func (m *ui) startProviderSwitch(p model.Provider, key string, creds model.OAuthCredentials) tea.Cmd {
-	m.status = "Checking " + p.DisplayName
-	m.layoutWidth = 0
-	if p.Auth == model.AuthOAuth {
-		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			client, err := model.NewOAuth(p.BaseURL, p.DefaultModel, model.ChatGPTIssuer, model.ChatGPTClientID, creds)
-			if err != nil {
-				return providerSwitchMsg{provider: p, creds: creds, err: err}
-			}
-			err = client.Check(ctx)
-			return providerSwitchMsg{provider: p, creds: creds, err: err}
-		}
-	}
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		ids, err := model.ListModels(ctx, p.BaseURL, key)
-		return providerSwitchMsg{provider: p, key: key, models: ids, err: err}
-	}
-}
-
-// providerSwitchMsg carries the verification result for a live switch. The
-// creds field is zero for key providers; for OAuth providers it carries the
-// stored login reused to build the activated client.
-type providerSwitchMsg struct {
-	provider model.Provider
-	key      string
-	creds    model.OAuthCredentials
-	models   []string
-	err      error
-}
-
-func (m *ui) handleProviderSwitchMsg(v providerSwitchMsg) tea.Cmd {
-	m.layoutWidth = 0
-	if v.err != nil {
-		m.status = "Error"
-		m.entries = append(m.entries, entry{role: "Error", content: "Switch to " + v.provider.DisplayName + " failed: " + v.err.Error()})
-		return nil
-	}
-	var reported []string
-	if v.provider.Auth != model.AuthOAuth {
-		// OAuth providers carry a curated static model list in the provider
-		// row; only key providers resolve the model from what was reported.
-		reported = v.models
-	}
-	modelID := providers.SwitchModelID(v.provider, reported)
-	if modelID == "" {
-		m.status = "Error"
-		m.entries = append(m.entries, entry{role: "Error", content: "Switch to " + v.provider.DisplayName + " failed: the provider reports no models."})
-		return nil
-	}
-	return m.activateProvider(v.provider, v.key, v.creds, modelID)
-}
-
-// activateProvider swaps the live client and session identity for the new
-// provider. config.json is never read or written; providers.json is only
-// touched by the key modal. The stream buffers reset so no bytes from the
-// previous provider bleed into the next turn.
-func (m *ui) activateProvider(p model.Provider, key string, creds model.OAuthCredentials, modelID string) tea.Cmd {
-	var client *model.Client
-	var err error
-	if p.Auth == model.AuthOAuth {
-		client, err = model.NewOAuth(p.BaseURL, modelID, model.ChatGPTIssuer, model.ChatGPTClientID, creds)
-		if client != nil {
-			client.SetOAuthSaver(func(c model.OAuthCredentials) error {
-				return providers.StoreOAuth(m.stateDir, p.Name, c)
-			})
-		}
+	if m.dialog.open && m.dialog.kind == dialogProviders {
+		// Refresh the rows in place so the stored key shows as ✔ without
+		// disturbing the open filter or the cursor.
+		items, _ := m.providersDialogItems()
+		m.dialogItems = items
 	} else {
-		client, err = model.New(p.BaseURL, modelID, key)
+		// Direct form (/providers <n-or-name> [key]): land on the dialog so
+		// the freshly stored row is visible and Enter-auth takes over.
+		m.openDialog(dialogProviders)
 	}
-	if err != nil {
-		m.status = "Error"
-		m.entries = append(m.entries, entry{role: "Error", content: "Switch to " + p.DisplayName + " failed: " + err.Error()})
-		return nil
-	}
-	if p.SessionHeader != "" {
-		client.SetSessionHeader(p.SessionHeader)
-		client.SetSession(m.snapshot.ID)
-	}
-	m.client = client
-	m.modelName = modelID
-	m.streamBuf.Reset()
-	m.streaming = -1
-	m.reasoningBuf.Reset()
-	m.reasoningStream = -1
-	m.pending = nil
-	m.reviewSeen = nil
-	m.jumpBottom()
-	m.conn = providers.Connection{Provider: p.DisplayName, Verified: true, Theme: m.conn.Theme, Nerd: m.conn.Nerd, Mcp: m.conn.Mcp}
-	m.status = "Connected"
+	m.entries = append(m.entries, entry{role: "Lisa", content: "Stored the API key for " + p.DisplayName + "."})
+	m.status = "Key stored"
 	m.layoutWidth = 0
-	m.entries = append(m.entries, entry{role: "Lisa", content: "Provider switched to " + p.DisplayName + " for this session."})
-	return nil
 }
 
-// handleProvidersCommand implements /providers and /providers <n-or-name>.
-// A bare command opens the selection dialog; a number indexes the predefined
-// list position-stably (independent of any dialog filter state) and an
-// exact canonical name applies directly, matching /themes.
+// handleProvidersCommand implements /providers, /providers <n-or-name>, and
+// /providers <n-or-name> [key]. A bare command opens the selection dialog; a
+// number indexes the predefined list position-stably (independent of any
+// dialog filter state) and an exact canonical name resolves via
+// LookupProvider, matching /themes. A target opens that provider's auth
+// surface; a trailing key argument stores that key after a passing check.
+// Nothing on this command ever switches the live provider.
 func (m *ui) handleProvidersCommand(line, arg string) tea.Cmd {
-	if arg == "" {
+	target, keyArg, hasKey := strings.Cut(arg, " ")
+	keyArg = strings.TrimSpace(keyArg)
+	if target == "" {
 		return m.openDialog(dialogProviders)
 	}
-	if n, err := strconv.Atoi(arg); err == nil {
+	var p model.Provider
+	if n, err := strconv.Atoi(target); err == nil {
 		if n < 1 || n > len(model.Providers) {
 			m.input = []rune(line)
 			m.edit.endCaret(m.input)
-			m.entries = append(m.entries, entry{role: "Error", content: "Usage: /providers <n-or-name> — run /providers first for the numbered list. " + commandHelp})
+			m.entries = append(m.entries, entry{role: "Error", content: "Usage: /providers <n-or-name> [key] — run /providers first for the numbered list. " + commandHelp})
 			return nil
 		}
-		return m.applyProviderDirect(model.Providers[n-1])
-	}
-	p, ok := model.LookupProvider(arg)
-	if !ok {
-		m.input = []rune(line)
-		m.edit.endCaret(m.input)
-		m.entries = append(m.entries, entry{role: "Error", content: "Unknown provider " + arg + "; run /providers for the list. " + commandHelp})
-		return nil
-	}
-	return m.applyProviderDirect(p)
-}
-
-// applyProviderDirect starts a switch from a typed argument: providers
-// without a stored key enter the key modal first; the rest verify async.
-// OAuth providers never enter the key modal (the switcher cannot sign in):
-// without a stored login the user is pointed at first-run setup or the
-// device-login flag instead.
-func (m *ui) applyProviderDirect(p model.Provider) tea.Cmd {
-	m.layoutWidth = 0
-	if p.Auth == model.AuthOAuth {
-		creds, ok, err := providers.StoredOAuth(m.stateDir, p.Name)
-		if err != nil {
-			m.entries = append(m.entries, entry{role: "Error", content: "Read stored credentials: " + err.Error()})
-			return nil
-		}
+		p = model.Providers[n-1]
+	} else {
+		var ok bool
+		p, ok = model.LookupProvider(target)
 		if !ok {
-			m.status = "Error"
-			m.entries = append(m.entries, entry{role: "Error", content: p.DisplayName + " has no stored sign-in; sign in during first-run setup or run lisa --provider chatgpt --device-login"})
+			m.input = []rune(line)
+			m.edit.endCaret(m.input)
+			m.entries = append(m.entries, entry{role: "Error", content: "Unknown provider " + target + "; run /providers for the list. " + commandHelp})
 			return nil
 		}
-		return m.startProviderSwitch(p, "", creds)
 	}
-	key, err := providers.StoredKey(m.stateDir, p.Name)
-	if err != nil {
-		m.entries = append(m.entries, entry{role: "Error", content: "Read stored API keys: " + err.Error()})
-		return nil
+	if hasKey {
+		return m.applyProviderKeyArgument(p, keyArg)
 	}
-	if key == "" {
-		m.openKeyModal(p)
-		return nil
-	}
-	return m.startProviderSwitch(p, key, model.OAuthCredentials{})
+	return m.openProviderAuth(p)
 }
 
-// Custom endpoints (spec §6.1): the switch machinery is provider-agnostic
-// (activateProvider builds a client from an arbitrary BaseURL), but no
-// custom row is surfaced in the dialog until this gate flips. Enabling the
-// feature later removes the gate; it adds no plumbing.
+// applyProviderKeyArgument stores a key passed flag-style with the command:
+// the key modal's check machinery runs without further input — the modal
+// seeds into its checking state and the result lands in handleKeyCheckMsg,
+// which stores the key and returns to the providers dialog. A failed check
+// keeps the modal open with the error and stores nothing.
+func (m *ui) applyProviderKeyArgument(p model.Provider, key string) tea.Cmd {
+	m.layoutWidth = 0
+	if key == "" {
+		return m.openProviderAuth(p)
+	}
+	if p.Auth == model.AuthOAuth {
+		m.entries = append(m.entries, entry{role: "Error", content: p.DisplayName + " uses ChatGPT login; it has no API key to store."})
+		return m.openProviderAuth(p)
+	}
+	m.keyModal = keyState{open: true, provider: p, checking: true, input: []rune(key)}
+	m.status = "Checking " + p.DisplayName
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := model.ListModels(ctx, p.BaseURL, key)
+		return keyCheckMsg{provider: p, key: key, err: err}
+	}
+}
+
+// Custom endpoints (spec §6.1): the auth machinery is provider-agnostic (the
+// key modal checks any BaseURL), but no custom row is surfaced in the dialog
+// and the direct form resolves only predefined names, so nothing reaches it
+// until this gate flips. Enabling the feature later removes the gate; it adds
+// no plumbing.
 const customEndpointsEnabled = false
 
 // providersDialogItems builds one display row per predefined provider with
@@ -305,7 +274,7 @@ func (m *ui) providersDialogItems() (items []string, activeIndex int) {
 				configured = "✔ "
 				labelSuffix = ""
 			} else {
-				// A read error counts as not signed in; the switch path
+				// A read error counts as not signed in; the auth view
 				// surfaces it in full when the row is selected.
 				labelSuffix = " — not signed in (first-run setup or --device-login)"
 			}
@@ -326,18 +295,22 @@ func (m *ui) providersDialogItems() (items []string, activeIndex int) {
 	return items, activeIndex
 }
 
-// keyModalView renders the key-entry screen over the provider dialog, which
-// stays open beneath: Esc returns to it with nothing changed. Opened by a
-// direct argument, it instead overlays the dimmed main view. The input is
-// masked with paste dots exactly like the setup flow's key stage.
+// keyModalView renders the provider auth overlay over the provider dialog,
+// which stays open beneath: Esc returns to it with nothing changed. Opened by
+// a direct argument, it instead overlays the dimmed main view. The key-entry
+// modal masks its input with paste dots exactly like the setup flow's key
+// stage; the auth-state view shows the stored credential's source.
 func (m *ui) keyModalView() string {
+	if m.keyModal.auth {
+		return m.providerAuthView()
+	}
 	var base []string
 	if m.dialog.open {
 		base = strings.Split(m.dialogView(), "\n")
 	} else {
 		base = strings.Split(m.mainView(), "\n")
 	}
-	width, height := m.width, m.height
+	width := m.width
 	var title, status string
 	if m.keyModal.checking {
 		title = "API key for " + m.keyModal.provider.DisplayName + " — checking connection…"
@@ -378,7 +351,67 @@ func (m *ui) keyModalView() string {
 			content = append(content, style.Render(fit(line, inner)))
 		}
 	}
+	return m.drawOverlayBox(base, boxWidth, content)
+}
 
+// providerAuthView renders the auth-state overlay for a configured provider:
+// the provider, where its stored key came from or its ChatGPT sign-in state,
+// and the footer. Enter never switches anything; Esc returns to the provider
+// dialog beneath (or the main view for the direct form).
+func (m *ui) providerAuthView() string {
+	var base []string
+	if m.dialog.open {
+		base = strings.Split(m.dialogView(), "\n")
+	} else {
+		base = strings.Split(m.mainView(), "\n")
+	}
+	width := m.width
+	p := m.keyModal.provider
+	title := "Auth for " + p.DisplayName
+	footer := "Esc back"
+	var body []string
+	if p.Auth == model.AuthOAuth {
+		if m.keyModal.signedIn {
+			body = append(body, "Signed in.")
+		} else {
+			body = append(body, "Not signed in: sign in during first-run setup or run lisa --provider chatgpt --device-login.")
+		}
+	} else {
+		body = append(body, "✔ Connected — key "+m.keyModal.source+".")
+		footer = "Enter replace key  Esc back"
+	}
+
+	boxWidth := runewidth.StringWidth(title) + 4
+	for _, line := range body {
+		if w := runewidth.StringWidth(line) + 6; w > boxWidth {
+			boxWidth = w
+		}
+	}
+	if w := runewidth.StringWidth(footer) + 2; w > boxWidth {
+		boxWidth = w
+	}
+	boxWidth = min(width-4, boxWidth+4)
+	inner := boxWidth - 4
+
+	content := []string{m.theme.Title.Render(fit(title, inner)), fit("", inner)}
+	for _, line := range body {
+		// Long hints wrap instead of truncating: a clipped
+		// "lisa --provider chatgpt --device-login" is useless.
+		for _, chunk := range wrap(line, inner) {
+			content = append(content, fit(chunk, inner))
+		}
+	}
+	content = append(content, fit("", inner))
+	content = append(content, m.theme.Help.Render(fit(footer, inner)))
+	return m.drawOverlayBox(base, boxWidth, content)
+}
+
+// drawOverlayBox composes the bordered box for the provider auth overlays:
+// each overlaid row is the dimmed (or intact) base text left of the box, the
+// full-intensity box row, and the base text right of it — the background
+// keeps its content instead of collapsing to a solid band.
+func (m *ui) drawOverlayBox(base []string, boxWidth int, content []string) string {
+	width, height := m.width, m.height
 	top := max(0, (height-len(content)-2)/2)
 	left := max(2, (width-boxWidth)/2)
 	for j := 0; j < len(content)+2 && top+j < height; j++ {

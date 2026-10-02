@@ -459,3 +459,74 @@ func TestAllModelsActivationFailureKeepsSession(t *testing.T) {
 		t.Fatalf("error entry = %+v", last)
 	}
 }
+
+// TestAllModelsSectionDeduplicatesRepeatedIds verifies a provider that
+// re-lists an id renders it once per section in first-occurrence order,
+// while ids shared across providers keep their per-provider labels.
+func TestAllModelsSectionDeduplicatesRepeatedIds(t *testing.T) {
+	stateDir := t.TempDir()
+	storedProviderKey(t, stateDir, "openai", "k-openai")
+	storedProviderKey(t, stateDir, "openrouter", "k-router")
+	prev := listModelsFunc
+	listModelsFunc = func(ctx context.Context, base, apiKey string) ([]string, error) {
+		switch {
+		case strings.Contains(base, "openai.com"):
+			// alpha echoes through the catalog: one section, three mentions.
+			return []string{"alpha", "beta", "alpha", "gamma", "alpha"}, nil
+		case strings.Contains(base, "openrouter"):
+			// Shares beta and gamma with the openai section.
+			return []string{"beta", "gamma", "router-a"}, nil
+		default:
+			return nil, fmt.Errorf("unexpected base %q", base)
+		}
+	}
+	t.Cleanup(func() { listModelsFunc = prev })
+	client, err := model.New("https://openrouter.ai/api/v1", "beta", "k-router")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := modelsTestUI(t, client, "beta", providers.Connection{Provider: "OpenRouter", ProviderCanonical: "openrouter", Verified: true}, stateDir)
+	if msgs := openModels(t, m); len(arrivedSections(msgs)) != 2 {
+		t.Fatalf("sections = %+v", msgs)
+	}
+	if len(m.dialogModelRows) != 6 {
+		t.Fatalf("rows = %+v", m.dialogModelRows)
+	}
+	var openaiIDs []string
+	for _, r := range m.dialogModelRows {
+		if r.provider.Name == "openai" {
+			openaiIDs = append(openaiIDs, r.model)
+		}
+	}
+	want := []string{"alpha", "beta", "gamma"}
+	if len(openaiIDs) != len(want) {
+		t.Fatalf("openai ids = %v, want %v", openaiIDs, want)
+	}
+	for i := range want {
+		if openaiIDs[i] != want[i] {
+			t.Fatalf("openai ids = %v, want %v", openaiIDs, want)
+		}
+	}
+	// Deduped rows drive the counts: alpha lists once within its section, so
+	// it renders bare; beta and gamma list once per provider, so they carry
+	// their provider labels.
+	if m.dialogModelCounts["alpha"] != 1 || m.dialogModelCounts["beta"] != 2 {
+		t.Fatalf("counts = %v", m.dialogModelCounts)
+	}
+	view := stripANSI(m.View())
+	for _, label := range []string{
+		"alpha",
+		"beta · OpenRouter (current)",
+		"beta · OpenAI",
+		"gamma · OpenRouter",
+		"gamma · OpenAI",
+		"router-a",
+	} {
+		if !strings.Contains(view, label) {
+			t.Fatalf("label %q missing: %q", label, view)
+		}
+	}
+	if strings.Contains(view, "alpha · ") {
+		t.Fatalf("intra-section duplicate labeled: %q", view)
+	}
+}

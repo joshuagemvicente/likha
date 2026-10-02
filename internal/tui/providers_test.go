@@ -2,7 +2,6 @@ package tui
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -192,23 +191,16 @@ func TestProvidersDialogNoMatches(t *testing.T) {
 	}
 }
 
-// TestProvidersSwitchActivatesSession drives the success path: an
-// already-configured provider verifies against its endpoint and then swaps
-// the live client, model, and status — without touching config.json or
-// providers.json.
-func TestProvidersSwitchActivatesSession(t *testing.T) {
+// TestProvidersEnterOpensAuthWithoutSwitching drives the core contract: Enter
+// on a configured API-key row opens the auth-state view and swaps nothing —
+// the client, model name, connection, and stored files are untouched, and no
+// network request is made (the fake endpoint would 404 any non-/models call,
+// and the auth path never dials at all).
+func TestProvidersEnterOpensAuthWithoutSwitching(t *testing.T) {
 	stateDir := t.TempDir()
 	server := newProvidersServer(t, false)
 	defer server.Close()
-	if err := providers.StoreKey(stateDir, "custom", "test-key"); err != nil {
-		t.Fatal(err)
-	}
-	cfgBefore := providers.StoredProviderConfig{Provider: "openai", Model: "gpt-4o-mini"}
-	if err := providers.SaveStoredConfig(stateDir, cfgBefore); err != nil {
-		t.Fatal(err)
-	}
-	configBefore, err := os.ReadFile(providers.ConfigFilePath(stateDir))
-	if err != nil {
+	if err := providers.StoreKey(stateDir, "openai", "test-key"); err != nil {
 		t.Fatal(err)
 	}
 	providersBefore, err := os.ReadFile(providers.KeyFilePath(stateDir))
@@ -217,112 +209,106 @@ func TestProvidersSwitchActivatesSession(t *testing.T) {
 	}
 	m := newProvidersUI(t, stateDir, server.URL+"/v1")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	prevClient := m.client
 
-	cmd := m.applyProviderDirect(providers.CustomEndpointTarget(server.URL + "/v1"))
-	if cmd == nil {
-		t.Fatal("configured provider did not start a switch")
+	runCommand(m, "/providers")
+	// The cursor starts on the live OpenAI row; Enter must only auth.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("Enter on a configured row returned a command")
 	}
-	if m.status != "Checking Custom endpoint" {
-		t.Fatalf("status = %q, want the checking state", m.status)
+	if !m.keyModal.open || !m.keyModal.auth || m.keyModal.provider.Name != "openai" {
+		t.Fatalf("auth-state view not opened for openai: %+v", m.keyModal)
 	}
-	msg := cmd()
-	v, ok := msg.(providerSwitchMsg)
-	if !ok || v.err != nil {
-		t.Fatalf("switch result = %+v", msg)
+	if !strings.Contains(m.View(), "Auth for OpenAI") ||
+		!strings.Contains(m.View(), "stored in the private state directory (providers.json)") {
+		t.Fatalf("auth view missing provider/source: %q", m.View())
 	}
-	m.Update(msg)
-
-	if m.modelName != "alpha" {
-		t.Fatalf("model = %q, want the first reported id alpha", m.modelName)
+	if m.client != prevClient {
+		t.Fatal("Enter replaced the live client")
 	}
-	if m.client == nil {
-		t.Fatal("client was not swapped in")
+	if m.modelName != "start-model" {
+		t.Fatalf("model changed to %q", m.modelName)
 	}
-	if m.status != "Connected" {
-		t.Fatalf("status = %q, want Connected", m.status)
+	if m.conn.Provider != "OpenAI" {
+		t.Fatalf("connection changed to %q", m.conn.Provider)
 	}
-	if m.conn.Provider != "Custom endpoint" {
-		t.Fatalf("connection provider = %q, want Custom endpoint", m.conn.Provider)
-	}
-	if _, ok := findEntry(m, "Provider switched to Custom endpoint for this session."); !ok {
-		t.Fatalf("confirmation entry missing: %+v", m.entries)
-	}
-	configAfter, err := os.ReadFile(providers.ConfigFilePath(stateDir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(configBefore, configAfter) {
-		t.Fatalf("config.json changed: %s -> %s", configBefore, configAfter)
+	if !m.dialog.open {
+		t.Fatal("Enter closed the providers dialog")
 	}
 	providersAfter, err := os.ReadFile(providers.KeyFilePath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(providersBefore, providersAfter) {
-		t.Fatal("providers.json was rewritten by a session switch")
-	}
-	if cfg, err := providers.LoadStoredConfig(stateDir); err != nil || cfg != cfgBefore {
-		t.Fatalf("stored config changed: %+v %v", cfg, err)
+		t.Fatal("providers.json was rewritten by navigation alone")
 	}
 }
 
-// TestProvidersSwitchVerificationFailure verifies the failure path: a failed
-// connection check leaves the previous provider active and appends an Error
-// entry describing the failed switch.
-func TestProvidersSwitchVerificationFailure(t *testing.T) {
+// TestProvidersAuthReplaceKeepsOldKeyOnFailure drives key replacement: the
+// auth-state view's Enter re-opens the key modal, and a failed check keeps
+// the OLD key stored, shows the error, and leaves the live session alone.
+func TestProvidersAuthReplaceKeepsOldKeyOnFailure(t *testing.T) {
 	stateDir := t.TempDir()
-	good := newProvidersServer(t, false)
-	defer good.Close()
 	bad := newProvidersServer(t, true)
 	defer bad.Close()
-	if err := providers.StoreKey(stateDir, "custom", "test-key"); err != nil {
+	if err := providers.StoreKey(stateDir, "custom", "old-key"); err != nil {
 		t.Fatal(err)
 	}
-	m := newProvidersUI(t, stateDir, good.URL+"/v1")
+	m := newProvidersUI(t, stateDir, "https://example.invalid/v1")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	prevClient := m.client
 
-	cmd := m.applyProviderDirect(providers.CustomEndpointTarget(bad.URL + "/v1"))
+	if cmd := m.openProviderAuth(providers.CustomEndpointTarget(bad.URL + "/v1")); cmd != nil {
+		t.Fatal("auth view returned a command")
+	}
+	if !m.keyModal.open || !m.keyModal.auth {
+		t.Fatalf("auth-state view not opened: %+v", m.keyModal)
+	}
+	// Enter replaces: the key modal opens over the auth view.
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.keyModal.auth || !m.keyModal.open || m.keyModal.checking {
+		t.Fatalf("Enter did not open the key modal: %+v", m.keyModal)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("new-key")})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("configured provider did not start a switch")
+		t.Fatal("Enter with a key did not start the connection check")
 	}
 	msg := cmd()
-	v, ok := msg.(providerSwitchMsg)
+	v, ok := msg.(keyCheckMsg)
 	if !ok || v.err == nil {
-		t.Fatalf("expected a verification failure, got %+v", msg)
+		t.Fatalf("expected a check failure, got %+v", msg)
 	}
 	m.Update(msg)
 
-	if m.client != prevClient {
-		t.Fatal("failed switch replaced the live client")
+	if m.keyModal.err == "" {
+		t.Fatalf("modal error not shown: %+v", m.keyModal)
 	}
-	if m.modelName != "start-model" {
-		t.Fatalf("model changed to %q on failure", m.modelName)
+	if key, err := providers.StoredKey(stateDir, "custom"); err != nil || key != "old-key" {
+		t.Fatalf("failed replace clobbered the stored key: %q %v", key, err)
 	}
-	if !strings.Contains(m.status, "Error") {
-		t.Fatalf("status = %q, want Error", m.status)
-	}
-	e, ok := findEntry(m, "Switch to Custom endpoint failed")
-	if !ok || e.role != "Error" {
-		t.Fatalf("failure entry missing: %+v", m.entries)
+	if m.client != prevClient || m.modelName != "start-model" {
+		t.Fatalf("failed replace changed the session: client=%v model=%q", m.client, m.modelName)
 	}
 }
 
 // TestProvidersKeyModalSuccess verifies the key modal for an unconfigured
 // provider: an empty Enter does nothing, a typed key checks the connection,
-// and the key persists only once the check passes, after which the provider
-// activates.
+// and a passing check stores the key and returns to the providers dialog —
+// the live provider and model stay untouched.
 func TestProvidersKeyModalSuccess(t *testing.T) {
 	stateDir := t.TempDir()
 	server := newProvidersServer(t, false)
 	defer server.Close()
 	m := newProvidersUI(t, stateDir, server.URL+"/v1")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	prevClient := m.client
 
-	if cmd := m.applyProviderDirect(providers.CustomEndpointTarget(server.URL + "/v1")); cmd != nil {
-		t.Fatal("unconfigured provider returned a switch command instead of the key modal")
+	if cmd := m.openProviderAuth(providers.CustomEndpointTarget(server.URL + "/v1")); cmd != nil {
+		t.Fatal("unconfigured provider returned a command instead of the key modal")
 	}
-	if !m.keyModal.open {
+	if !m.keyModal.open || m.keyModal.auth {
 		t.Fatalf("key modal did not open: %+v", m.keyModal)
 	}
 	if !strings.Contains(m.View(), "API key for Custom endpoint") {
@@ -361,8 +347,63 @@ func TestProvidersKeyModalSuccess(t *testing.T) {
 	if m.keyModal.open {
 		t.Fatalf("key modal stayed open after success: %+v", m.keyModal)
 	}
-	if m.client == nil || m.modelName != "alpha" || m.status != "Connected" {
-		t.Fatalf("provider not activated: model=%q status=%q", m.modelName, m.status)
+	// Direct form: the dialog opens on success so the stored row is visible.
+	if !m.dialog.open || m.dialog.kind != dialogProviders {
+		t.Fatalf("dialog did not open after storing: %+v", m.dialog)
+	}
+	if m.client != prevClient || m.modelName != "start-model" {
+		t.Fatalf("storing a key switched the session: client=%v model=%q", m.client, m.modelName)
+	}
+	if _, ok := findEntry(m, "Stored the API key for Custom endpoint."); !ok {
+		t.Fatalf("confirmation entry missing: %+v", m.entries)
+	}
+}
+
+// TestProvidersKeyStoreRefreshesDialogRow verifies the dialog refresh: with
+// the providers dialog open beneath a checking modal, a passing check stores
+// the key, closes the modal, and the row's ✔ appears without disturbing the
+// open dialog state.
+func TestProvidersKeyStoreRefreshesDialogRow(t *testing.T) {
+	stateDir := t.TempDir()
+	server := newProvidersServer(t, false)
+	defer server.Close()
+	m := newProvidersUI(t, stateDir, server.URL+"/v1")
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	prevClient := m.client
+
+	runCommand(m, "/providers")
+	if !m.dialog.open {
+		t.Fatal("providers dialog did not open")
+	}
+	// Seed the modal into its checking state for the openai row; the check
+	// result is then synthesized (the real endpoint is never dialed).
+	p, ok := model.LookupProvider("openai")
+	if !ok {
+		t.Fatal("openai missing from the predefined list")
+	}
+	m.keyModal = keyState{open: true, provider: p, checking: true}
+	m.handleKeyCheckMsg(keyCheckMsg{provider: p, key: "fresh-key"})
+
+	if m.keyModal.open {
+		t.Fatalf("modal stayed open after storing: %+v", m.keyModal)
+	}
+	if key, err := providers.StoredKey(stateDir, "openai"); err != nil || key != "fresh-key" {
+		t.Fatalf("stored key = %q %v, want fresh-key", key, err)
+	}
+	if !m.dialog.open || m.dialog.kind != dialogProviders {
+		t.Fatalf("dialog did not stay open: %+v", m.dialog)
+	}
+	var openAIRow bool
+	for _, item := range m.dialogItems {
+		if strings.HasPrefix(item, "✔ OpenAI (openai)") {
+			openAIRow = true
+		}
+	}
+	if !openAIRow {
+		t.Fatalf("row did not refresh to ✔: %+v", m.dialogItems)
+	}
+	if m.client != prevClient || m.modelName != "start-model" {
+		t.Fatalf("storing a key switched the session: client=%v model=%q", m.client, m.modelName)
 	}
 }
 
@@ -382,8 +423,8 @@ func TestProvidersKeyModalFailure(t *testing.T) {
 		t.Fatal("providers dialog did not open")
 	}
 	prevClient := m.client
-	if cmd := m.applyProviderDirect(providers.CustomEndpointTarget(bad.URL + "/v1")); cmd != nil {
-		t.Fatal("unconfigured provider returned a switch command instead of the key modal")
+	if cmd := m.openProviderAuth(providers.CustomEndpointTarget(bad.URL + "/v1")); cmd != nil {
+		t.Fatal("unconfigured provider returned a command instead of the key modal")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("test-key")})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -435,8 +476,8 @@ func TestProvidersKeyModalEscKeepsDialog(t *testing.T) {
 		t.Fatal("providers dialog did not open")
 	}
 	prevClient := m.client
-	if cmd := m.applyProviderDirect(providers.CustomEndpointTarget(server.URL + "/v1")); cmd != nil {
-		t.Fatal("unconfigured provider returned a switch command")
+	if cmd := m.openProviderAuth(providers.CustomEndpointTarget(server.URL + "/v1")); cmd != nil {
+		t.Fatal("unconfigured provider returned a command")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("partial")})
 	if !m.keyModal.open || !m.dialog.open {
@@ -462,9 +503,58 @@ func TestProvidersKeyModalEscKeepsDialog(t *testing.T) {
 	}
 }
 
+// TestProvidersAuthEscReturnsToDialog verifies the auth-state view's Esc:
+// it closes only the overlay; the dialog beneath stays open, and from the
+// direct form (no dialog) it returns to the main view.
+func TestProvidersAuthEscReturnsToDialog(t *testing.T) {
+	stateDir := t.TempDir()
+	server := newProvidersServer(t, false)
+	defer server.Close()
+	if err := providers.StoreKey(stateDir, "openai", "test-key"); err != nil {
+		t.Fatal(err)
+	}
+	m := newProvidersUI(t, stateDir, server.URL+"/v1")
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	runCommand(m, "/providers")
+	// Enter on the live OpenAI row (cursor starts there) opens the auth
+	// view while the dialog stays open beneath it.
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
+		t.Fatalf("dialog Enter returned a command: %v", cmd)
+	}
+	if !m.keyModal.open || !m.keyModal.auth || !m.dialog.open {
+		t.Fatalf("auth view over dialog wrong: modal=%+v dialog=%+v", m.keyModal, m.dialog)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.keyModal.open {
+		t.Fatal("Esc did not close the auth view")
+	}
+	if !m.dialog.open {
+		t.Fatal("Esc closed the providers dialog beneath the auth view")
+	}
+	// Esc again discards the dialog itself.
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.dialog.open {
+		t.Fatal("Esc did not close the dialog afterwards")
+	}
+
+	// Direct form: the auth view overlays the main view; Esc returns there.
+	m2 := newProvidersUI(t, stateDir, server.URL+"/v1")
+	m2.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	runCommand(m2, "/providers openai")
+	if !m2.keyModal.open || !m2.keyModal.auth || m2.dialog.open {
+		t.Fatalf("direct auth view wrong: modal=%+v dialog=%+v", m2.keyModal, m2.dialog)
+	}
+	m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m2.keyModal.open || m2.dialog.open {
+		t.Fatalf("Esc did not return to the main view: modal=%+v dialog=%+v", m2.keyModal, m2.dialog)
+	}
+}
+
 // TestProvidersDirectArguments covers /providers <n> and /providers <name>:
-// a configured provider starts the async switch, an unconfigured one opens
-// the key modal, and bad arguments restore the draft with an Error entry.
+// an unconfigured provider opens the key modal, a configured one the
+// auth-state view, and bad arguments restore the draft with an Error entry.
+// None of these dial the network.
 func TestProvidersDirectArguments(t *testing.T) {
 	stateDir := t.TempDir()
 	server := newProvidersServer(t, false)
@@ -474,37 +564,28 @@ func TestProvidersDirectArguments(t *testing.T) {
 	m := newProvidersUI(t, stateDir, server.URL+"/v1")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	runCommand(m, "/providers 1")
-	if !m.keyModal.open || m.keyModal.provider.Name != "openai" {
+	if !m.keyModal.open || m.keyModal.auth || m.keyModal.provider.Name != "openai" {
 		t.Fatalf("key modal not opened for /providers 1: %+v", m.keyModal)
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 
-	// Number on a configured provider: the switch command starts. The
-	// command verifies against the endpoint asynchronously; it is never
-	// invoked here (the real OpenAI endpoint must not be contacted).
+	// Number on a configured provider: the auth-state view opens; nothing
+	// dials the real OpenAI endpoint.
 	if err := providers.StoreKey(stateDir, "openai", "k"); err != nil {
 		t.Fatal(err)
 	}
-	cmd := runCommand(m, "/providers 1")
-	if cmd == nil {
-		t.Fatal("/providers 1 on a configured provider did not start a switch")
+	runCommand(m, "/providers 1")
+	if !m.keyModal.open || !m.keyModal.auth || m.keyModal.provider.Name != "openai" {
+		t.Fatalf("auth view not opened for /providers 1: %+v", m.keyModal)
 	}
-	if m.keyModal.open {
-		t.Fatalf("key modal open for a configured provider: %+v", m.keyModal)
-	}
-	if !strings.HasPrefix(m.status, "Checking OpenAI") {
-		t.Fatalf("status = %q, want the checking state", m.status)
-	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // esc during checking cancels nothing here; safe no-op
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 
-	// Name form resolves through LookupProvider; configured → switch path.
+	// Name form resolves through LookupProvider: configured → auth view.
 	m2 := newProvidersUI(t, stateDir, server.URL+"/v1")
 	m2.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	if cmd := runCommand(m2, "/providers openai"); cmd == nil {
-		t.Fatal("/providers openai did not start a switch")
-	}
-	if m2.keyModal.open {
-		t.Fatalf("key modal open for a configured provider: %+v", m2.keyModal)
+	runCommand(m2, "/providers openai")
+	if !m2.keyModal.open || !m2.keyModal.auth {
+		t.Fatalf("auth view not opened for /providers openai: %+v", m2.keyModal)
 	}
 
 	// Out-of-range number: draft restored, Error entry appended.
@@ -525,6 +606,59 @@ func TestProvidersDirectArguments(t *testing.T) {
 	}
 	if e, ok := findEntry(m3, "Unknown provider nope"); !ok || e.role != "Error" {
 		t.Fatalf("unknown-provider entry missing: %+v", m3.entries)
+	}
+}
+
+// TestProvidersKeyArgumentStoresAfterCheck drives the flag-style trailing key
+// argument against a dialable fake endpoint: a passing check stores the key
+// and lands on the providers dialog; nothing switches. Failure stores nothing.
+func TestProvidersKeyArgumentStoresAfterCheck(t *testing.T) {
+	stateDir := t.TempDir()
+	server := newProvidersServer(t, false)
+	defer server.Close()
+	m := newProvidersUI(t, stateDir, server.URL+"/v1")
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	prevClient := m.client
+
+	p := providers.CustomEndpointTarget(server.URL + "/v1")
+	cmd := m.applyProviderKeyArgument(p, "flag-key")
+	if cmd == nil || !m.keyModal.open || !m.keyModal.checking {
+		t.Fatalf("key argument did not start the check: cmd=%v modal=%+v", cmd, m.keyModal)
+	}
+	msg := cmd()
+	v, ok := msg.(keyCheckMsg)
+	if !ok || v.err != nil {
+		t.Fatalf("check result = %+v", msg)
+	}
+	m.Update(msg)
+
+	if key, err := providers.StoredKey(stateDir, "custom"); err != nil || key != "flag-key" {
+		t.Fatalf("stored key = %q %v, want flag-key", key, err)
+	}
+	if m.client != prevClient || m.modelName != "start-model" {
+		t.Fatalf("key argument switched the session: client=%v model=%q", m.client, m.modelName)
+	}
+	if !m.dialog.open || m.dialog.kind != dialogProviders {
+		t.Fatalf("dialog did not open after storing: %+v", m.dialog)
+	}
+
+	// A failing check stores nothing and leaves the error visible.
+	bad := newProvidersServer(t, true)
+	defer bad.Close()
+	m2 := newProvidersUI(t, stateDir, server.URL+"/v1")
+	m2.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	cmd = m2.applyProviderKeyArgument(providers.CustomEndpointTarget(bad.URL+"/v1"), "bad-key")
+	msg = cmd()
+	v, ok = msg.(keyCheckMsg)
+	if !ok || v.err == nil {
+		t.Fatalf("expected a check failure, got %+v", msg)
+	}
+	m2.Update(msg)
+	if m2.keyModal.err == "" {
+		t.Fatalf("failure error not visible: %+v", m2.keyModal)
+	}
+	if key, err := providers.StoredKey(stateDir, "custom"); err != nil || key != "flag-key" {
+		t.Fatalf("failed argument clobbered the stored key: %q %v", key, err)
 	}
 }
 
@@ -557,9 +691,9 @@ func TestModelCommandRemoved(t *testing.T) {
 	}
 }
 
-// TestCustomEndpointGate pins the build-time gate: the custom endpoint
-// target exists and flows through the switch machinery, but the dialog only
-// ever lists the predefined providers.
+// TestCustomEndpointGate pins the build-time gate: the custom endpoint target
+// exists, but with customEndpointsEnabled=false nothing in the dialog or the
+// direct form ever references it — no row, no auth surface, no switch.
 func TestCustomEndpointGate(t *testing.T) {
 	if customEndpointsEnabled {
 		t.Fatal("customEndpointsEnabled should be false until the feature ships")
@@ -604,39 +738,46 @@ func storedTestOAuth(t *testing.T, stateDir string) model.OAuthCredentials {
 	return creds
 }
 
-// TestProvidersChatgptNoStoredLogin drives the keyless path: /providers
-// chatgpt without a stored login appends the sign-in guidance as an Error
-// entry, never opens the API-key modal (the switcher cannot sign in), and
-// leaves the live client untouched.
-func TestProvidersChatgptNoStoredLogin(t *testing.T) {
+// TestProvidersChatgptStateNotSignedIn drives the keyless path: the chatgpt
+// row's auth view reports the missing sign-in and points at first-run setup
+// or --device-login; Enter does nothing (the modal is for keys only) and the
+// live client is untouched.
+func TestProvidersChatgptStateNotSignedIn(t *testing.T) {
 	stateDir := t.TempDir()
 	m := newProvidersUI(t, stateDir, "https://example.invalid/v1")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	prevClient := m.client
 
 	if cmd := runCommand(m, "/providers chatgpt"); cmd != nil {
-		t.Fatal("no-stored-login chatgpt returned a command instead of an error entry")
+		t.Fatal("chatgpt auth view returned a command")
 	}
-	if m.keyModal.open {
-		t.Fatal("API-key modal opened for an OAuth provider")
+	if !m.keyModal.open || !m.keyModal.auth || m.keyModal.provider.Name != "chatgpt" {
+		t.Fatalf("auth view not opened for chatgpt: %+v", m.keyModal)
 	}
-	e, ok := findEntry(m, "ChatGPT (Plus/Pro) has no stored sign-in; sign in during first-run setup or run lisa --provider chatgpt --device-login")
-	if !ok || e.role != "Error" {
-		t.Fatalf("sign-in guidance entry missing: %+v", m.entries)
+	view := m.View()
+	if !strings.Contains(view, "Not signed in") || !strings.Contains(view, "--device-login") {
+		t.Fatalf("auth view missing the sign-in hint: %q", view)
+	}
+	if strings.Contains(view, "Signed in") {
+		t.Fatalf("unsigned-in chatgpt shows a signed-in state: %q", view)
+	}
+	// Enter is a no-op: no sign-in here, no key modal.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil || m.keyModal.checking {
+		t.Fatalf("Enter on unsigned-in chatgpt did something: cmd=%v modal=%+v", cmd, m.keyModal)
 	}
 	if m.client != prevClient || m.modelName != "start-model" {
-		t.Fatalf("no-login path changed the session: client=%v model=%q", m.client, m.modelName)
+		t.Fatalf("chatgpt auth view changed the session: client=%v model=%q", m.client, m.modelName)
 	}
 }
 
-// TestProvidersChatgptSwitchActivated drives the OAuth success path: with a
-// stored login the switch verifies the login (offline while the token is
-// unexpired), swaps in an OAuth client on the documented default model, and
-// touches neither config.json nor providers.json.
-func TestProvidersChatgptSwitchActivated(t *testing.T) {
+// TestProvidersChatgptStateSignedIn drives the signed-in path: with a stored
+// login the chatgpt auth view reports the sign-in, Enter does nothing, and
+// neither config.json nor providers.json is touched.
+func TestProvidersChatgptStateSignedIn(t *testing.T) {
 	stateDir := t.TempDir()
 	server := newProvidersServer(t, false)
-	defer server.Close() // unused by the OAuth path; nothing may dial it
+	defer server.Close() // unused by the auth view; nothing may dial it
 	storedTestOAuth(t, stateDir)
 
 	cfgBefore := providers.StoredProviderConfig{Provider: "openai", Model: "gpt-4o-mini"}
@@ -653,50 +794,24 @@ func TestProvidersChatgptSwitchActivated(t *testing.T) {
 	}
 	m := newProvidersUI(t, stateDir, server.URL+"/v1")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	prevClient := m.client
 
-	cmd := runCommand(m, "/providers chatgpt")
-	if cmd == nil {
-		t.Fatal("signed-in chatgpt did not start a switch")
+	if cmd := runCommand(m, "/providers chatgpt"); cmd != nil {
+		t.Fatal("chatgpt auth view returned a command")
 	}
-	if m.keyModal.open {
-		t.Fatal("API-key modal opened for an OAuth provider")
+	if !m.keyModal.open || !m.keyModal.auth || !m.keyModal.signedIn {
+		t.Fatalf("signed-in auth view not opened: %+v", m.keyModal)
 	}
-	if !strings.HasPrefix(m.status, "Checking ChatGPT (Plus/Pro)") {
-		t.Fatalf("status = %q, want the checking state", m.status)
+	if !strings.Contains(m.View(), "Signed in") {
+		t.Fatalf("auth view missing the signed-in state: %q", m.View())
 	}
-	msg := cmd()
-	v, ok := msg.(providerSwitchMsg)
-	if !ok || v.err != nil {
-		t.Fatalf("switch result = %+v", msg)
+	// Enter does nothing even when signed in: the modal is for keys only.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatalf("Enter on signed-in chatgpt returned a command: %v", cmd)
 	}
-	m.Update(msg)
-
-	if m.conn.Provider != "ChatGPT (Plus/Pro)" {
-		t.Fatalf("connection provider = %q, want ChatGPT (Plus/Pro)", m.conn.Provider)
-	}
-	if m.modelName != "gpt-5.5" {
-		t.Fatalf("model = %q, want the provider default gpt-5.5", m.modelName)
-	}
-	if m.client == nil {
-		t.Fatal("client was not swapped in")
-	}
-	// OAuth clients hold no static key and Codex responses report no
-	// x-codex-primary-* headers yet, so both stay empty.
-	if m.client.APIKey() != "" || m.client.Usage() != "" {
-		t.Fatalf("activated client is not an OAuth client: key=%q usage=%q", m.client.APIKey(), m.client.Usage())
-	}
-	if m.status != "Connected" {
-		t.Fatalf("status = %q, want Connected", m.status)
-	}
-	if _, ok := findEntry(m, "Provider switched to ChatGPT (Plus/Pro) for this session."); !ok {
-		t.Fatalf("confirmation entry missing: %+v", m.entries)
-	}
-	// Re-checking the activated client must succeed offline: the stored
-	// token is unexpired, so no refresh and no network round trip happen.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := m.client.Check(ctx); err != nil {
-		t.Fatalf("activated OAuth client failed an offline check: %v", err)
+	if m.client != prevClient || m.modelName != "start-model" || m.conn.Provider != "OpenAI" {
+		t.Fatalf("chatgpt auth view switched the session: client=%v model=%q conn=%q", m.client, m.modelName, m.conn.Provider)
 	}
 	configAfter, err := os.ReadFile(providers.ConfigFilePath(stateDir))
 	if err != nil {
@@ -710,53 +825,41 @@ func TestProvidersChatgptSwitchActivated(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(providersBefore, providersAfter) {
-		t.Fatal("providers.json was rewritten by a session switch")
-	}
-	if cfg, err := providers.LoadStoredConfig(stateDir); err != nil || cfg != cfgBefore {
-		t.Fatalf("stored config changed: %+v %v", cfg, err)
+		t.Fatal("providers.json was rewritten by the auth view")
 	}
 	if _, ok, err := providers.StoredOAuth(stateDir, "chatgpt"); err != nil || !ok {
-		t.Fatalf("stored login lost during the switch: ok=%t err=%v", ok, err)
+		t.Fatalf("stored login lost: ok=%t err=%v", ok, err)
 	}
 }
 
-// TestProvidersChatgptSwitchCheckFailure verifies the OAuth failure path: an
-// expired login forces a refresh attempt, which the unreachable endpoint
-// rejects, leaving the previous provider active with an Error entry.
-func TestProvidersChatgptSwitchCheckFailure(t *testing.T) {
+// TestProvidersEnvKeySource verifies the env-var source: with no stored key
+// but the provider's dedicated environment variable set, the auth view
+// reports the env source and Enter opens the replace modal — nothing is
+// stored by navigation alone.
+func TestProvidersEnvKeySource(t *testing.T) {
+	t.Setenv("LISA_OPENAI_API_KEY", "env-key")
 	stateDir := t.TempDir()
-	creds := model.OAuthCredentials{
-		Refresh: "refresh-token",
-		Access:  "access-token",
-		Expires: time.Now().Add(-time.Hour).UnixMilli(),
-	}
-	if err := providers.StoreOAuth(stateDir, "chatgpt", creds); err != nil {
-		t.Fatal(err)
-	}
-	m := newProvidersUI(t, stateDir, "https://example.invalid/v1")
+	server := newProvidersServer(t, false)
+	defer server.Close()
+	m := newProvidersUI(t, stateDir, server.URL+"/v1")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	prevClient := m.client
 
-	cmd := runCommand(m, "/providers chatgpt")
-	if cmd == nil {
-		t.Fatal("signed-in chatgpt did not start a switch")
+	if cmd := runCommand(m, "/providers 1"); cmd != nil {
+		t.Fatal("env-sourced auth view returned a command")
 	}
-	msg := cmd()
-	v, ok := msg.(providerSwitchMsg)
-	if !ok || v.err == nil {
-		t.Fatalf("expected a verification failure for the stale login, got %+v", msg)
+	if !m.keyModal.open || !m.keyModal.auth {
+		t.Fatalf("auth view not opened for the env-sourced provider: %+v", m.keyModal)
 	}
-	m.Update(msg)
-
-	if m.client != prevClient {
-		t.Fatal("failed OAuth switch replaced the live client")
+	if !strings.Contains(m.View(), "provided via environment variable LISA_OPENAI_API_KEY") {
+		t.Fatalf("auth view missing the env source: %q", m.View())
 	}
-	if m.modelName != "start-model" {
-		t.Fatalf("model changed to %q on failure", m.modelName)
+	if key, err := providers.StoredKey(stateDir, "openai"); err != nil || key != "" {
+		t.Fatalf("navigation stored the env key: %q %v", key, err)
 	}
-	e, ok := findEntry(m, "Switch to ChatGPT (Plus/Pro) failed")
-	if !ok || e.role != "Error" {
-		t.Fatalf("failure entry missing: %+v", m.entries)
+	// Enter replaces: the key modal opens (its check is never started here).
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.keyModal.auth || !m.keyModal.open || m.keyModal.checking {
+		t.Fatalf("Enter did not open the replace modal: %+v", m.keyModal)
 	}
 }
 

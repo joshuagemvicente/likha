@@ -302,18 +302,30 @@ func (m *ui) handleModelsProviderFailed(msg modelsProviderFailedMsg) {
 
 // applyModelsSections rebuilds the selectable rows from sections and places
 // the cursor: the live pair while the user has not navigated, a clamp into
-// the visible matches after (arrivals never yank the cursor).
+// the visible matches after (arrivals never yank the cursor). Each section
+// contributes one row per distinct id in first-occurrence order: a provider
+// that re-lists an id still renders it once.
 func (m *ui) applyModelsSections(sections []modelsSection) {
 	rows := make([]modelsRow, 0)
 	flat := make([]string, 0)
 	counts := make(map[string]int)
 	for _, s := range sections {
+		// One provider may re-list an id (a proxy echoes its upstream
+		// catalog), so keep only the first occurrence per section; the
+		// reported order of the survivors is preserved. Ids shared across
+		// providers are unaffected: each section tracks its own seen set.
+		seen := make(map[string]bool, len(s.models))
 		for _, id := range s.models {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
 			rows = append(rows, modelsRow{provider: s.provider, model: id})
 			flat = append(flat, id)
 			counts[id]++
 		}
 	}
+
 	m.dialogModelCounts = counts
 	m.lastModels = flat
 	m.dialogModelRows = rows

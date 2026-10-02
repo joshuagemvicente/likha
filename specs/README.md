@@ -62,3 +62,5 @@ specs/
 | Adaptive themes (live preview + full-surface color) | [adaptive-themes/](adaptive-themes/spec.md) | implemented (local) — M1 preview, M2 adaptive helpers, M3 bands landed 2026-10-01; live Ghostty/terminal walkthrough outstanding |
 | All-provider models in `/models` | [all-models/](all-models/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
 | Fast `/models` open (cache + progressive render) | [models-perf/](models-perf/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
+| Additional predefined providers (Groq, xAI, Together, DeepSeek, Gemini) | [additional-providers/](additional-providers/spec.md) | planned |
+| Providers as connection manager (auth only, no activation) | [providers-connect/](providers-connect/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |

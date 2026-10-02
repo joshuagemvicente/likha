@@ -301,3 +301,165 @@ func TestModelsDialogSharedIdsDisambiguate(t *testing.T) {
 		t.Fatalf("section headers wrong: %q", view)
 	}
 }
+
+// TestModelsDialogLongListsPinHeader is the screenshot shape: both providers
+// list 30+ models, the terminal is ~40 rows tall, and the cursor sits
+// roughly 15 rows into the second (OpenRouter) section — the OpenAI title
+// has scrolled away and the OpenRouter title may clip at the window top.
+// Every visible model row must carry its own section's title: the sticky
+// pin supplies the OpenRouter title above its rows, the row list carries
+// the OpenAI title above its rows or those rows scroll out together, and
+// no row ever renders under the other provider's title.
+func TestModelsDialogLongListsPinHeader(t *testing.T) {
+	const listLen = 30
+	stateDir := t.TempDir()
+	storedProviderKey(t, stateDir, "openai", "k-openai")
+	storedProviderKey(t, stateDir, "openrouter", "k-router")
+	prev := listModelsFunc
+	listModelsFunc = func(ctx context.Context, base, apiKey string) ([]string, error) {
+		if strings.Contains(base, "openrouter") {
+			return makeIds("router-", listLen), nil
+		}
+		return makeIds("o-", listLen), nil
+	}
+	t.Cleanup(func() { listModelsFunc = prev })
+	client, err := model.New("https://api.openai.com/v1", "o-1", "k-openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := modelsTestUI(t, client, "o-1", providers.Connection{Provider: "OpenAI", ProviderCanonical: "openai", Verified: true}, stateDir)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/models")})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	runModelsCmds(t, m, cmd)
+	if len(m.dialogMatches()) != 2*listLen {
+		t.Fatalf("matches = %d, want %d", len(m.dialogMatches()), 2*listLen)
+	}
+	// Walk the cursor ~15 rows past the OpenRouter section header: 30
+	// OpenAI rows first, then 15 into the router list.
+	for range listLen + 15 {
+		m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+	view := stripANSI(m.View())
+	lines := strings.Split(view, "\n")
+
+	// Slice the centered dialog box out of the full-screen render, so
+	// dimmed background text can never influence the assertions (the
+	// │ slice pattern used by TestModelsDialogSharedIdsDisambiguate):
+	// anchor on the ╭/╰ border lines and keep only the rows between them.
+	var boxLines []string
+	inBox := false
+	for _, line := range lines {
+		switch {
+		case strings.Contains(line, "╭") && strings.Contains(line, "╮"):
+			inBox = true
+		case inBox && strings.Contains(line, "╰") && strings.Contains(line, "╯"):
+			inBox = false
+		case inBox:
+			first := strings.Index(line, "│")
+			last := strings.LastIndex(line, "│")
+			if first < 0 || last <= first {
+				continue
+			}
+			plain := strings.TrimSpace(stripANSI(strings.TrimSuffix(strings.TrimPrefix(line[first:last], "│"), "│")))
+			boxLines = append(boxLines, plain)
+		}
+	}
+	box := strings.Join(boxLines, "\n")
+	if !strings.Contains(box, "OpenRouter") {
+		t.Fatalf("dialog box not found or OpenRouter title missing:\n%s", view)
+	}
+
+	// Every content row (header or model row) must be accounted for by its
+	// owning section's title appearing above it, before an intervening
+	// title of the other section. The "no o-* row under OpenRouter / no
+	// router-* row under OpenAI" wording says the same thing: the box
+	// opens under the pinned/live section's title, so a row attributed to
+	// the wrong section is a pin failure.
+	type titleRow struct {
+		title string // section title the current run belongs to
+		pick  int    // -1 title row otherwise: model rows seen since that title
+	}
+	current := titleRow{"", -1}
+	attributed := false
+	for _, plain := range boxLines {
+		switch {
+		case plain == "OpenAI" || plain == "OpenRouter":
+			if current.pick >= 0 && current.pick == 0 {
+				t.Fatalf("orphan header %q with no rows following it:\n%s", current.title, view)
+			}
+			current = titleRow{title: plain, pick: 0}
+		case strings.Contains(plain, "Model selection") || strings.Contains(plain, "Enter switch"):
+			continue // box title / hint rows, not section content
+		default:
+			if strings.TrimSpace(plain) == "" {
+				continue
+			}
+			fields := strings.Fields(plain)
+			if len(fields) == 0 {
+				t.Fatalf("non-empty box row has no fields (box extraction bug):\n%s", plain)
+			}
+			id := fields[0]
+			if !strings.HasPrefix(id, "o-") && !strings.HasPrefix(id, "router-") {
+				continue // box chrome; only model rows carry the ids
+			}
+			if current.title == "" {
+				t.Fatalf("model row %q renders before any section title:\n%s", plain, view)
+			}
+			want := "OpenAI"
+			if strings.HasPrefix(id, "router-") {
+				want = "OpenRouter"
+			}
+			if current.title != want {
+				t.Fatalf("row %q renders under %q title, want %q:\n%s", plain, current.title, want, view)
+			}
+			current.pick++
+			attributed = true
+		}
+	}
+	if !attributed {
+		t.Fatalf("no model rows visible mid-section:\n%s", view)
+	}
+	// The pinned title occupies one window slot, so the box content plus
+	// borders must stay inside m.height — spill would push the bottom
+	// border (and with it the hint) off the screen.
+	boxRows := len(boxLines) + 2 // ── top and bottom border rows
+	if boxRows > m.height {
+		t.Fatalf("dialog box rows (%d) exceed terminal height (%d):\n%s", boxRows, m.height, view)
+	}
+	// The OpenRouter section is entirely reachable: its title must show
+	// exactly once in the dialog box, either as the pinned title above the
+	// window rows or as the run start after the last OpenAI row.
+	if countHeaderLinesByBox(boxLines, "OpenRouter") != 1 {
+		t.Fatalf("OpenRouter title rendered %d times in the dialog box:\n%s", countHeaderLinesByBox(boxLines, "OpenRouter"), view)
+	}
+	// The box content must fit the terminal: with the hint row and bottom
+	// border intact no tail content was clipped off the render.
+	if lines[len(lines)-1] == "" && len(lines) > 0 {
+		lines = lines[:len(lines)-1]
+	}
+	if strings.Count(strings.Join(lines, "\n"), "Enter switch") != 1 {
+		t.Fatalf("hint line clipped from the dialog box bottom:\n%s", view)
+	}
+}
+
+// countHeaderLinesByBox counts exact header matches on one dialog-box row,
+// the box-local variant of countHeaderLines (models_all_test.go).
+func countHeaderLinesByBox(box []string, header string) int {
+	n := 0
+	for _, plain := range box {
+		if plain == header {
+			n++
+		}
+	}
+	return n
+}
+
+func makeIds(prefix string, n int) []string {
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("%s%d", prefix, i+1)
+	}
+	return ids
+}

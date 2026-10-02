@@ -108,7 +108,7 @@ type ui struct {
 	modelsTargetOrder []string                 // target provider Names in final display order
 	modelsFailures    []string                 // failed provider display names this open
 	modelsErrSample   string                   // first fetch error text this open
-	keyModal          keyState                 // /providers: masked API-key entry for an unconfigured provider
+	keyModal          keyState                 // /providers: provider auth overlay (key-entry modal and auth-state view)
 
 	// Session measurements and identity for the status line (spec §4).
 	started          time.Time // session start; drives the minutes segment
@@ -647,12 +647,6 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.handleKeyCheckMsg(v)
 		return m, nil
-	case providerSwitchMsg:
-		if m.mode != modeMain || m.keyModal.open || m.dialog.open {
-			// Late result after esc closed the flow: ignore.
-			return m, nil
-		}
-		return m, m.handleProviderSwitchMsg(v)
 	case setupCheckMsg:
 		if m.mode != modeSetup || m.setup.stage != setupChecking {
 			return m, nil

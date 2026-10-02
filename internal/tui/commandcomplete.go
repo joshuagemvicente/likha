@@ -19,7 +19,7 @@ var commands = []commandItem{
 	{"help", "list the reserved commands"},
 	{"mcp", "show the connected MCP servers or how to configure them"},
 	{"models", "switch the model for this session"},
-	{"providers", "select the provider for this session (a prompt asks for the API key when none is stored)"},
+	{"providers", "manage a provider's stored key (auth); switching happens through /models"},
 	{"quit", "exit"},
 	{"sessions", "list or resume a saved session"},
 	{"themes", "list or apply a color theme"},

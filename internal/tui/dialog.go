@@ -149,7 +149,7 @@ func (m *ui) openDialog(kind dialogKind) tea.Cmd {
 }
 
 // commandHelp is the text /help prints and unknown-command errors point to.
-const commandHelp = "Commands: /compact [focus] summarize the conversation into a compact brief; /sessions [n] list or resume a saved session; /models list models from every configured provider; /providers select the provider for this session (a prompt asks for the API key when none is stored); /quit exit; /help this list. Selections open a dialog: ↑/↓ navigate, type to filter, Enter apply, Esc cancel. Unknown /commands are not sent to the model; // sends a literal slash."
+const commandHelp = "Commands: /compact [focus] summarize the conversation into a compact brief; /sessions [n] list or resume a saved session; /models list models from every configured provider; /providers manage a provider's stored key (auth); switching happens through /models; /quit exit; /help this list. Selections open a dialog: ↑/↓ navigate, type to filter, Enter apply, Esc cancel. Unknown /commands are not sent to the model; // sends a literal slash."
 
 // handleCommand dispatches a leading-slash input. Reserved commands act on
 // the application and never reach the model; unknown commands restore the
@@ -441,9 +441,11 @@ func (m *ui) confirmDialog(matches []int) tea.Cmd {
 		m.layoutWidth = 0
 		return m.resumeSession(m.sessionIDs[origIndex])
 	case dialogProviders:
-		m.dialog = dialogState{}
+		// Enter opens the row's auth surface; the dialog stays open beneath
+		// (Esc returns to it) and nothing on this surface ever switches the
+		// live provider — activation happens through /models.
 		m.layoutWidth = 0
-		return m.applyProviderDirect(model.Providers[origIndex])
+		return m.openProviderAuth(model.Providers[origIndex])
 	}
 	return nil
 }
@@ -468,7 +470,7 @@ func (m *ui) dialogView() string {
 	case dialogSessions:
 		title, hint = "Session selection", "↑/↓ navigate  PgUp/PgDn page  Enter resume  Esc cancel"
 	case dialogProviders:
-		title, hint = "Provider selection", "↑/↓ navigate  PgUp/PgDn page  Enter select  Esc cancel"
+		title, hint = "Provider selection", "↑/↓ navigate  PgUp/PgDn page  Enter auth  Esc cancel"
 	}
 	items := m.dialogItems
 	matches := m.dialogMatches()
