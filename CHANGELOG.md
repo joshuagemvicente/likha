@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Selection dialogs highlight the cursor row with a background band** (UI-only): the `Selected` role now carries a full-row background — a 12% accent-to-canvas tint derived per theme family like the conversation bands (dialog cursor rows in `/models`, `/providers`, `/sessions`, `/themes`, and the composer picker) — so the highlighted model reads as a filled row instead of a bare `>` marker. Every family's tint passes the text-on-band contrast gate (new matrix test); the `default` family keeps its plain terminal look with no band.
+
 - **`/providers` is now a connection manager, not a switcher** (specs/providers-connect): selecting a provider opens its auth surface — the masked key-entry modal for a missing key, an auth-state view for a stored key (source: the private state directory or the provider's `LISA_<NAME>_API_KEY` environment variable; Enter again replaces the key after a re-check, a failed check keeps the old key) — and never switches the live provider or model. `chatgpt` shows its sign-in state only (Enter is a no-op; the switcher still cannot sign in interactively). The direct form `/providers <n-or-name> [key]` stores a given key after a passing check instead of activating. Provider and model switching happen solely through `/models`.
 - **`/models` deduplicates repeated ids inside one provider's section** (specs/models-perf): a provider whose `/models` route lists the same id more than once (`deepseek-v4-flash` appeared twice in a row on the screenshot) is collapsed to its first occurrence in reported order, so a section cannot render duplicate rows.
 

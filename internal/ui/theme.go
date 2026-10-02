@@ -1,7 +1,9 @@
 // Package ui holds Lisa's color themes and the optional Nerd Font glyph set.
-// Themes map onto seven style roles and never color conversation prose beyond
-// error entries; Nerd Font icons are strictly opt-in so plain-text output
-// remains complete and legible without patched fonts.
+// Themes map onto canvas roles (Base plus the user/tool/model bands), seven
+// foreground roles, and the muted/error signal roles; prose adopts the single
+// Normal fg while authorship shows in the background bands. Nerd Font icons
+// are strictly opt-in so plain-text output remains complete and legible
+// without patched fonts.
 package ui
 
 import (
@@ -13,6 +15,9 @@ import (
 
 type Theme struct {
 	Base     lipgloss.Style // app canvas background (theme's Normal bg; default = terminal default)
+	BgUser   lipgloss.Style // user band background (bg only; default = terminal default)
+	BgTool   lipgloss.Style // tool band background (bg only; default = terminal default)
+	BgModel  lipgloss.Style // assistant band background (bg only; default = terminal default)
 	Title    lipgloss.Style // headings, header identity
 	Selected lipgloss.Style // cursor rows, focused identity
 	Normal   lipgloss.Style // conversation prose (uncolored by default)
@@ -154,8 +159,11 @@ func HasDarkBackground() bool {
 	return lipgloss.HasDarkBackground()
 }
 
-// bgOf extracts the background color from a style, or "" when unset.
-// Base is the only role that sets one; every other role returns "".
+// bgOf extracts the background color from a style, or "" when unset. The
+// canvas roles (Base, BgUser, BgTool, BgModel) set one; every foreground
+// role returns "". AdaptiveColor unsets report NoColor, which is neither a
+// hex Color nor a resolvable dark/light pair, so both read as ""
+// (terminal default preserved).
 func bgOf(s lipgloss.Style) string {
 	bg := s.GetBackground()
 	if bg == nil {
@@ -164,12 +172,37 @@ func bgOf(s lipgloss.Style) string {
 	if c, ok := bg.(lipgloss.Color); ok {
 		return string(c)
 	}
+	if ac, ok := bg.(lipgloss.AdaptiveColor); ok {
+		if ac.Light == "" || ac.Dark == "" {
+			return ""
+		}
+		// The background applies per render, not per resolve: the two mixes
+		// track the same subtle ratio by construction, so report the tint
+		// the terminal would show now. Callers (dialogView dimming, canvas
+		// PaintRow fills) sample this at render time.
+		if HasDarkBackground() {
+			return ac.Dark
+		}
+		return ac.Light
+	}
 	return ""
 }
 
 // BaseBG reports the theme's canvas background color, or "" when the theme
 // leaves the terminal default in place (default family).
 func (t Theme) BaseBG() string { return bgOf(t.Base) }
+
+// BgUserBG reports the user band background, or "" when the theme leaves
+// the terminal default in place (default family).
+func (t Theme) BgUserBG() string { return bgOf(t.BgUser) }
+
+// BgToolBG reports the tool band background, or "" when the theme leaves
+// the terminal default in place (default family).
+func (t Theme) BgToolBG() string { return bgOf(t.BgTool) }
+
+// BgModelBG reports the assistant band background, or "" when the theme
+// leaves the terminal default in place (default family).
+func (t Theme) BgModelBG() string { return bgOf(t.BgModel) }
 
 // PaintRow pads row to width display cells, then paints the theme canvas
 // background behind every span: bg is inserted after each SGR reset so role
@@ -259,8 +292,10 @@ func Itoa(n int) string {
 // ParseHex parses "#rrggbb" into 0-255 channels.
 func ParseHex(s string) (r, g, b int, ok bool) { return parseHex(s) }
 
-// Named resolves a theme by name for the detected terminal variant. An
-// unknown name yields false; the caller falls back to default.
+// Named resolves a theme by name carrying both terminal variants: the dark
+// argument is advisory/compat only (kept so callers and tests stay stable)
+// while each role's AdaptiveColor selects Light/Dark per render from the
+// renderer's cached HasDarkBackground.
 func Named(name string, dark bool) (Theme, bool) {
 	if name == "" || name == "default" {
 		return defaultTheme(), true
@@ -269,15 +304,11 @@ func Named(name string, dark bool) (Theme, bool) {
 	if !ok {
 		return Theme{}, false
 	}
-	pal := family.dark
-	if !dark {
-		pal = family.light
-	}
-	return fromPalette(pal), true
+	return fromNamedFamily(name, family), true
 }
 
-// Resolve picks the theme for a name and terminal: named families use their
-// variant; unknown names fall back to default.
+// Resolve picks the theme for a name and terminal: named families carry both
+// variants; unknown names fall back to default.
 func Resolve(name string, dark bool) Theme {
 	theme, ok := Named(name, dark)
 	if !ok {
@@ -286,25 +317,89 @@ func Resolve(name string, dark bool) Theme {
 	return theme
 }
 
-func fromPalette(pal palette) Theme {
-	base := lipgloss.NewStyle()
-	if pal.base != "" {
-		base = lipgloss.NewStyle().Background(lipgloss.Color(pal.base))
+// fromFamily builds one Theme whose roles carry both the family's dark and
+// light variant via lipgloss.AdaptiveColor. Empty means "terminal default":
+// an unset style keeps NoColor rather than an empty color string.
+func fromFamily(fam struct{ dark, light palette }) Theme {
+	return fromNamedFamily("", fam)
+}
+
+// fromNamedFamily builds one Theme as fromFamily does, plus the M3 band
+// backgrounds: each mixes the family accent toward the base canvas at the
+// M2-tuned ratio (bandUserRatio and friends in adaptive.go), resolved
+// through bandBG so a recorded per-family override wins. The name threads
+// through for the override lookup only; fromFamily's unnamed form keeps
+// working for single-variant test palettes (no override ever matches "").
+func fromNamedFamily(name string, fam struct{ dark, light palette }) Theme {
+	style := func(darkVal, lightVal string) lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(adaptive(darkVal, lightVal))
+	}
+	bold := func(darkVal, lightVal string) lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(adaptive(darkVal, lightVal)).Bold(true)
+	}
+	// band derives one Bg role background for both variants. Empty on
+	// both sides (a half-defined test palette) keeps the terminal
+	// default, mirroring adaptive's empty handling.
+	band := func(bandName string, ratio float64) lipgloss.Style {
+		light := bandBG(bandKey{family: name, band: bandName, light: true},
+			mix(fam.light.accent, fam.light.base, ratio))
+		dark := bandBG(bandKey{family: name, band: bandName, light: false},
+			mix(fam.dark.accent, fam.dark.base, ratio))
+		if light == "" && dark == "" {
+			return lipgloss.NewStyle()
+		}
+		if light == "" {
+			light = dark
+		}
+		if dark == "" {
+			dark = light
+		}
+		return lipgloss.NewStyle().Background(bandColor(light, dark))
 	}
 	return Theme{
-		Base:     base,
-		Title:    lipgloss.NewStyle().Foreground(lipgloss.Color(pal.accent)).Bold(true),
-		Selected: lipgloss.NewStyle().Foreground(lipgloss.Color(pal.accent)).Bold(true),
-		Normal: func() lipgloss.Style {
-			if pal.text == "" {
-				return lipgloss.NewStyle()
-			}
-			return lipgloss.NewStyle().Foreground(lipgloss.Color(pal.text))
-		}(),
-		Help:    lipgloss.NewStyle().Foreground(lipgloss.Color(pal.dim)).Bold(true),
-		Border:  lipgloss.NewStyle().Foreground(lipgloss.Color(pal.accent)),
-		Warning: lipgloss.NewStyle().Foreground(lipgloss.Color(pal.warning)).Bold(true),
-		Error:   lipgloss.NewStyle().Foreground(lipgloss.Color(pal.err)),
-		Muted:   lipgloss.NewStyle().Foreground(lipgloss.Color(pal.dim)),
+		Base:     lipgloss.NewStyle().Background(adaptive(fam.dark.base, fam.light.base)),
+		BgUser:   band("user", bandUserRatio),
+		BgTool:   band("tool", bandToolRatio),
+		BgModel:  band("model", bandModelRatio),
+		Title:    bold(fam.dark.accent, fam.light.accent),
+		Selected: selected(fam.dark, fam.light, name),
+		Normal:   lipgloss.NewStyle().Foreground(adaptive(fam.dark.text, fam.light.text)),
+		Help:     bold(fam.dark.dim, fam.light.dim),
+		Border:   style(fam.dark.accent, fam.light.accent),
+		Warning:  bold(fam.dark.warning, fam.light.warning),
+		Error:    style(fam.dark.err, fam.light.err),
+		Muted:    style(fam.dark.dim, fam.light.dim),
 	}
+}
+
+// selected builds the Selected role: the accent foreground (cursor rows,
+// focused identity) plus a full-row background highlight at
+// bandSelectionRatio — the UI-only change that turns every selection
+// dialog's cursor row into a tinted band instead of a bare "> " marker.
+// An accent-less test palette skips the background (terminal default),
+// mirroring band's empty handling; the contrast matrix test still guards
+// accent-on-tint legibility.
+func selected(dark, light palette, name string) lipgloss.Style {
+	lightMix := ""
+	if light.accent != "" || light.base != "" {
+		lightMix = bandBG(bandKey{family: name, band: "selection", light: true},
+			mix(light.accent, light.base, bandSelectionRatio))
+	}
+	darkMix := ""
+	if dark.accent != "" || dark.base != "" {
+		darkMix = bandBG(bandKey{family: name, band: "selection", light: false},
+			mix(dark.accent, dark.base, bandSelectionRatio))
+	}
+	st := lipgloss.NewStyle().Foreground(adaptive(dark.accent, light.accent)).Bold(true)
+	if lightMix != "" || darkMix != "" {
+		st = st.Background(bandColor(lightMix, darkMix))
+	}
+	return st
+}
+
+// fromPalette builds one Theme from a single variant, kept for tests: both
+// AdaptiveColor fields carry the same value, so the selected variant always
+// matches the source palette regardless of the renderer's detection.
+func fromPalette(pal palette) Theme {
+	return fromFamily(struct{ dark, light palette }{dark: pal, light: pal})
 }
