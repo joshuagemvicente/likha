@@ -571,26 +571,28 @@ func (m *ui) dialogView() string {
 		for len(visible[start:end]) > 0 && visible[start].header != "" && (start+1 >= end || visible[start+1].header != "") {
 			start++
 		}
-		// Sticky section header: when the window starts mid-section the
-		// section title would scroll out while its rows stay visible
-		// (models without their title — the reported shape), so pin the
-		// section's header above the window. The pinned row takes one
-		// window slot so the box keeps its height: drop the last window
-		// row unless it holds the cursor, in which case shift the window
-		// start one earlier instead (same visible count, cursor kept).
+		// Sticky section header: when the window opens mid-section, the
+		// section title scrolled out while its rows stay visible — models
+		// without their title (the reported shape). Pin the first row's
+		// section title above the window. The pinned title occupies one
+		// window slot; make room by dropping the tail row (when it is not
+		// the cursor), else the leading row while its neighbor shares the
+		// same section, else let the box grow by one row — a foreign
+		// section's rows must never render under the pinned title.
 		pinned := ""
 		if start < end && visible[start].header == "" {
 			pinned = m.dialogModelRows[matches[visible[start].pos]].provider.DisplayName
 		}
 		rowsEnd := end
 		if pinned != "" {
-			if start+windowed >= len(visible) && end < len(visible) {
-				rowsEnd = min(len(visible), end+1)
-			} else {
-				rowsEnd = max(start+1, end-1)
-				if at >= rowsEnd {
-					start = max(0, start-1)
-					rowsEnd = min(len(visible), end)
+			if rowsEnd-1 > at {
+				rowsEnd--
+			} else if start < rowsEnd-1 {
+				next := visible[start+1]
+				if next.header == "" {
+					if q := m.dialogModelRows[matches[next.pos]].provider; q.Name == m.dialogModelRows[matches[visible[start].pos]].provider.Name {
+						start++
+					}
 				}
 			}
 			content = append(content, m.theme.Title.Render(fit(pinned, inner)))
