@@ -14,9 +14,10 @@ Observable outcomes, mirrors [spec.md](spec.md). Status words per
       per FR-09 — never silently dropped, never shown as a diff to approve.
 - [ ] In plan mode, repository reads (list/search/read) still succeed with
       the same FR-05 scoping and reporting as in normal mode.
-- [ ] In plan mode, MCP tool call behavior follows the decision recorded in
-      spec.md, and any refusal there is reported the same way mutation
-      refusals are.
+- [ ] In plan mode, every MCP tool refuses before approval/dispatch, even if
+      its server is already trusted; user/model receive attributed results.
+- [ ] Checklist state and allowed explore/questions/skills/output do not grant
+      write access; optional web retains its separate consent policy.
 - [ ] After leaving plan mode, one edit proposal and one shell command still
       round-trip through their normal FR-06/FR-08 approval flow unchanged.
 - [ ] Refusals reach the model as tool results, so the agent reacts in text

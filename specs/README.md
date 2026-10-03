@@ -35,7 +35,18 @@ specs/
    integration tests live in `tests/integration/`.
 7. No skipped, always-passing, or mock-only tests may be used to claim a feature works.
 
+For the approved tools/agents milestone, the user requested no new automated
+tests and no code-review pass. Existing checks still run; acceptance guides
+record manual outcomes and unexercised behavior. This constraint does not make
+old passing checks proof of new behavior or waive published-release verification.
+See [coordination rules](tooling-platform/tasks.md#verification-constraint).
+
 ## Feature index
+
+**Tools/agents delivery:** start at the [three-phase index](tooling-platform/README.md).
+Each phase groups multiple feature specs with separate todos and acceptance
+guides. All new features below remain planned; no application implementation
+was authorized during the specification interview.
 
 | Feature | Folder | Status |
 | --- | --- | --- |
@@ -44,7 +55,7 @@ specs/
 | Slash commands in the prompt input | [slash-commands/](slash-commands/spec.md) | implemented (local) — including the `/` command autocomplete popup (typing `/` opens the reserved-command list; see [conversation-compaction/](conversation-compaction/context.md)) |
 | Themes and optional Nerd Font icons | [themes/](themes/spec.md) | implemented (local) |
 | MCP server support (tools via stdio) | [mcp-support/](mcp-support/spec.md) | implemented (local) |
-| Agent harness prompt (system prompt + project instructions) | [agent-harness/](agent-harness/spec.md) | draft — awaiting review |
+| Agent harness prompt (system prompt + root instructions) | [agent-harness/](agent-harness/spec.md) | planned — Phase 1; root AGENTS.md, 32-KiB cap, real repo identity |
 | @ file/folder references (mention paths in prompts) | [file-references/](file-references/spec.md) | implemented (local) |
 | curl installer for released binaries | [curl-install/](curl-install/spec.md) | implemented (local) — no release published |
 | ChatGPT Plus/Pro login (OAuth 2) provider | [chatgpt-plus/](chatgpt-plus/spec.md) | implemented (local) — live probe outstanding |
@@ -52,15 +63,26 @@ specs/
 | Conversation compaction (/compact) | [conversation-compaction/](conversation-compaction/spec.md) | implemented (local) |
 | Thinking control (/think) | [thinking-control/](thinking-control/spec.md) | draft |
 | Repo context file (/init → AGENTS.md) | [repo-init/](repo-init/spec.md) | draft |
-| Plan mode (/plan read-only) | [plan-mode/](plan-mode/spec.md) | draft |
-| Custom commands / skills | [custom-commands/](custom-commands/spec.md) | draft |
+| Plan mode (/plan read-only) | [plan-mode/](plan-mode/spec.md) | planned — Phase 3; all edit/shell/MCP blocked |
+| Custom slash command templates | [custom-commands/](custom-commands/spec.md) | planned — deferred; distinct from Markdown skills |
 | Text transforms (/transform, Wispr-Flow style) | [text-transforms/](text-transforms/spec.md) | draft |
 | TUI layout (status bar enrichment, header declutter, scrollbar fix, role backgrounds) | [tui-layout/](tui-layout/spec.md) | implemented (local) — phases 1–3 done (phase 1: header declutter + mini logo, status-bar enrichment incl. git/env/spend/ctx, auto session names, folder/branch default-on; phase 2: content-width breakpoints + per-path no-overflow invariant tests; phase 3: role backgrounds via adaptive-themes); real-terminal walkthroughs pending |
 | Model context tracker (measured usage + estimates) | [context-tracker/](context-tracker/spec.md) | in progress — implementation and automated tests complete; real-terminal walkthrough pending |
 | Muted tool rendering + terminal-native composer keys | [tool-rendering-terminal-keys/](tool-rendering-terminal-keys/spec.md) | in progress — M1 (muted tools) and M2 (composer keys) implemented (local); Ctrl+Delete chord unbindable on bubbletea v1.3.10, carried by Alt+D |
 | Repository structure refactor (phased package split) | [structure-refactor/](structure-refactor/spec.md) | implemented (local) — Phase 1 + Phase 1.5 landed 2026-10-01; Phase 2 parked |
 | Agent tool loop (read-only search steering + round-cap auto-continue; first slice of agent-harness) | [agent-loop/](agent-loop/spec.md) | planned |
-| Tool and agent platform (alpha → beta roadmap) | [tooling-platform/](tooling-platform/spec.md) | proposed — registry, tool UX, web/skills, subagents, user agents, code intelligence, and memory |
+| Tool and agent platform (three-phase coordination) | [tooling-platform/](tooling-platform/README.md) | planned — scope approved; documentation only; user agents/code intelligence/memory deferred |
+| Tool registry, policy, and /tools | [tool-registry/](tool-registry/spec.md) | planned — Phase 1 |
+| Repository inspection tool polish | [repository-tools/](repository-tools/spec.md) | planned — Phase 1; range/directory/scoped/partial reads |
+| Reviewed exact-text edits and creation | [targeted-edits/](targeted-edits/spec.md) | planned — Phase 1; one multi-file diff review |
+| Expandable tool output and private artifacts | [tool-output/](tool-output/spec.md) | planned — Phase 1 |
+| Awaited nested explore agents | [explore-agents/](explore-agents/spec.md) | planned — Phase 2; depth 2, four executing children, shared budgets |
+| Agent tree, transcripts, and branch cancellation | [agent-inspection/](agent-inspection/spec.md) | planned — Phase 2 |
+| Model questions with preserved steering state | [ask-user/](ask-user/spec.md) | planned — Phase 3 |
+| Persisted bounded plan/todo checklist | [plan-todo/](plan-todo/spec.md) | planned — Phase 3; separate from /plan mode |
+| Strict global Markdown skills | [markdown-skills/](markdown-skills/spec.md) | planned — Phase 3; passive instructions only |
+| Brave search and direct public HTTPS fetch | [web-tools/](web-tools/spec.md) | planned — Phase 3; optional, scoped consent |
+| User-authored agent profiles and built-in review role | [user-agents/](user-agents/spec.md) | planned — Phase 4; scope approved 2026-10-04; project-local profiles and write-capable children deferred |
 | Steering prompts (type, queue, and interrupt while a run is active) | [steering-prompts/](steering-prompts/spec.md) | implemented (local) — M1 automated suite green, real-TUI walkthrough outstanding; M2 pending probe |
 | Approve/Decline buttons for permission reviews | [permission-ui/](permission-ui/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
 | Adaptive themes (live preview + full-surface color) | [adaptive-themes/](adaptive-themes/spec.md) | implemented (local) — M1 preview, M2 adaptive helpers, M3 bands landed 2026-10-01; live Ghostty/terminal walkthrough outstanding |

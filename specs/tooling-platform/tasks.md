@@ -1,135 +1,103 @@
-# Tasks: Tool and agent platform (alpha → beta)
+# Tasks: three-phase tools and agents delivery
 
-**Status:** proposed checklist. Each item should be checked only after the
-linked spec's acceptance criteria and this checklist's release gates pass.
+**Status:** Phase 1 implemented locally; walkthrough/release verification pending.
+Phases 2–3 remain planned. See [implementation evidence](implementation.md).
+Checked delivery items mean integrated code, not an exercised release claim.
 
-## 0. Scope and decision cleanup
+## Before implementation
 
-- [ ] Review this roadmap and agree on Alpha/Beta scope.
-- [ ] Reconcile `specs/mcp-support/spec.md`: resolved server-level session
-      trust vs. contradictory per-call approval wording; keep implementation
-      behavior unchanged unless separately decided.
-- [ ] Resolve the plan-mode policy for MCP calls (recommended: block all MCP
-      calls while plan mode is active).
-- [ ] Confirm web-search backend/configuration and network permission UX.
-- [ ] Decide initial skills and user-agent file locations/precedence; global
-      agent files first, project-local profiles only with an explicit trust
-      rule.
-- [ ] Audit existing tool names/schemas and document compatibility requirements
-      before adding aliases or replacing `edit_file`.
+- [x] User checks the [phase scopes](README.md) and authorizes application changes.
+- [x] Record existing worktree changes and baseline build/test results without
+      reverting user work. Preserve the untracked files present during drafting.
+- [x] Coordinator freezes catalog/call/result/approval/task/event/persistence
+      interfaces and worker write sets before parallel integration.
 
-## 1. Foundation — alpha prerequisite
+## Eight parallel worker areas
 
-- [ ] Implement the compiled harness tool contract and round-cap continuation
-      in [`agent-loop`](../agent-loop/spec.md).
-- [ ] Implement project instructions and size/precedence rules in
-      [`agent-harness`](../agent-harness/spec.md).
-- [ ] Write a buildable registry spec: registration, model schema, input
-      validation, source attribution, effect class, availability, output cap,
-      cancellation, and parallel-safety metadata.
-- [ ] Design one authorization path for built-in, MCP, web, and child-agent
-      calls; retain existing edit/command approvals and MCP session TOFU.
-- [ ] Move current five built-ins and MCP dispatch behind the registry with no
-      visible behavior regression and no import cycle with the agent loop/UI.
-- [ ] Add collision detection for built-in, MCP, and future user tool names.
-- [ ] Add catalog inspection (`/tools` or equivalent): name, source, purpose,
-      availability, and permission class.
-- [ ] Test schemas and policy with fake handlers; test unknown tools, malformed
-      input, denied calls, cancellation, output truncation, and error fidelity.
+Deploy eight implementation subagents after approval. Assign independent
+modules/files; workers build against agreed contracts and send integration
+patches to the coordinator rather than racing on shared files. The coordinator
+owns `internal/agent/agent.go`, `internal/tui/tui.go`, command composition,
+shared model/config changes, and final snapshot wiring. Workers may prepare
+modules across later phases, but expose them only after prerequisites pass.
 
-## 2. Alpha — core user workflow
+| Worker | Feature ownership | Integration handoff |
+| --- | --- | --- |
+| 1 | Registry/schema/policy + MCP adapter | Catalog/invoke interfaces, qualified-name mapping |
+| 2 | Repository inspection + root instruction loader | Cancellable scoped handlers, instruction snapshot |
+| 3 | Reviewed exact-text edit engine | Multi-path proposals, preflight/apply/recovery result |
+| 4 | Output capture/artifact storage | Private refs, pagination, caps/lifecycle |
+| 5 | Nested explore scheduler/runtime | Task state/events, permits, budgets, terminal results |
+| 6 | Tool/agent inspection UI + child telemetry presentation | Leaf views/focus actions, attributed tree/expansion |
+| 7 | Questions/checklist/plan-mode/skills | Main-only handlers, pure interaction/state records |
+| 8 | Brave search/public-HTTPS fetch | Private web setup, grants, transport/results |
 
-- [ ] Specify and implement create + targeted edit/patch tools while keeping
-      reviewed full diffs, stale checks, and explicit approval.
-- [ ] Specify and implement `ask_user`: question/options, pending state,
-      cancellation, answer delivery exactly once, and accessible TUI behavior.
-- [ ] Specify and implement one visible plan/todo tool; distinguish it from
-      subagent task spawning.
-- [ ] Specify web search/fetch: supported backend, config, network consent,
-      source URLs, content limits, timeout, and failure behavior.
-- [ ] Implement web tools through the registry; no shell/curl fallback and no
-      network tool exposed when its backend is unavailable.
-- [ ] Implement [`custom-commands`](../custom-commands/spec.md) as user-invoked
-      prompt templates; verify commands never execute code, register tools, or
-      change permissions.
-- [ ] Write a separate skill spec for model-invoked Markdown prompt packs:
-      loading, discovery, scope, size limits, and how results enter context.
-      A skill may guide tool use but cannot register tools or grant permissions.
-- [ ] Implement the skill loader/tool only after that spec; keep skills
-      distinct from slash commands and executable extensions.
-- [ ] Add provenance labels to MCP, web, and built-in tool activity; preserve
-      the transcript and approval UI contracts.
-- [ ] Update user documentation with tool inventory, permissions, optional
-      setup, and data-flow warnings.
+Eight workers do not change the runtime four-child execution limit. Use
+handoffs/dependency waits where needed instead of simultaneous edits to shared
+files. Integration is implementation work, not an extra code-review pass.
 
-## 3. Alpha — bounded read-only delegation
+For this Phase 1 checkpoint, the eight concurrent ownership areas were registry,
+repository inspection, harness, exact edits, artifacts, inspection UI, MCP
+identity, and command capture/session records. The broader table above remains
+the later-phase scheduling map; no later-phase runtime was exposed.
 
-- [ ] Write a subagent/task spec covering child context, parent context,
-      cancellation, time/budget limits, output limits, persistence, and UI.
-- [ ] Add a `task` tool that can invoke only registered agent profiles; no
-      arbitrary child prompt can expand its tool or permission set.
-- [ ] Add built-in read-only `explore`; no nested children and no writes in
-      alpha. State the allowed child tools in the model definition and enforce
-      them at dispatch.
-- [ ] Show child start, progress, completion, failure, and cancellation without
-      making users poll or losing the parent transcript.
-- [ ] Test the child cannot write, shell, call disallowed MCP, spawn a child,
-      or continue work after cancellation.
-- [ ] Complete the Alpha exit gate in `spec.md`, including a real-terminal
-      walkthrough and at least one live provider structured-tool probe.
-- [ ] Publish an alpha tool inventory and clearly label unverified provider
-      combinations.
+## Phase 1: dependable core tools
 
-## 4. Beta — user-created agent profiles
+- [x] Land [registry/catalog](../tool-registry/tasks.md) and common authorization.
+- [x] Land [harness/root instructions](../agent-harness/tasks.md) and
+      [main-loop continuation](../agent-loop/tasks.md).
+- [x] Land [repository polish](../repository-tools/tasks.md), including Image 2
+      dedicated-tool routing and Image 1 external-path refusal/gating.
+- [x] Land [exact edits](../targeted-edits/tasks.md), whole-change review,
+      stale refusal, safe parent creation, and honest partial-apply reporting.
+- [x] Land [output/expansion](../tool-output/tasks.md) and qualified MCP names.
+- [x] Record existing-check results and [core walkthrough](user-guide.md#phase-1-core-tools)
+      evidence/gaps before exposing dependent agent workflows.
 
-- [ ] Specify profile format and validation: name, description, instructions,
-      optional model, and a restrictive tool allowlist; reject unknown fields
-      that could imply permissions.
-- [ ] Implement `/agents` to list and inspect built-ins and user profiles;
-      errors identify invalid/duplicate files without preventing app startup.
-- [ ] Load global profiles first. Add repo-local profiles only after explicit
-      trust and precedence behavior is defined; repository content cannot
-      silently authorize tools.
-- [ ] Add built-in `review` profile and document how users create profiles
-      without writing code.
-- [ ] Enforce effective permissions as parent ∩ user policy ∩ profile
-      allowlist; profile settings may only reduce capabilities.
-- [ ] Test malicious prompt text, unsupported model names, name collisions,
-      missing tools, session resume, and no permission escalation.
-- [ ] Decide whether any user-defined agent can write in beta. If yes, finish
-      isolated worktree creation, review, merge/discard, cleanup, and recovery
-      specs before exposing it; otherwise label all profiles read-only.
+## Phase 2: awaited nested exploration
 
-## 5. Beta — optional advanced capabilities
+- [ ] Land [explore runtime](../explore-agents/tasks.md): depth, fresh contexts,
+      shared spawn/deadline/round budgets, queued/waiting permit release.
+- [ ] Land [agent inspection](../agent-inspection/tasks.md): child tree,
+      transcripts/usage, branch cancellation, coordinated persistence.
+- [ ] Record nesting, four-waiting-parent progress, failure/limit, branch/run
+      cancellation, and interrupted-resume outcomes or mark them unverified.
+- [ ] Keep writer/custom roles, background tasks, and expanded child tools disabled.
 
-- [ ] Specify AST query/edit adapters, supported languages, diff review, and
-      graceful fallback.
-- [ ] Specify LSP lifecycle, server trust/configuration, timeout, supported
-      operations, and graceful fallback when a server is missing.
-- [ ] Implement AST/LSP as optional adapters; neither changes shell or edit
-      approval semantics.
-- [ ] Specify memory opt-in, project scope, content limits, inspect/forget,
-      retention, provider disclosure, and secret handling.
-- [ ] Implement memory disabled by default, with visible state and explicit
-      read/write/forget operations; agent profiles cannot enable it silently.
-- [ ] Complete the Beta exit gate; run macOS/Linux walkthroughs, supported
-      provider probes, installation/config migration checks, and tool-disable
-      recovery.
+## Phase 3: supporting workflows
+
+- [ ] Land [ask user](../ask-user/tasks.md), preserving drafts/queues and one answer.
+- [ ] Land [checklist](../plan-todo/tasks.md) and separate [read-only mode](../plan-mode/tasks.md).
+- [ ] Land [global Markdown skills](../markdown-skills/tasks.md) and documented strict format.
+- [ ] Land [optional web](../web-tools/tasks.md), Brave disclosure, scoped grants,
+      public transport/address policy, and no fallback providers/shell.
+- [ ] Align shipped command/help/setup/provider claims with actual enablement.
+- [ ] Record combined walkthrough evidence; keep unexercised behaviors unverified.
+
+## Verification constraint
+
+At integration checkpoints run existing `go build ./...`, `go test ./...`, and
+`go test -race ./...`. Add no new automated tests and perform no code-review
+pass. Do not delete, skip, or weaken existing checks to make them green.
+Record baseline vs new failures and any proposed contract migration that needs
+the user's decision. Manual acceptance guides describe scenarios, not newly
+created test programs. Missing credentials/walkthroughs leave explicit gaps.
+
+`implemented (local)` describes landed code plus its recorded evidence, not
+automatic behavioral verification. `verified (release)` still requires the
+published-binary/provider walkthrough in the product contract.
 
 ## Dependency map
 
 ```text
-scope/security decisions
-  └─ registry + central policy + harness prompt
-       ├─ edit/patch, question, plan/todo, web, skills ── alpha core
-       └─ task lifecycle + read-only explore ─────────── alpha delegation
-            └─ profile format + /agents ──────────────── beta user agents
-                 └─ worktree isolation ───────────────── beta write agents
-
-registry ── AST/LSP adapters ── optional beta code intelligence
-registry + privacy spec ─────── optional beta memory
+approved contracts
+  ├─ registry ── harness/loop, repo tools, edits, MCP names
+  └─ result/session identity ── output artifacts + expansion
+       └─ phase 1 checkpoint
+            ├─ explore scheduler ── agent tree/transcripts/usage
+            └─ phase 2 checkpoint
+                 ├─ questions + checklist + read-only mode
+                 ├─ global prompt-only skills
+                 └─ optional Brave + direct HTTPS fetch
+                      └─ phase 3 checkpoint
 ```
-
-Web, skills, and code-intelligence adapters may be developed independently
-after the registry/policy seam is agreed. User-defined agents and delegated
-writes block on the child permission and isolation specs.

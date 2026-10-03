@@ -1,6 +1,10 @@
 # Likha vs OpenCode V2 vs OMP — product feature comparison
 
 **Date:** 2026-10-03 · **Status:** product-level comparison note. Complements
+the focused [five-CLI tools/agents comparison](cli-workflows.md), including
+Claude Code, Pi, and Codex. Use that note for the approved adoption map and
+current default/gating corrections; this wider matrix retains its OpenCode
+V2/OMP product scope. It also complements
 [research.md](research.md) (callable tools, delegation, permissions) and
 [../agent-harness/research.md](../agent-harness/research.md) (prompt/runtime layers); this
 note does not repeat their tool-policy detail — it compares the user-visible feature surface.

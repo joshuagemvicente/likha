@@ -1,6 +1,6 @@
-# Checklist: Custom commands (user-defined skills)
+# Checklist: custom slash command templates (deferred)
 
-- [ ] `/skills` lists the available user-defined commands with descriptions and a clear empty state.
+- [ ] `/commands` lists available templates; real Markdown skills retain /skills.
 - [ ] A user command invoked with arguments expands its template and the expansion is sent as an ordinary user prompt.
 - [ ] Actions proposed after a custom command still require the unchanged edit/command approval.
 - [ ] A user command file named after a reserved command is refused with a visible error and never dispatched.

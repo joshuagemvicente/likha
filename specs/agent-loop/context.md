@@ -13,8 +13,8 @@ Code paths this feature touches, validated 2026-10-01.
     replaces that `fail` with an append + `continue`.
   - `dispatchTool` (`:128-…`) — `glob`/`read`/`grep` run ungated;
     `edit_file`/`run_command`/MCP fallback call `requestApproval`. The
-    MCP fallback is the last `switch` case; a harness message must not
-    change that ordering.
+    MCP fallback is the last baseline `switch` case. Phase 1 registry migration
+    may replace the switch while preserving its authorization outcomes.
 - `internal/model/client.go` — `Stream` validates roles including
   `system`/`developer` (`:352-356`) and never injects a prompt itself;
   both wires (chat-completions and Codex, `codex.go`) accept a leading
@@ -32,9 +32,9 @@ Code paths this feature touches, validated 2026-10-01.
 - `internal/session/session.go` — persisted history snapshot comes from
   the event's `History`; the harness system message must be prepended
   per request, never stored, matching agent-harness §Session wiring.
-- `specs/agent-harness/spec.md` — parent feature (draft). This slice
-  implements only its tool-contract section; update its "Amend FR-03 or
-  add FR-17" note to point at FR-19 to keep the two specs consistent.
+- `specs/agent-harness/spec.md` — planned Phase 1 parent feature, now scoped to
+  the compiled rules, true root identity, and root AGENTS.md snapshot under FR-19.
+  Coordinate its single system layer with this loop's continuation work.
 
 Precedent for the notice UX: the `Likha`-role entries already used for
 cancellation (`tui.go:532`).

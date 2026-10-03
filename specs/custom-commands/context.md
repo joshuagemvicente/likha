@@ -1,14 +1,18 @@
-# Context: Custom commands (user-defined skills)
+# Context: custom command templates (deferred)
+
+This feature is outside the approved phases. Real SKILL.md discovery and
+`/skills` belong to [Markdown skills](../markdown-skills/spec.md); templates
+would use `/commands`. Remaining format/location choices are unresolved.
 
 ## Code
 
 | Path | Relevance |
 | --- | --- |
-| `internal/skills/skills.go` | The explicit placeholder this feature replaces: only a doc comment; `/skills` is "intentionally reserved but inert". |
-| `internal/app/tui.go` | `handleCommand` (~line 552) is the slash-command dispatch: reserved cases, `//` escape, unknown-command default branch that restores the draft. `commandHelp` (~line 547) is the `/help` text unknown-command errors point to. The Enter path calls `handleCommand` when the prompt starts with `/` (~line 1119). |
+| `internal/skills/skills.go` | Current inert package; the separate Markdown skill feature owns its activation. |
+| `internal/tui/tui.go`, `internal/tui/dialog.go`, `internal/tui/commandcomplete.go` | Command dispatch, `//`, help, and unknown-command behavior. |
 | `internal/app/run.go` | State directory resolution: `LIKHA_STATE_DIR` or `os.UserConfigDir()/likha` (~lines 149–157); `config.json` and `mcp.json` are loaded here before the TUI starts — the precedent for loading command files at startup. |
-| `internal/app/config.go`, `internal/app/keyfile.go`, `internal/mcp/config.go` | Private state file precedents: missing file is not an error, corrupt file is a loud error, mode 0600 (`config.json`, `providers.json`, `mcp.json`). |
-| `internal/app/mcp.go`, `internal/mcp/` | The MCP loading pattern (`newMcpManager` at TUI construction) and `/mcp` status command — the sibling feature whose boundary `/skills` must not blur. |
+| `internal/providers/config.go`, `internal/providers/keyfile.go`, `internal/mcp/config.go` | Current private state/config conventions. |
+| `internal/mcp/` | MCP is a separate configured tool source and `/mcp` surface; templates do not register its tools. |
 
 ## Related specs
 
@@ -30,13 +34,13 @@
   project (checked into version control) or `~/.claude/commands/` globally;
   the filename becomes the command and `$ARGUMENTS` marks where the typed
   arguments are inserted. Newer docs also describe skills under
-  `.claude/skills/<name>/SKILL.md`, but both remain markdown prompt
-  templates, not code.
+  `.claude/skills/<name>/SKILL.md`; foreign skill formats can support executable
+  resources/permission effects. Do not assume their semantics match passive templates.
 - OMP skills: the `skill://<name>` convention — markdown instruction files
   selected by name, executed by reading, never executed as code.
 
 ## Open items
 
 - See the "Open decisions" section of [spec.md](spec.md): frontmatter schema,
-  location/precedence, load timing, argument rules, `/skills` scope, and the
+  location/precedence, load timing, argument rules, `/commands` scope, and the
   reserved-list wording for the FR-03 amendment. None is resolved yet.

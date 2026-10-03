@@ -1,21 +1,34 @@
-# Feature: Tool and agent platform (alpha → beta)
+# Feature: Tool and agent platform: three delivery phases
 
-**Status:** proposed roadmap — architecture and release scope for review; no
-implementation commitment beyond the existing tool and MCP contracts.
+**Status:** Phase 1 implemented locally; release verification pending. Scope and
+separate application implementation approval received on 2026-10-03.
+Phases 2–3 remain planned. See [implementation evidence](implementation.md).
 
 ## Goal
 
-Make Likha/Likha's tools predictable, safe, inspectable, and extensible enough for
-alpha and beta users. Add the practical capabilities users expect from coding
-agents without importing another product's private runtime or shipping an
-unbounded plugin system.
+Make repository work and nested exploration useful in Likha's CLI. Compare
+selected workflows with Claude Code, OpenCode V2, OMP, Pi, and Codex CLI;
+adopt useful behavior without promising feature-count parity.
 
-This is a coordinating spec. Existing feature specs remain authoritative for
-their detailed behavior; follow-on specs are required before implementing new
-capability families. The comparative research is in
-[`tooling-landscape/research.md`](../tooling-landscape/research.md).
+This file coordinates the release. Each feature has its own behavior spec,
+tasks, checklist, context, and role. Start with the [phase index](README.md).
+Use the [CLI benchmark](../tooling-landscape/cli-workflows.md) for comparisons
+and the [user guide](user-guide.md) for setup and operation requirements.
 
-## Current baseline
+## Approved delivery phases
+
+| Phase | Feature specs | Exit condition |
+| --- | --- | --- |
+| 1: core tools | [registry/catalog](../tool-registry/spec.md), [repository inspection](../repository-tools/spec.md), [targeted edits](../targeted-edits/spec.md), [output/expansion](../tool-output/spec.md), [harness](../agent-harness/spec.md), [loop](../agent-loop/spec.md), [MCP](../mcp-support/spec.md) | Inspect → propose → review → verify is legible, bounded, cancellable, and preserves existing approvals. |
+| 2: exploration | [nested explore runtime](../explore-agents/spec.md), [agent inspection](../agent-inspection/spec.md) | Awaited nested children obey shared limits; users can inspect and cancel branches without losing the parent. |
+| 3: supporting workflows | [questions](../ask-user/spec.md), [checklist](../plan-todo/spec.md), [read-only mode](../plan-mode/spec.md), [skills](../markdown-skills/spec.md), [web](../web-tools/spec.md) | Optional workflows have explicit setup, permission, failure, and resume behavior. |
+
+Each phase contains multiple feature specs. Its exit condition is a manual
+acceptance target, not a claim that passing existing tests covers new behavior.
+Implementation scheduling and the eight-worker ownership plan live in
+[tasks.md](tasks.md); the user must approve implementation separately.
+
+## Pre-implementation baseline
 
 `internal/agent/agent.go` declares and dispatches five built-in model tools:
 
@@ -30,12 +43,12 @@ capability families. The comparative research is in
 Configured MCP tools are appended to the tool list. MCP calls currently use
 trust-on-first-use **per server, for the session**: the first call requires
 approval; later calls to the trusted server do not prompt again until relaunch.
-The implementation is the current behavior, but `specs/mcp-support/spec.md`
-contains conflicting per-call approval wording that must be reconciled.
+The MCP spec now uses that resolved contract throughout. Phase 1 adds
+server-qualified identities without changing the trust grant.
 
 There is no built-in web, ask-user, plan/todo, skills, LSP, AST, memory, or
 subagent tool. `/compact`, `/mcp`, `/models`, etc. are app commands, not
-model-callable tools. Existing related drafts include
+model-callable tools. Related planned/deferred feature specs include
 [`agent-loop`](../agent-loop/spec.md),
 [`agent-harness`](../agent-harness/spec.md),
 [`plan-mode`](../plan-mode/spec.md),
@@ -58,7 +71,7 @@ model-callable tools. Existing related drafts include
 Keep these concepts separate in the model descriptions, TUI, config files, and
 docs. In particular, `/agents` is a user-facing management surface; it is not a
 delegation call. Peer teams, shared mailboxes, and autonomous agent swarms are
-not part of alpha or beta.
+outside the approved phases.
 
 ## Architecture contract
 
@@ -84,7 +97,7 @@ Each registered tool declares, at minimum:
 - any platform/backend requirements that can make it unavailable.
 
 The concrete representation and package placement are implementation details
-for the registry spec. It must not create an import cycle with the turn loop or
+for the registry tasks. It must not create an import cycle with the turn loop or
 UI. UI approval travels through the existing approval seam; tool code does not
 directly render dialogs or mutate TUI state.
 
@@ -106,48 +119,50 @@ directly render dialogs or mutate TUI state.
 6. Tool refusal, invalid input, timeout, cancellation, and truncation are
    returned to the model and shown to the user; none is reported as success.
 
-## Alpha scope — dependable daily-use core
+## Approved capability scope
 
-Alpha is the first user-testable version. It keeps current safe behavior while
-making routine code work more complete and legible.
+The three phases keep existing approval behavior while making routine code
+work more complete and legible. Feature specs own their detailed contracts.
 
-### Required capability set
+### Required capability set across the three phases
 
-- **Repository inspection:** retain `glob`, `read`, and `grep`; steer the model
-  to use them instead of shell search. Read-only tools remain repository
-  confined and need no approval.
-- **File changes:** support create and targeted edit/patch operations in
+- **Repository inspection:** retain `glob`, `read`, and `grep`, add directory
+  listing, line ranges, scoped searches, and partial-result metadata. Respect
+  ignores by default. Steer repository inspection to these approval-free,
+  repository-confined tools; keep shell approval if the model chooses shell.
+- **File changes:** support create and unique exact-text replacements in
   addition to the current full-content proposal. Every write still produces
   one complete diff review, stale checks, explicit approval, and a visible
   result. Preserve existing tool-call compatibility while names/schemas are
-  migrated.
+  migrated. A multi-file proposal has one review; a stale target blocks it.
+  Deletion, rename, fuzzy patches, and binary edits are deferred.
 - **Shell:** retain `run_command` with the current exact-command review and
-  explicit unsandboxed warning. Do not add blanket command approval in alpha.
+  explicit unsandboxed warning. Do not add blanket command approval.
 - **Ask the user:** add an `ask_user` interaction for a concise question and
   optional choices. A pending question is cancellable; its answer returns as a
   tool result exactly once.
-- **Plan/todo:** add one visible, bounded plan tool (create/update/complete
-  steps) rather than several redundant task CRUD tools. Planning state is
-  session UI state, not permission to edit or execute.
-- **Web:** add `web_search` and `web_fetch` through a documented, configurable
-  backend. Network use is explicit, capped, attributable, and cannot execute
-  instructions found in results. Search sources/URLs are included in results.
-  If no supported backend is configured, these tools are absent with a clear
-  explanation; shelling out to `curl` is not the fallback.
-- **Skills:** support Markdown-only, on-demand instructions. Skills cannot
-  register tools, run code, change model/provider settings, or alter approvals.
-  Reuse and resolve the security/configuration decisions in
-  [`custom-commands`](../custom-commands/spec.md) before implementation.
-- **Delegation:** add a bounded `task` tool and a built-in read-only `explore`
-  agent. The child has a separate context, receives only repository-read and
-  explicitly enabled web tools, returns a concise result to the parent, and
-  cannot spawn another child. Start with one child at a time; parallel
-  read-only work can follow only after cancellation and result ordering are
-  proven.
+- **Plan/todo:** add one persisted, bounded checklist tool. Implement `/plan`
+  separately as a live permission mode; checklist updates grant no authority.
+- **Web:** add configured Brave `web_search` and direct public-HTTPS
+  `web_fetch`. First use asks for conversation-scoped backend/origin consent.
+  Results identify sources, destination, limits, and data flow. Search requires
+  setup; fetch requires explicit enablement. Neither falls back to shell or a
+  different vendor. Local conversion makes no extra model request.
+- **Skills:** load strict global `<stateDir>/skills/<name>/SKILL.md` prompt
+  packs on model or user invocation. Skills add instructions, not tools,
+  executable resources, configuration changes, or permissions. Custom slash
+  command templates remain a separate deferred feature.
+- **Delegation:** add awaited `task` and repository-read-only `explore`.
+  Main depth 0 may create depth-1 children, which may create depth-2 explore
+  children. Four children may execute across the entire tree; waiting parents
+  release execution slots. Each child gets a scoped brief and the active
+  parent model. Shared spawn and per-child time/round limits apply.
 - **MCP:** retain the existing stdio adapter and session-scoped TOFU behavior;
-  make tool provenance visible and reconcile its spec wording.
+  make tool provenance visible and prevent name collisions.
+- **Outputs:** use compact expandable rows and capped private, session-linked
+  artifacts. Retained output does not enter model context until requested.
 
-### Alpha UX
+### Shared UX
 
 - Add `/tools` (or equivalent) to inspect the active tool catalog, source,
   concise description, and permission class. Clearly distinguish unavailable
@@ -155,13 +170,14 @@ making routine code work more complete and legible.
 - Tool activity and results stay in the transcript; activity indicators do
   not replace the tool name/result. Keep approval previews focused on the
   operation and decision the user must make.
-- Add `/agents` for listing the built-in alpha agent and its current
-  capabilities; do not imply users can yet author agents.
+- Add `/agents` for the explore capability profile and runtime tree: parent,
+  depth, queued/running/waiting status, budgets, usage, transcript, and branch
+  cancellation. Do not imply user-authored profiles exist yet.
 
-## Beta scope — user-configurable agents and code intelligence
+## Deferred roadmap — not approved for these phases
 
-Beta builds on an alpha that has passed its exit gate. It broadens capability
-without turning agent definitions into executable plugins.
+These items require a separate interview, scope approval, and feature specs.
+They are not dependencies or exit gates for the approved three phases.
 
 - **User-authored agents:** support declarative Markdown/frontmatter profiles
   under the private Likha state directory, with optional project-local profiles
@@ -175,9 +191,9 @@ without turning agent definitions into executable plugins.
   permissions.
 - **Write-capable child agents:** require an isolated worktree or equivalent
   per-child workspace. The parent reviews/promotes resulting changes; no
-  concurrent writers share the live checkout. Until isolation exists, custom
-  agents remain read-only or use normal parent-owned approval in a strictly
-  serialized flow.
+  concurrent writers share the live checkout. Until isolation exists,
+  write-capable children remain disabled. An isolated workspace does not
+  itself authorize writes; the future spec must define approval there too.
 - **Code intelligence:** optional AST query/edit and LSP symbol/diagnostic
   adapters. Missing language servers or unsupported languages degrade
   gracefully to `grep`/`read`; semantic tools never silently fall back to
@@ -189,29 +205,32 @@ without turning agent definitions into executable plugins.
   added only with a dedicated permission spec and visible explanation of
   persistence scope. Agent frontmatter is not the policy file.
 
-## Out of scope through beta
+## Outside the approved phases
 
-- Importing Claude Code, OpenCode, OMP, or Pi implementations as dependencies;
+- Importing Claude Code, OpenCode, OMP, Pi, or Codex private runtimes;
   integrate their useful concepts, not their private runtime.
 - Arbitrary user-authored executable plugins, hooks, or scripts. MCP remains
   the existing external tool integration mechanism.
-- Agent teams, peer messaging, recursive swarms, or unbounded background
-  agents.
+- Agent teams, peer messaging, unbounded recursion, or background agents.
+  Bounded nested explore is in scope; arbitrary recursive swarms are not.
 - Automatic approval, hidden shell execution, or treating a cwd restriction as
   a sandbox.
-- Required LSP/AST installations, a particular hosted search provider, or
-  silently sending project content to a new provider.
+- Making optional LSP/AST or web setup a prerequisite for repository work,
+  or silently sending project content to a new provider. Brave is the chosen
+  optional first search adapter, not a mandatory service for using Likha.
 
 ## Release gates
 
-### Alpha exit gate
+### Three-phase evidence and release gate
 
 - The registry and policy path cover built-ins, MCP, web, and task dispatch;
   no mutating or network tool has an alternate path.
-- All current tool behaviors and approval semantics have regression tests;
-  question, plan, skill, web, and read-only task flows have automated tests.
-- Cancellation, refusal, malformed schemas, unavailable backends, output caps,
-  stale edits, and session resume have explicit tests.
+- Existing regression checks run with recorded results; new question, plan,
+  skill, web, and read-only task flows have recorded walkthrough evidence or
+  explicit unverified labels. No new automated tests are requested.
+- Acceptance guides name cancellation, refusal, malformed schemas, unavailable
+  backends, output caps, stale edits, and session resume; record which were
+  exercised rather than equating old tests with their coverage.
 - A human walkthrough covers inspect → plan/question → edit/review → verify,
   shell approval, web source display, MCP first-use trust, child result/cancel,
   narrow terminal layout, and terminal restoration.
@@ -219,7 +238,7 @@ without turning agent definitions into executable plugins.
   the shipped core. README/provider claims remain limited to providers actually
   probed; unverified tool behavior is labelled honestly.
 
-### Beta exit gate
+### Deferred-feature gates (not current release gates)
 
 - User-authored agent profiles load, validate, list, and fail safely; their
   allowlists cannot exceed parent/user permissions.
@@ -234,20 +253,20 @@ without turning agent definitions into executable plugins.
 - macOS and Linux alpha/beta walkthroughs pass; users can disable optional
   tools and return to the five-tool baseline.
 
-## Follow-on specs required before implementation
+## Verification and authorization to work
 
-Keep this roadmap as the dependency and release map. Before coding, produce
-buildable specs for:
+The approved implementation constraint is eight parallel workers on independent
+areas, no new tests, and no code-review pass. Run existing build/test checks and
+record their results. Do not delete, skip, or weaken existing checks to claim
+completion. Document manual scenarios for behavior existing tests do not cover.
 
-1. tool registry/schema/policy and `/tools`;
-2. web backend, network policy, output and source handling;
-3. `ask_user`, plan/todo, and skills invocation/UX;
-4. task/subagent lifecycle, context, cancellation, budgets, and TUI;
-5. custom agent file format, locations, precedence, and trust;
-6. worktree-isolated write agents;
-7. AST/LSP adapter contract; and
-8. opt-in memory, retention, deletion, and privacy.
+The phase gate above describes evidence still required before a release claim;
+it does not request new automated test creation. Passing old checks alone is
+insufficient to mark a new feature `verified (release)`. Until a scenario has
+been exercised, label its new behavior unverified.
 
-Existing drafts should be sharpened rather than copied. Resolve the MCP
-per-call-vs-session-trust wording and the plan-mode MCP decision before their
-acceptance criteria are used as gates.
+The user separately authorized implementation from the start of the phase index
+and requested parallel subagents. Phase 1 used eight independent worker areas.
+During integration, the user also approved adapting the existing context-tracker
+test assertions to the new harness/catalog contract without adding tests or
+weakening its history, steering, usage, and estimate checks.

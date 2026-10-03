@@ -1,22 +1,21 @@
-# Feature: Custom commands (user-defined skills)
+# Feature: custom slash command templates (deferred)
 
-**Status:** draft.
+**Status:** planned, deferred beyond the approved tools/agents phases.
+
+This draft describes prompt templates only. The separate
+[Markdown skill spec](../markdown-skills/spec.md) owns `/skills`, `/skill`, and
+the global SKILL.md loader. This feature would use `/commands` for template
+discovery; its remaining format/location decisions require separate approval.
 
 ## Context
 
 Users of agent TUIs expect to reuse their own prompt recipes as typed
 commands. The precedent is Claude Code's custom slash commands
 (`.claude/commands/*.md`: a markdown file whose filename becomes the command
-and whose body is a prompt template with `$ARGUMENTS` substituted) and OMP
-skills: both are **prompt templates, not code**. Likha already reserves the
-name `/skills` in the TUI but it is inert — `internal/skills/skills.go` is an
-explicit placeholder ("`/skills` in the TUI is intentionally reserved but
-inert"), and [slash-commands/spec.md](../slash-commands/spec.md) excludes
-`/skills` from scope "until a skills feature exists".
-
-This feature defines that skills feature: **user-defined slash commands**,
-each a markdown file the user authors. It activates the reserved-but-inert
-`internal/skills` package.
+and whose body is a prompt template with `$ARGUMENTS` substituted). Likha's
+templates produce prompt text only; this does not imply foreign skill formats
+share the same executable-resource or permission semantics. Actual Markdown
+skills have their own discovery/loading contract in the linked Phase 3 spec.
 
 **Explicitly NOT a plugin runtime.** v1-spec.md §6 states v1 has no plugin
 architecture, and this feature does not introduce one. A custom command is
@@ -38,7 +37,7 @@ different spec contradicting v1-spec.md.
     `providers.json` / `mcp.json` in the private state directory.
   Whether both locations exist, and which wins when the same command name is
   defined in both, is an open decision (below).
-- `/skills` stops being inert and lists the available user commands with
+- `/commands` would list the available user templates with
   their descriptions. With none defined, it says so clearly. It does not
   change the reserved built-in commands.
 - A user command is invoked like a built-in: `/<name> [arguments]`. The
@@ -81,33 +80,32 @@ file is prompt text in the conversation.
    filename-derived), `description`, and an `allowed-tools`-style field. An
    `allowed-tools` equivalent implies runtime policy, which this spec
    explicitly rejects; if kept at all it could only be advisory text shown in
-   `/skills`, never enforced behavior. Recommendation for v1: `description`
+   `/commands`, never enforced behavior. Recommendation: `description`
    only, name from the filename.
 2. **Locations and precedence.** Repo only, state dir only, or both; if both
    exist, does the repo file win, the state file win, or is the collision an
    error? (Tension: `.likha/commands` inside an untrusted repository vs.
    treating command files as untrusted input regardless of location.)
 3. **Load timing.** Hot reload on file change vs. load once at startup (with
-   `/skills` re-reading?).
+   `/commands` re-reading?).
 4. **Arguments.** Placeholder token name; a single blob vs. positional
    arguments; quoting rules for multi-word arguments; behavior when the
    template has no placeholder but arguments were given.
-5. **`/skills` scope.** Does it list anything MCP-provided? Recommended: no —
-   MCP servers and tools have `/mcp`; `/skills` lists user-defined prompt
-   commands only.
+5. **`/commands` scope.** List templates only; MCP has `/mcp` and real skills
+   have `/skills`. Do not merge these distinct catalogs.
 6. **Interaction with existing rules.** The `//` escape and
    inert-during-active-run rules from [slash-commands/spec.md](../slash-commands/spec.md)
    apply unchanged; confirm.
 
 ## Functional changes (to apply in v1-spec.md when started)
 
-- **FR-03 extension:** the reserved-command list gains `/skills`; the
+- **Deferred FR-03 extension:** the reserved-command list would gain `/commands`; the
   sentence gains that user-defined commands from markdown files are also
   dispatched, that reserved names cannot be overridden, and that a custom
   command's expansion is sent as the user prompt.
 - A new functional requirement, in v1-spec.md's tone: "The user can define
   custom slash commands as markdown prompt templates in the repository or the
-  private state directory; `/skills` lists them; an invoked command's
+  private state directory; `/commands` would list them; an invoked command's
   template, with the typed arguments substituted, is sent as the user prompt
   and never executes anything or changes tools or configuration."
 - README command reference documents `.likha/commands/*.md` (and the state
@@ -115,7 +113,7 @@ file is prompt text in the conversation.
 
 ## Acceptance criteria (draft)
 
-- [ ] `/skills` lists defined user commands with descriptions and shows a
+- [ ] `/commands` lists defined user templates with descriptions and shows a
       clear empty-state message when none exist.
 - [ ] `/<name> [arguments]` expands the template with the arguments
       substituted and sends the expansion as an ordinary user prompt.

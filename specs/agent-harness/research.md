@@ -1,6 +1,12 @@
 # Harness layers of AI agent terminals — comparative research
 
 **Date:** 2026-10-03 · **Status:** research note feeding [spec.md](spec.md) (agent-harness) and related drafts.
+
+**Decision override:** this note records alternatives, not the approved scope.
+The questionnaire selected root-only AGENTS.md, a 32-KiB reject-on-overflow cap,
+and no imports/compatibility fallbacks. Use the [three-phase index](../tooling-platform/README.md)
+and [five-CLI comparison](../tooling-landscape/cli-workflows.md) for the current
+adoption map; historical suggestions below do not authorize wider loading.
 **Method:** primary sources only — official docs and source repositories. Terminal source claims cite repository paths at pinned commits (clones fetched 2026-10-03); doc claims cite official documentation URLs. Where evidence is docs-only (closed-source Claude Code) or absent, the text says so. Analysis and ratings are marked as such. No live probe of hosted/cloud surfaces was run.
 
 Terminals surveyed: **Claude Code**, **OpenAI Codex**, **OpenCode**, **OMP**, **Gemini CLI**, **Aider** (contrast case), plus **Likha** (current state and four-layer confirmation).

@@ -1,36 +1,16 @@
-# Tasks: Agent tool loop (harness steering + round-cap auto-continue)
+# Tasks: main agent loop
 
-Ordered; each task carries its verification. No checkmarks until work
-starts.
-
-1. **Harness system message.** Add the compiled tool-contract system
-   message (embed or constant in `internal/agent`), prepend it in
-   `RunTurn` before `prior`, and keep it out of what the session store
-   persists (verify via a snapshot round-trip in the test).
-   *Verify:* unit test asserting the request history's first message is
-   `system` with the steering text, exactly once, and that the persisted
-   snapshot's first message is not it (AC-1).
-2. **Checkpoint continuation in `RunTurn`.** Replace the post-loop
-   `fail` with: emit a `notice` turn event, append a `developer`
-   continue-instruction message, and re-enter the loop. Track rounds so
-   the notice text can name the count. Keep all existing `ctx.Err()`
-   checks and `appendUnexecuted` reconciliation untouched.
-   *Verify:* fake-model test that requests one tool call per round;
-   assert execution continues past round 32, a `notice` arrives, and the
-   turn ends `done` (AC-3); a second pass asserts the round-64 notice
-   (AC-4).
-3. **TUI notice rendering.** Handle the `notice` kind in the event
-   switch: append a `Likha`-role conversation entry and leave `working`
-   and any pending state untouched.
-   *Verify:* TUI test feeding a `notice` event mid-run: entry appears,
-   composer stays inert, no cancellation/pending side effects (AC-2/4
-   UI half).
-4. **Steering text review.** Read the tool-contract wording against
-   FR-06/07/08/16: it must direct tool choice without implying that any
-   command is pre-approved or that approval can be skipped.
-   *Verify:* the wording is asserted in the AC-1 test (approval sentences
-   present verbatim), preventing silent weakening later.
-5. **Full suite + spec status.** Run `go test ./...`; flip this spec's
-   status to `implemented (local)` and update
-   [specs/README.md](../README.md) and the agent-harness cross-reference.
-   *Verify:* suite green; index row matches status words rules.
+1. Coordinate the single compiled tool-contract system layer with the harness
+   owner. Compose it per request outside stored conversation history.
+   **Done:** request-order and snapshot/resume evidence shows no duplication.
+2. Replace the main 32-round hard failure with a visible notice and runtime-only
+   continuation instruction; preserve cancellation, steering safe points, and
+   unexecuted-tool reconciliation. Child runs use their separate round policy.
+   **Done:** exercised main checkpoints continue; child limits do not reset.
+3. Render the attributed notice without ending working state or discarding the
+   live composer/steering queue. Continue normal approval for every effect.
+   **Done:** notices, draft, pending decisions, and cancellation remain consistent.
+4. Run existing build/test/race checks under
+   [coordination constraints](../tooling-platform/role.md). Record checkpoint/
+   provider outcomes or missing evidence; create no tests and add no review pass.
+   **Done:** landed status and verification gaps are accurate in the index.

@@ -1,6 +1,10 @@
 # Callable tools and delegation — focused landscape
 
 **Date:** 2026-10-03 · **Status:** focused research note for Likha’s tool UX.
+**Updated comparison:** [cli-workflows.md](cli-workflows.md) covers all five
+requested CLIs including Codex, current permission/delegation caveats, and the
+approved adoption map. Its snapshot corrections supersede earlier default
+assumptions in this note; none of these comparisons is a live behavior probe.
 **See also:** [feature-comparison.md](feature-comparison.md) — product-level Likha vs OpenCode V2 vs OMP feature surface.
 **Method:** first-party documentation and pinned upstream source only. Products
 change quickly; version and source caveats are called out below. For prompt,
@@ -127,24 +131,20 @@ draft scope and approval semantics.
    trust-on-first-use rule as a reason that “approved” does not imply
    read-only. Its recommended safe behavior is to block all MCP calls in plan
    mode until that open decision is resolved. [24][27][28]
-6. **Defer subagents/teams rather than implying Likha already has them.** The
-   current UX should not expose agent-role selection as if it were runnable.
-   The harness draft defers subagents and skills; a future design can first
-   decide the child tool set, spawn permission, side-effect boundary, and
-   cancellation/reporting UX. [23]
+6. **Distinguish planned children from current capabilities.** The current
+   runtime has no delegation. The approved [explore spec](../explore-agents/spec.md)
+   defines depth-2 read-only nesting, awaited results, shared budgets, and
+   cancellation. Teams/writers/custom roles remain deferred; do not describe
+   the planned runtime as shipped or inherit another product's permission defaults.
 
 ### Likha spec consistency note
 
-The current MCP implementation and the resolved decision in
+The current MCP implementation and
 [`mcp-support/spec.md`](../mcp-support/spec.md) use server-level trust after the
-first approval in a session. However, that draft also says “every MCP tool
-call” is gated/shown in its context and acceptance criteria. The current
-[`internal/mcp/manager.go`](../../internal/mcp/manager.go) marks a server trusted
-after the first accepted call and runs subsequent calls without another prompt.
-Treat the resolved decision and implementation as current behavior, and
-reconcile the contradictory per-call wording before using the draft as a
-future acceptance contract. `plan-mode/spec.md` already describes the
-first-call/session-trust consequence accurately. [20][22][27]
+first approval in the running manager's lifetime, resetting on app relaunch.
+The phase documentation reconciles the former contradictory per-call wording.
+Planned plan mode blocks every MCP call even when trusted; naming/registry
+improvements do not change the trust grant. [20][22][27]
 
 ## Sources
 

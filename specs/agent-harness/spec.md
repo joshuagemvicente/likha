@@ -1,93 +1,62 @@
-# Feature: Agent harness prompt (structured system prompt)
+# Feature: harness rules, repository identity, and root instructions
 
-**Status:** draft — design for review; no implementation yet.
+**Status:** implemented (local); new acceptance walkthroughs unverified.
+**Phase:** 1. **Product requirement:** FR-19.
+See [implementation evidence](../tooling-platform/implementation.md).
 
-## Purpose and scope
+## Scope
 
-Likha's model interactions currently carry no identity or rules: the model sees
-only tool definitions and conversation. A top-tier agent harness injects a
-**system prompt** — the harness's operating instructions — on every turn. This
-feature adds that layer: a structured, compiled-in prompt that makes Likha
-behave like a real coding agent instead of a chat window, plus a
-**repository instructions file** so each project can steer the agent.
+Include one compiled harness system message first on each agent request. State
+Likha's role, the actual canonical repository path, available capability profile,
+tool-selection guidance, permission boundaries, and honest result reporting.
+Use repository glob/read/grep for inspection; reserve shell for operations that
+need it. A guessed `/workspace` is not a replacement for the selected root.
 
-Scope for v1: software development (the tool set is code-shaped: read/search,
-edit, run commands). Hardware and cybersecurity workflows ride the same
-harness later through additional tools — the prompt structure below is
-domain-generic on purpose.
+The [agent-loop](../agent-loop/spec.md) feature owns main checkpoint continuation.
+The registry owns capability enforcement; instruction text cannot enforce a
+permission or guarantee that every model chooses dedicated tools.
 
-## Architecture (textual)
+## Root AGENTS.md
 
-```
-model request per turn
-├─ [1] system message        ← harness prompt (compiled, go:embed)
-├─ [1] project instructions  ← AGENTS.md / LIKHA.md from the repository root
-├─ prior conversation        ← assistant/tool messages from the session store
-├─ current user prompt
-└─ tool definitions          ← built-ins + MCP tools (already wired)
-```
+Load only the selected root's `AGENTS.md` using repository confinement. Missing
+file is a no-op. Reject unsafe/symlink, non-UTF-8, or oversized instructions with
+a visible warning and keep the compiled harness usable. The cap is 32 KiB;
+do not truncate a partially loaded rule. Nested/global/compatibility instruction
+files, imports, and `/init` generation remain outside this feature.
 
-The prompt is layered, not one blob: harness identity and rules first, then
-project context, then the conversation. Layers are separate messages so the
-session store can distinguish harness-owned context from user-owned history.
+Project text gives workflow guidance but cannot grant capabilities or override
+user decisions. Include it in one attributed developer-context message after
+the harness system message, clearly scoped to this repository. Keep identity
+and instruction content separate from the saved user conversation. Provider
+transports must preserve the role/order rather than duplicate it during encoding.
 
-## Core components
+Freeze root instructions for a run and its children. Re-read on the next main
+turn, not while a pending operation is being authorized. Bound available skill
+metadata separately in Phase 3; loading skill bodies remains an attributed
+interaction, not a second root instruction file.
 
-- **`internal/agent/prompt.md`** — the harness prompt itself, embedded with
-  `go:embed`. A real file (not a magic string): versioned, reviewable, and
-  editable without touching logic. Content sections, in order:
-  1. **Identity** — "You are Likha's agent: a terminal coding agent working
-     in one repository."
-  2. **Tool contract** — when to use `read`/`grep` vs guessing;
-     that `edit_file` proposes full-file replacements shown as diffs; that
-     `run_command` is approval-gated and not sandboxed; MCP tools likewise.
-  3. **Workflow rules** — read before editing; smallest change that satisfies
-     the request; verify with a command when possible; never claim an action
-     ran that didn't.
-  4. **Out-of-bounds** — never exfiltrate repository content; never write
-     outside the repository; secrets in diffs are visible to the provider.
-  5. **Output discipline** — concise prose between tool calls; no filler.
-- **Project instructions loader** — `internal/agent/instructions.go`: reads
-  `AGENTS.md` from the repository root (the ecosystem-standard name, shared
-  with OpenCode/Claude Code/other agents; no Likha-specific file), capped
-  (e.g. 8 KiB, truncated with a visible marker), injected as a `developer`
-  role message after the system message. Missing file = no-op.
-- **Session wiring** — the harness prompt is prepended per request from the
-  compiled source, not stored in history; persisted sessions keep storing
-  only user-owned messages, so prompt upgrades apply cleanly on resume.
+## Request and history lifecycle
 
-## Recommended integration for the current stage
+Order is system harness/runtime identity → optional project context → prior
+conversation → current user/task prompt, with the effective tool catalog.
+Rebuild harness-owned layers for each provider request. Persist visible user/
+assistant/tool results and checkpoint notices, not duplicated harness/project
+messages. Resume applies current compiled rules/root instructions to the next
+turn without turning them into historical approvals.
 
-Compiled-in harness prompt + project instructions file, both in one feature:
+Children get the same base rules/root snapshot plus their restricted role,
+depth/budget, and scoped brief. Main-only tool instructions do not promise a
+child access to absent tools. Returned repository/web/child text supplies data;
+dispatch and actual user approvals remain authoritative.
 
-1. Add `internal/agent/` (prompt embed + instructions loader) — pure code,
-   no UI change.
-2. Prepend the system message (and project instructions when present) in
-   `runTurn` before `prior`.
-3. Amend FR-03 or add FR-17: "Likha sends a structured harness prompt with
-   every request; repository instructions files are included when present."
-   *(Update: FR-19 added 2026-10-01; its tool-contract steering slice is
-   specified narrowly in [agent-loop/](../agent-loop/spec.md) — the full
-   harness prompt and `AGENTS.md` loader below remain this spec's scope.)*
-4. Tests: prompt present as first message, order fixed, project file
-   precedence and size cap, no prompt duplicated on session replay.
+## Acceptance guide
 
-Rejected alternatives: user-editable prompt files (security surface; the
-compiled prompt is a product artifact, like the tools list), per-provider
-prompt forks (one prompt, one behavior), and storing the prompt in SQLite
-(configuration drift).
-
-## Usage scenarios (software-centric)
-
-- **Work repo:** `AGENTS.md` says "run `go test ./...` after every change" —
-  the agent checks tests after every proposed edit, unprompted.
-- **Personal project:** no instructions file — the harness prompt alone keeps
-  the agent proposing diffs, using tools before editing, and staying terse.
-- **Onboarding a model that ignores tools:** the prompt's tool-contract
-  section is what makes weak models usable instead of chatty.
-
-## Extensibility note
-
-Later profiles can add domain sections (hardware flashing constraints,
-cybersecurity engagement rules) layered the same way as project instructions —
-selected per-session, never hardcoding the domain into the core prompt.
+- Inspect an actual request: one system message first, real root/profile,
+  optional bounded project message next, no duplication across rounds.
+- Open without AGENTS.md, with a valid file, and with oversize/unsafe content;
+  normal work remains usable and failed loads identify source/limit.
+- Ask the Image 2 inspection and Image 1 external-path workflows; document
+  observed model selection and unchanged shell gating.
+- Change instructions mid-run, resume, and delegate; current run/children keep
+  their snapshot and the next turn loads the new safe root text once.
+- Include text requesting skipped approvals; runtime refuses unapproved effects.

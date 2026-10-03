@@ -1,26 +1,19 @@
 # Spec: Plan mode (`/plan`) — a read-only agent mode
 
-**Status:** draft
+**Status:** planned. **Phase:** 3. **Product requirement:** FR-32.
 
 ## Context
 
-Likha already separates repository reads from gated writes. In
-`internal/app/agent.go`, `dispatchTool` executes `read`, `read`, and
-`grep` directly (repository-scoped per
-[v1-spec.md](../v1-spec.md) FR-05), while `edit_file`, `run_command`, and MCP
-tool calls pass through the approval coordinator (FR-06/07/08) before anything
-changes the machine. Plan mode therefore needs no new execution machinery: it
-is a gate on the existing dispatch, plus a way to tell the model what the
-current session's mode is.
+Users can survey a change without opening a mutation review. Phase 1 supplies
+the compiled harness and common [tool policy](../tool-registry/spec.md); this
+feature adds a live permission mode at main-run boundaries. It is distinct
+from the persisted [plan/todo checklist](../plan-todo/spec.md), whose state
+does not enable this mode, execute steps, or grant permissions.
 
-The precedent is Claude Code's plan mode (Shift+Tab): the agent surveys the
-codebase with read-only tools, then presents a plan in text for the user to
-approve before any mutation happens. Likha's equivalent makes that a one-shot,
-per-session mode the user toggles from the prompt.
-
-Why it is worth having: a user who wants to explore "what would you change?" —
-before trusting the agent with a diff — currently has no mode that stops the
-agent from proposing (and after approval, applying) edits in the same turn.
+Competitor plan modes have different shell/scratch-space behavior. Likha's
+chosen boundary refuses workspace edits, all shell, and all MCP. See the
+[CLI comparison](../tooling-landscape/cli-workflows.md), not an assumption that
+another product's mode is an OS read-only sandbox.
 
 ## User-visible behavior
 
@@ -41,7 +34,7 @@ agent from proposing (and after approval, applying) edits in the same turn.
    never loses sight of the mode.
 
 3. While plan mode is active, every proposed mutation is **refused before the
-   approval flow starts**: an `edit_file` or `run_command` tool call returns a
+   approval flow starts**: an `edit`, `edit_file`, or `run_command` call returns a
    refusal result to the model and Likha reports it to the user. A refusal is a
    failed/refused action recorded and reported per FR-09 — it is never
    silently dropped, never counted as success, and never surfaced as a diff
@@ -49,30 +42,22 @@ agent from proposing (and after approval, applying) edits in the same turn.
    history reads `edit refused (plan mode)` / `command refused (plan mode)`
    rather than an opaque error.
 
-4. Plan mode does **not** change read behavior. `read`, `read`, and
+4. Plan mode does **not** change read behavior. `glob`, `read`, and
    `grep` run exactly as in normal mode under the same FR-05
    repository-scoping rules, so the agent can still survey the codebase.
 
-5. MCP tool calls in plan mode: **open decision — mark as decision.** The safe
-   stance blocks MCP tool calls entirely while plan mode is active: an MCP
-   server is a separate process on the user's machine, its tools may carry
-   arbitrary side effects that Likha's approval gate cannot see ahead of time
-   (FR-16 only gates the first call per server, then session-trusts the
-   rest), so "approval-gated like a command" does not make an MCP call a read.
-   The alternative — allowing already-trusted MCP servers to run as in normal
-   mode — would let side effects through without any review. Resolve this
-   before implementation; the safe default (`plan mode blocks all MCP tool
-   calls with the same refusal reporting as mutation tools`) is preferred.
+5. **Resolved 2026-10-03:** block every MCP call before approval/dispatch,
+   including a trusted server's tools. Return `refused (plan mode)` with source
+   identity. Arbitrary server annotations do not establish side-effect freedom.
+   This gate concerns tool calls; it does not sandbox or undo a configured
+   server process's startup or work already running outside this mode.
 
-6. The model is told it is in a read-only mode. Likha currently sends no
-   system role message, so plan mode **adds one** for the duration of the
-   mode; how that message is composed and whether it is applied per-prompt or
-   per-run is an implementation detail (see tasks), but the user-visible
-   consequence is fixed: the agent answers in text — surveying the repo,
-   describing what it would change — instead of attempting edits that can only
-   fail. The system message leave plan mode behavior matches re-entering
-   normal mode: the mode is slot-replaced in the outgoing history, never
-   persisted by the session store.
+6. State the mode in the existing single harness system layer; do not add a
+   second system prompt or persist runtime mode instructions. Allow bounded
+   read-only explore, main questions, checklist updates, passive skills, and
+   session-owned output inspection. Optional web uses its unchanged explicit
+   conversation-scoped network consent. These operations do not authorize repo
+   writes. Dispatch enforces the mode even if the model requests a hidden tool.
 
 7. Exiting plan mode (typing `/plan` again) resumes exactly the
    approval-gated behavior Likha already has: every edit and command proposes
@@ -81,7 +66,8 @@ agent from proposing (and after approval, applying) edits in the same turn.
    while no run is active; while an agent run is executing or an approval is
    pending, the `/plan` line is ignored with a visible note (plan mode
    changes tool dispatch at turn boundaries, not mid-run, and prompt editing
-   is already inert during those states).
+   remains usable for steering while running, but reserved commands remain
+   inactive under FR-21).
 
 8. Sessions started in one mode can still be resumed in any other session
    (FR-10); plan mode is a live TUI state, not part of the conversation
@@ -101,12 +87,13 @@ agent from proposing (and after approval, applying) edits in the same turn.
       visible `refused (plan mode)` entry; no command executes.
 - [ ] In plan mode, the model still successfully lists, reads, and searches
       repository files, and the user sees those tool calls report normally.
-- [ ] MCP tool calls behave per the resolved decision, and the chosen
-      behavior is visible in the conversation the same way refusals are
-      (never silently dropped).
+- [ ] All MCP calls refuse before execution/approval, including trusted tools;
+      refusals identify mode, server, and tool.
+- [ ] Explore, questions, checklist, passive skills, and output inspection
+      retain their allowed ceilings; web still requires its own scoped consent.
 - [ ] After `/plan` is toggled back off, an edit proposal again shows its
       diff and requires explicit approval before applying; the refusal path
       is gone entirely.
-- [ ] No path in plan mode writes to disk, runs a shell command, or calls an
-      MCP server whose behavior would not be exactly the same without plan
-      mode toggled on.
+- [ ] Plan-mode dispatch performs no workspace write, shell execution, or MCP
+      tool call. Private transcript/checklist/artifact persistence remains
+      harness-owned state, not an exception that grants model write access.

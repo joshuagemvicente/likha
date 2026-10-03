@@ -1,6 +1,13 @@
 # Feature: Agent tool loop (harness steering + round-cap auto-continue)
 
-**Status:** planned.
+**Status:** implemented (local). Existing request/history/approval checks pass;
+32/64-round and live-provider walkthroughs remain unverified.
+See [implementation evidence](../tooling-platform/implementation.md).
+
+**Phase:** 1. Main-run behavior only. The approved implementation constraint
+is existing checks plus recorded walkthrough evidence, with no new automated
+tests or code-review pass. Child explore has separate terminal budgets under
+[explore-agents](../explore-agents/spec.md); main continuation does not reset them.
 
 ## Purpose and scope
 
@@ -36,9 +43,10 @@ harness prompt and `AGENTS.md` loader remain that spec's scope.
 
 ## User-visible behavior
 
-1. **Read-only searches never show the shell-review dialog.** When the user
-   asks to find or search something, the agent uses `grep`/`glob`/`read` —
-   never `run_command` — for repository inspection. Concretely: Likha sends
+1. **Repository inspection has an approval-free dedicated-tool path.** When
+   the user asks to find/search/read, the harness directs `grep`/`glob`/`read`.
+   A model-requested shell still prompts; steering is not deterministic runtime
+   enforcement of tool choice. Concretely: Likha sends
    a harness system message with every request whose tool contract states
    that the built-in read-only tools are the default for repository
    inspection and that `run_command` is reserved for actions only the
@@ -78,13 +86,13 @@ harness prompt and `AGENTS.md` loader remain that spec's scope.
   the model with the system message and, when the model requests
   `run_command` for inspection anyway, the existing approval flow still
   gates it (no behavior change possible from prompt content alone).
-- AC-3: Driving `RunTurn` with a fake model that requests one tool call
-  every round runs past round 32, emits a checkpoint notice event, keeps
-  executing tools, and completes with a `done` event rather than the
-  previous error.
-- AC-4: A second checkpoint (round 64) emits a second notice and the turn
-  still completes; cancellation at any round stops the turn with today's
-  cancellation semantics and no executed-but-unreported tool.
+- AC-3: An exercised main run past round 32 emits a visible checkpoint notice,
+  keeps executing authorized tools, and can complete rather than producing
+  the former round-cap error. Record evidence or leave this case unverified;
+  this milestone does not require creation of a new fake-model test.
+- AC-4: The same applies at round 64; cancellation stops subsequent actions
+  with no executed-but-unreported tool. Child round exhaustion remains a
+  limited task outcome rather than an unlimited child continuation.
 - AC-5: The full suite (`go test ./...`) is green; the previous
   "exceeded 32 consecutive tool rounds" error no longer appears as a
   terminal turn outcome in tests.

@@ -9,14 +9,15 @@ Observable outcomes, mirrors v1-spec FR-19/FR-20 wording.
 - [ ] The steering text directs the model to the built-in read-only tools
       and states that `run_command` requires explicit user approval and
       is not sandboxed — the approval contract is restated, never
-      weakened (AC-2, task 4 review).
+      weakened (AC-2).
 - [ ] A turn crossing the tool-round checkpoint shows a visible notice
       entry and keeps executing tools; the turn can still end `done`
       after round 32, and the previous terminal error does not occur
       (FR-20, AC-3).
 - [ ] Each later checkpoint emits another notice naming the round count;
       the turn remains cancellable at every round with today's
-      cancellation guarantees (AC-4).
+       cancellation guarantees (AC-4).
+- [ ] Child explore budgets remain terminal and cannot reset at main checkpoints.
 - [ ] `edit_file`, `run_command`, and first-use MCP tools still round-trip
       through their normal approval dialogs unchanged (FR-06/07/08/16
       unchanged).
