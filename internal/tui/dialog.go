@@ -8,6 +8,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"likha/internal/model"
+	"likha/internal/session"
 	likhaui "likha/internal/ui"
 )
 
@@ -149,7 +150,7 @@ func (m *ui) openDialog(kind dialogKind) tea.Cmd {
 }
 
 // commandHelp is the text /help prints and unknown-command errors point to.
-const commandHelp = "Commands: /compact [focus] summarize the conversation into a compact brief; /sessions [n] list or resume a saved session; /models list models from every configured provider; /providers manage a provider's stored key (auth); switching happens through /models; /quit exit; /help this list. Selections open a dialog: ↑/↓ navigate, type to filter, Enter apply, Esc cancel. Unknown /commands are not sent to the model; // sends a literal slash."
+const commandHelp = "Commands: /compact [focus] summarize the conversation into a compact brief; /sessions [n] list or resume a saved session; /tools inspect tool availability, source, and permissions; /tools clear-output explicitly clear this session's retained output; /models list models from every configured provider; /providers manage a provider's stored key (auth); switching happens through /models; /plan toggle read-only plan mode (edits, commands, and MCP calls refuse without approval flow); /agents inspect the explore profile, task tree, and child transcripts; /todo show the persisted plan checklist; /skills list the discovered global skill catalog; /skill <name> [request] load one skill and start a turn; /quit exit; /help this list. Ctrl+O inspects tool results without losing your draft. Selections open a dialog: ↑/↓ navigate, type to filter, Enter apply, Esc cancel. Unknown /commands are not sent to the model; // sends a literal slash."
 
 // handleCommand dispatches a leading-slash input. Reserved commands act on
 // the application and never reach the model; unknown commands restore the
@@ -174,6 +175,70 @@ func (m *ui) handleCommand(line string) tea.Cmd {
 	case "help":
 		m.entries = append(m.entries, entry{role: "Likha", content: commandHelp})
 		return nil
+	case "tools":
+		return m.handleToolsCommand(arg)
+	case "agents":
+		if arg != "" {
+			m.entries = append(m.entries, entry{role: "Error", content: "Use /agents to inspect explore tasks; user-authored profiles are not supported."})
+			return nil
+		}
+		return m.openAgentInspection()
+	case "plan":
+		if arg != "" {
+			m.entries = append(m.entries, entry{role: "Error", content: "The /plan command takes no arguments; it toggles read-only plan mode."})
+			return nil
+		}
+		if m.working || m.pending != nil {
+			// Reserved commands stay inactive during a run or pending review;
+			// the mode changes at turn boundaries only, with a visible note.
+			m.entries = append(m.entries, entry{role: "Likha", content: "Plan mode cannot change while a run is active or a review is pending."})
+			return nil
+		}
+		m.planMode = !m.planMode
+		if m.planMode {
+			m.entries = append(m.entries, entry{role: "Likha", content: "Plan mode enabled: workspace edits, shell commands, and MCP calls refuse without an approval flow until you toggle /plan off."})
+		} else {
+			m.entries = append(m.entries, entry{role: "Likha", content: "Plan mode disabled: edits and commands propose for approval again as usual."})
+		}
+		return nil
+	case "todo":
+		if arg != "" {
+			m.entries = append(m.entries, entry{role: "Error", content: "The /todo command takes no arguments; it shows the persisted checklist."})
+			return nil
+		}
+		m.entries = append(m.entries, entry{role: "Likha", content: m.planSummaryView()})
+		return nil
+	case "skills":
+		if arg != "" {
+			m.entries = append(m.entries, entry{role: "Error", content: "The /skills command takes no arguments; use /skill <name> [request] to load one."})
+			return nil
+		}
+		m.entries = append(m.entries, entry{role: "Likha", content: m.describeSkills()})
+		return nil
+	case "skill":
+		parts := strings.SplitN(arg, " ", 2)
+		name := strings.TrimSpace(parts[0])
+		if m.client == nil {
+			m.entries = append(m.entries, entry{role: "Error", content: "No provider configured; complete first-run setup first."})
+			return nil
+		}
+		if name == "" {
+			m.entries = append(m.entries, entry{role: "Error", content: "Usage: /skill <name> [request]. /skills lists the discovered catalog."})
+			return nil
+		}
+		body, origin, err := m.loadUserSkill(name)
+		if err != nil {
+			m.entries = append(m.entries, entry{role: "Error", content: "Skill load refused: " + err.Error() + " Nothing was sent to the provider."})
+			return nil
+		}
+		provenance := "Loaded skill '" + name + "' (origin " + origin + "): instruction text reaches the configured provider; runtime policy stays authoritative even if the text demands otherwise."
+		m.entries = append(m.entries, entry{role: "Likha", content: provenance})
+		request := ""
+		if len(parts) > 1 {
+			request = strings.TrimSpace(parts[1])
+		}
+		prompt := "Follow the loaded skill '" + name + "' instructions for this request.\n\nSkill instruction text (user-managed, sent to the provider; untrusted relative to runtime policy):\n\n" + body + "\n\nRequest:\n" + request
+		return m.startTurn(prompt, nil)
 	case "compact":
 		// One model call replaces the summarized past. Refusals are visible
 		// entries and never reach the network; nothing changes on failure.
@@ -250,6 +315,19 @@ func (m *ui) resumeSession(id string) tea.Cmd {
 		return nil
 	}
 	m.snapshot = snapshot
+	m.restoreTaskRecords()
+	snapshot = m.snapshot
+	m.taskRuntime = nil
+	m.resetAgentInspection()
+	m.closeAsk()
+	m.closeConsent()
+	m.planMode = false // a resumed session never inherits a live mode
+	m.webGrants = nil
+	m.refreshProfileCatalog()
+	m.restorePlan()
+	m.toolRecords = append([]session.ToolRecord(nil), snapshot.ToolRecords...)
+	m.toolInspector = toolInspectionState{}
+	m.toolCatalogGen++
 	m.history = snapshot.History
 	m.recalculateContext(m.history)
 	m.freshSession = false // a resumed session never re-generates its name
@@ -257,6 +335,9 @@ func (m *ui) resumeSession(id string) tea.Cmd {
 	for _, saved := range snapshot.Entries {
 		m.entries = append(m.entries, entry{role: saved.Role, content: saved.Content})
 	}
+	m.openOutputStore()
+	m.reportInterruptedTasks()
+	m.reportUnansweredQuestions()
 	m.refreshStatusSessionTitle()
 	m.streamBuf.Reset()
 	m.streaming = -1

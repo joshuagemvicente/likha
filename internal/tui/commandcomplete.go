@@ -15,14 +15,20 @@ type commandItem struct {
 // mirrors them so entering "@/…" style tokens is not needed: "/" itself is
 // enough. Descriptions restate commandHelp in one line each.
 var commands = []commandItem{
+	{"agents", "inspect the explore profile, task tree, transcripts, and branch cancellation"},
 	{"compact", "summarize the conversation so far into a compact brief, /compact [focus] steers it"},
 	{"help", "list the reserved commands"},
 	{"mcp", "show the connected MCP servers or how to configure them"},
 	{"models", "switch the model for this session"},
+	{"plan", "toggle read-only plan mode: edits, commands, and MCP calls refuse without approval flow"},
 	{"providers", "manage a provider's stored key (auth); switching happens through /models"},
 	{"quit", "exit"},
 	{"sessions", "list or resume a saved session"},
+	{"skill", "load a discovered global Markdown skill on demand: /skill <name> [request]"},
+	{"skills", "list the discovered global skill catalog"},
 	{"themes", "list or apply a color theme"},
+	{"tools", "inspect available tools, source, permissions, and output storage"},
+	{"todo", "show the persisted plan/todo checklist and its progress"},
 }
 
 // commandQuery reports whether the draft is inside a slash-command token:
@@ -47,9 +53,6 @@ func commandMatches(query string) []commandItem {
 	for _, c := range commands {
 		if strings.Contains(strings.ToLower(c.Name), q) {
 			out = append(out, c)
-			if len(out) >= 8 {
-				break
-			}
 		}
 	}
 	return out
@@ -165,10 +168,11 @@ func (m *ui) commandLines() []string {
 		return nil
 	}
 	visible := min(8, len(m.commandPopup.matches), available)
+	start := max(0, m.commandPopup.cursor-visible+1)
 	rows := make([]string, 0, visible+1)
-	for i, c := range m.commandPopup.matches[:visible] {
+	for i, c := range m.commandPopup.matches[start : start+visible] {
 		row := "/" + c.Name + " — " + c.Description
-		if i == m.commandPopup.cursor {
+		if start+i == m.commandPopup.cursor {
 			rows = append(rows, withBase(m.theme.Selected, m.theme.Base).Render(fit("> "+row, m.width)))
 		} else {
 			rows = append(rows, withBase(m.theme.Help, m.theme.Base).Render(fit("  "+row, m.width)))

@@ -97,7 +97,7 @@ func (m *ui) rebuild() {
 			}
 		}
 		first := false
-		for _, e := range m.entries {
+		for index, e := range m.entries {
 			if e.role == "Logo" {
 				// Startup block: raw pre-formatted logo lines, never
 				// re-wrapped. The block is fixed-width ASCII, but a line wider
@@ -167,7 +167,14 @@ func (m *ui) rebuild() {
 			// boundary: widths pre- and post-swatch are identical because the
 			// decoration is visual only — no text is added, removed, or
 			// reordered, only SGR spans wrap existing cells.
-			addSwatches(wrap(e.role+": "+e.content, width), style)
+			content := e.content
+			if e.role == "Tool" {
+				content = m.toolEntryContent(index, content)
+				if m.toolEntryFocused(index) {
+					style = withBase(m.theme.Selected, m.theme.BgTool)
+				}
+			}
+			addSwatches(wrap(e.role+": "+content, width), style)
 		}
 		m.layoutWidth = m.width
 	}
@@ -186,8 +193,20 @@ func (m *ui) View() string {
 	if m.keyModal.open {
 		return m.keyModalView()
 	}
+	if m.consentVisible() {
+		return m.consentView()
+	}
+	if m.askVisible() {
+		return m.askView()
+	}
 	if m.dialog.open {
 		return m.dialogView()
+	}
+	if m.agentInspectionVisible() {
+		return m.agentInspectionView()
+	}
+	if m.toolInspectionVisible() {
+		return m.toolInspectionView()
 	}
 	return m.mainView()
 }

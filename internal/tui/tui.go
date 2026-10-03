@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,10 +14,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"likha/internal/agent"
+	"likha/internal/explore"
 	"likha/internal/model"
+	"likha/internal/profiles"
 	"likha/internal/providers"
 	"likha/internal/repository"
 	"likha/internal/session"
+	"likha/internal/tooloutput"
+	"likha/internal/tools"
 	likhaui "likha/internal/ui"
 	"likha/internal/update"
 )
@@ -96,6 +101,7 @@ type ui struct {
 	activityGeneration uint64 // invalidates ticks from an earlier activity interval
 	working            bool
 	cancelling         bool
+	planMode           bool // live per-session read-only state; never persisted
 	runID              uint64
 	cancel             context.CancelFunc
 	events             chan agent.TurnEvent
@@ -134,23 +140,39 @@ type ui struct {
 	keyModal           keyState                 // /providers: provider auth overlay (key-entry modal and auth-state view)
 
 	// Session measurements and identity for the status line (spec §4).
-	contextTokens      int64     // input-context estimate or provider-reported value
-	contextSeen        bool      // context usage has a usable value
-	contextEstimated   bool      // value is approximate rather than provider-reported
-	contextWindow      int64     // selected model's resolved context limit
-	contextWindowKnown bool      // selected model's context limit is documented
-	started            time.Time // session start; drives the minutes segment
-	usagePrompt        int64     // cumulative prompt tokens across completed turns
-	usageCompletion    int64     // cumulative completion tokens across completed turns
-	lastPromptTokens   int64     // prompt tokens of the last completed turn (ctx %)
-	usageSeen          bool      // provider usage reported at least once this session
-	updateVersion      string    // newer release tag when known; empty = none
-	git                gitState  // last successful git status read; zero value (and !gitStatusOK) on failure
-	gitOK              bool      // last git status call succeeded; false hides every git segment
-	spend              float64   // accumulated session cost in US dollars
-	spendKnown         bool      // pricing seen for at least one turn (subscription rows included)
-	freshSession       bool      // started with no stored entries; gates the auto-naming run
-	nameTried          bool      // the one auto-naming attempt already launched
+	contextTokens         int64     // input-context estimate or provider-reported value
+	contextSeen           bool      // context usage has a usable value
+	contextEstimated      bool      // value is approximate rather than provider-reported
+	contextWindow         int64     // selected model's resolved context limit
+	contextWindowKnown    bool      // selected model's context limit is documented
+	started               time.Time // session start; drives the minutes segment
+	usagePrompt           int64     // cumulative prompt tokens across completed turns
+	usageCompletion       int64     // cumulative completion tokens across completed turns
+	lastPromptTokens      int64     // prompt tokens of the last completed turn (ctx %)
+	usageSeen             bool      // provider usage reported at least once this session
+	updateVersion         string    // newer release tag when known; empty = none
+	git                   gitState  // last successful git status read; zero value (and !gitStatusOK) on failure
+	gitOK                 bool      // last git status call succeeded; false hides every git segment
+	spend                 float64   // accumulated session cost in US dollars
+	spendKnown            bool      // pricing seen for at least one turn (subscription rows included)
+	freshSession          bool      // started with no stored entries; gates the auto-naming run
+	nameTried             bool      // the one auto-naming attempt already launched
+	toolCatalog           []tools.CatalogEntry
+	toolCatalogGen        uint64
+	toolInspector         toolInspectionState
+	toolRecords           []session.ToolRecord
+	outputs               *tooloutput.Store
+	agentInspector        agentInspectionState
+	taskRecords           []explore.Record
+	profileCatalog        profiles.Catalog // frozen at run boundaries/session switches; read-only in agents_profiles.go
+	reportedProfileErrors string
+	taskRuntime           *explore.Manager
+	ask                   askState
+	askSequence           uint64 // delivery identity counter under m.events broker
+	consent               consentState
+	reportedSkillErrors   string
+	webGrants             map[string]bool // conversation-scoped web consents
+	grantsMu              sync.Mutex      // serializes UI writes with tool-goroutine reads
 }
 
 // dialogMatches documents the shared selection-dialog filter: a
@@ -170,6 +192,12 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 		glyphs = likhaui.NerdGlyphs()
 	}
 	m := &ui{root: root, repo: repo, client: client, modelName: name, conn: conn, stateDir: stateDir, store: store, snapshot: snapshot, history: snapshot.History, promptHistory: newPromptHistory(restoredPromptHistory(snapshot)), following: true, caretOn: true, streaming: -1, activity: -1, status: "Connected", mode: modeMain, theme: theme, glyphs: glyphs, themeName: themeName, composerStyle: validComposerStyle(conn.ComposerStyle), statusLineOpts: conn.StatusLine, started: time.Now(), freshSession: len(snapshot.Entries) == 0}
+	m.restoreTaskRecords()
+	m.restorePlan()
+	m.refreshProfileCatalog()
+	m.reportUnansweredQuestions()
+	m.reportSkillCatalogIssue()
+	snapshot = m.snapshot
 	m.resolveContextWindow()
 	if len(m.history) > 0 {
 		m.recalculateContext(m.history)
@@ -205,9 +233,16 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 		m.status = "Not connected"
 		m.entries = append(m.entries, entry{role: "Error", content: "Startup connection check failed: " + conn.Err.Error()})
 	}
+	entryBase := len(m.entries)
 	for _, saved := range snapshot.Entries {
 		m.entries = append(m.entries, entry{role: saved.Role, content: saved.Content})
 	}
+	m.toolRecords = append([]session.ToolRecord(nil), snapshot.ToolRecords...)
+	for i := range m.toolRecords {
+		m.toolRecords[i].EntryIndex += entryBase
+	}
+	m.openOutputStore()
+	m.reportInterruptedTasks()
 	if len(snapshot.Entries) > 0 && conn.Err == nil {
 		m.status = "Resumed session"
 	}
@@ -296,6 +331,7 @@ func (m *ui) hideActivity() {
 	}
 	if idx >= 0 {
 		m.entries = append(m.entries[:idx], m.entries[idx+1:]...)
+		m.adjustToolRecordsAfterRemoval(idx)
 		if m.streaming > idx {
 			m.streaming--
 		}
@@ -351,18 +387,21 @@ func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
 	m.events = make(chan agent.TurnEvent, 64)
 	m.abandon = make(chan struct{})
 	m.runID++
+	m.taskRuntime = nil
+	m.resetAgentInspection()
 	runID := m.runID
 	events := m.events
 	abandon := m.abandon
 	client, repo, root, mcp := m.client, m.repo, m.root, m.conn.Mcp
+	options := m.toolRunOptions(m.runID)
 	go func() {
 		defer close(events)
-		agent.RunTurn(ctx, client, repo, root, prior, prompt, mcp, steer, func(ev agent.TurnEvent) {
+		agent.RunTurnWithOptions(ctx, client, repo, root, prior, prompt, mcp, steer, options, func(ev agent.TurnEvent) {
 			ev.RunID = runID
 			// Steer deliveries join terminal events in the non-droppable
 			// path: the engine has already appended the message to its
 			// history, so the UI must account for it before the run ends.
-			if ev.Kind == "done" || ev.Kind == "error" || ev.Kind == "tool_result" || ev.Kind == "steer" {
+			if ev.Kind == "done" || ev.Kind == "error" || ev.Kind == "tool_result" || ev.Kind == "steer" || ev.Kind == "notice" || ev.Kind == "task" || ev.Kind == "task_runtime" || ev.Kind == "tool_checkpoint" {
 				select {
 				case events <- ev:
 				case <-abandon:
@@ -406,11 +445,14 @@ func (m *ui) sendHeldQueue() tea.Cmd {
 		return nil
 	}
 	kept := m.entries[:0]
-	for _, e := range m.entries {
+	indices := make(map[int]int)
+	for index, e := range m.entries {
 		if e.role != "Queued" {
+			indices[index] = len(kept)
 			kept = append(kept, e)
 		}
 	}
+	m.remapToolRecords(indices)
 	m.entries = kept
 	head, rest := m.queue[0], m.queue[1:]
 	m.queue = nil
@@ -646,11 +688,62 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateVersion = v.version
 		}
 		return m, nil
+	case toolsCatalogMsg:
+		if v.generation != m.toolCatalogGen || v.sessionID != m.snapshot.ID || v.runID != m.runID || m.working || m.mode != modeMain || m.pending != nil || m.dialog.open || m.keyModal.open {
+			return m, nil
+		}
+		m.toolCatalog = v.entries
+		m.status = "Ready"
+		return m, m.openToolCatalog()
+	case toolInspectionOutputMsg:
+		m.handleToolInspectionOutput(v)
+		return m, nil
+	case agentDetailOutputMsg:
+		m.handleAgentDetailOutput(v)
+		return m, nil
+	case agentBranchCancelledMsg:
+		if v.sessionID != m.snapshot.ID || v.runID != m.runID || !m.working || m.cancelling {
+			return m, nil
+		}
+		if v.err != nil {
+			m.status = "Cancel branch unavailable: " + toolShortText(v.err.Error(), 160)
+		} else {
+			m.status = "Cancel requested for task " + toolShortText(v.taskID, 64)
+		}
+		return m, nil
 	case agent.TurnEvent:
 		if !m.working || v.RunID != m.runID {
 			return m, nil
 		}
 		switch v.Kind {
+		case "task_runtime":
+			m.taskRuntime = v.TaskRuntime
+		case "task":
+			if v.Task != nil {
+				m.acceptTaskRecord(*v.Task)
+			}
+		case "tool_checkpoint":
+			m.history = v.History
+			m.persist()
+		case "ask":
+			// One blocking ask_user broker waits on the reply channel; this
+			// opens the interactive question. The reply has room for one
+			// send, exactly once, and stale duplicates are dropped here.
+			m.hideActivity()
+			if v.Ask == nil {
+				return m, nil
+			}
+			ask := v.Ask
+			m.openAskQuestion(ask.Request, ask.ID, ask.CallID, func(answer tools.AskAnswer) {
+				select {
+				case ask.Reply <- answer:
+				default:
+				}
+			})
+			return m, nil
+		case "consent":
+			m.openConsent(v.Consent)
+			return m, nil
 		case "context":
 			// Each stream replaces the displayed context state. An unknown
 			// measurement intentionally clears any value from the prior turn.
@@ -687,6 +780,8 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			m.pending = v.Approval
+			m.resetToolInspection()
+			m.resetAgentInspection()
 			m.scroll = 0 // review starts at the top of the proposal screen
 			m.following = false
 			m.layoutWidth = 0
@@ -699,6 +794,17 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.streamBuf.Reset()
 			m.streaming = -1
 			m.entries = append(m.entries, entry{role: "Tool", content: v.Text})
+			if v.Kind == "tool_start" && v.ToolCall != nil && v.ToolCall.Name == "task" {
+				m.toolRecords = append(m.toolRecords, session.ToolRecord{EntryIndex: len(m.entries) - 1, CallID: v.ToolCall.ID, Name: "task", Arguments: v.ToolCall.Arguments, SourceKind: "builtin", SourceTool: "task", Status: "queued", Content: "Awaiting explore task acceptance"})
+				if profile := taskProfileFromArguments(v.ToolCall.Arguments); profile != "" {
+					if content, ok := m.taskRowContentForProfile(v.ToolCall.ID, profile); ok {
+						m.toolRecords[len(m.toolRecords)-1].Content = content
+					}
+				}
+			}
+			if v.Kind == "tool_result" && v.ToolCall != nil && v.ToolResult != nil {
+				m.recordToolResult(len(m.entries)-1, *v.ToolCall, *v.ToolResult)
+			}
 			if m.cancelling {
 				m.status = "Cancelling"
 			} else if v.Kind == "tool_start" {
@@ -717,6 +823,12 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Batch(waitEvent(m.events), m.activityTickCmd())
 				}
 			}
+		case "notice":
+			m.entries = append(m.entries, entry{role: "Likha", content: v.Text})
+			if v.History != nil {
+				m.history = v.History
+			}
+			m.persist()
 		case "steer":
 			m.hideActivity()
 			// A queued message reached the model: adopt the engine's history
@@ -748,6 +860,8 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "compacted":
 			m.hideActivity()
+			m.resetToolInspection()
+			m.resetAgentInspection()
 			// The single summarize call finished: swap the summarized turns
 			// for the brief and mark the point in the conversation.
 			m.history = v.History
@@ -770,12 +884,18 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reviewFocus = focusApprove
 			m.history = v.History
 			m.working = false
+			m.taskRuntime = nil
+			// An unanswered question dies with the run context; record the
+			// interruption once and never reopen or replay it.
+			m.askInterruptedNote()
+			m.closeConsent()
 			if m.cancel != nil {
 				m.cancel()
 			}
 			m.cancel = nil
 			if m.streaming >= 0 && v.Kind == "error" {
 				m.entries = append(m.entries[:m.streaming], m.entries[m.streaming+1:]...)
+				m.adjustToolRecordsAfterRemoval(m.streaming)
 			}
 			m.streaming = -1
 			if m.cancelling {
@@ -834,6 +954,9 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.MouseMsg:
 		if m.mode == modeSetup {
+			return m, nil
+		}
+		if m.handleAgentInspectionMouse(v) || m.handleToolInspectionMouse(v) {
 			return m, nil
 		}
 		// The scrollbar column claims clicks and drags; anywhere else, the
@@ -920,11 +1043,14 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					n := len(m.queue)
 					m.queue = nil
 					kept := m.entries[:0]
-					for _, e := range m.entries {
+					indices := make(map[int]int)
+					for index, e := range m.entries {
 						if e.role != "Queued" {
+							indices[index] = len(kept)
 							kept = append(kept, e)
 						}
 					}
+					m.remapToolRecords(indices)
 					note := "Queued messages cleared."
 					if n == 1 {
 						note = "Queued message cleared."
@@ -1000,6 +1126,19 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeSetup {
 			return m.updateSetup(v)
 		}
+		// A pending model question claims keys first: answer input must never
+		// leak into the composer or popups, and Esc/Ctrl+C still fall through
+		// to run cancellation (handleAskKey returns false for ctrl+c).
+		if handled, cmd := m.handleAskKey(v); handled {
+			m.layoutWidth = 0
+			return m, cmd
+		}
+		// Web consent likewise intercepts keys, with Esc declining only the
+		// consent and Ctrl+C falling through to run cancellation.
+		if handled, cmd := m.handleConsentKey(v); handled {
+			m.layoutWidth = 0
+			return m, cmd
+		}
 		// The @ completion popup claims navigation and completion keys only
 		// while it has rows; everything else keeps editing the draft.
 		if m.mention.open {
@@ -1035,6 +1174,17 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.composerVertical.reset()
 			}
 			return updated, cmd
+		}
+		if m.pending == nil {
+			if handled, cmd := m.handleAgentInspection(v); handled {
+				return m, cmd
+			}
+			if handled, cmd := m.inspectFocusedTask(v); handled {
+				return m, cmd
+			}
+			if handled, cmd := m.handleToolInspection(v); handled {
+				return m, cmd
+			}
 		}
 		if v.String() == "ctrl+g" {
 			if !m.working && m.pending == nil {
@@ -1095,11 +1245,14 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch v.String() {
 		case "ctrl+c", "esc":
+			m.toolCatalogGen++
 			if m.working {
 				// Cancel-run stays immediate: ESC during a run never arms
 				// the newline prefix, so it carries no ambiguity.
 				m.cancel()
 				m.pending = nil
+				m.resetToolInspection()
+				m.resetAgentInspection()
 				m.reviewSeen = nil
 				m.reviewFocus = focusApprove
 				m.cancelling = true
@@ -1499,16 +1652,26 @@ func (m *ui) autoNameAfterFirstTurn(kind string) tea.Cmd {
 
 func (m *ui) persist() {
 	m.snapshot.PromptHistory = m.promptHistory.all()
+	m.snapshot.Tasks = append([]explore.Record(nil), m.taskRecords...)
 	if m.store == nil {
 		return
 	}
 	m.snapshot.History = m.history
 	m.snapshot.Entries = make([]session.Entry, 0, len(m.entries))
-	for _, current := range m.entries {
+	indices := make(map[int]int)
+	for index, current := range m.entries {
 		if current.role == "Logo" || current.role == "Queued" || current.role == "Working" {
 			continue // per-run furniture: startup art, undelivered queue rows, and ephemeral activity are never stored
 		}
+		indices[index] = len(m.snapshot.Entries)
 		m.snapshot.Entries = append(m.snapshot.Entries, session.Entry{Role: current.role, Content: current.content})
+	}
+	m.snapshot.ToolRecords = nil
+	for _, record := range m.toolRecords {
+		if index, ok := indices[record.EntryIndex]; ok {
+			record.EntryIndex = index
+			m.snapshot.ToolRecords = append(m.snapshot.ToolRecords, record)
+		}
 	}
 	if err := m.store.Save(m.snapshot); err != nil {
 		m.status = "Session save failed"

@@ -95,6 +95,12 @@ func (m *ui) statusHints(page, pages int, narrow bool) []string {
 		return []string{kind + " · " + position + " · " + controls, "Review " + position + " " + compact}
 	}
 	state := m.statusState()
+	if m.toolInspector.focused {
+		if m.working {
+			return []string{m.toolInspectionHelp() + " · Ctrl+C cancel", position + " Tab · ^O inspect · ^C cancel", "Tab · ^O inspect · ^C cancel"}
+		}
+		return []string{m.toolInspectionHelp(), position + " Tab · ^O inspect · Back unfocus", "Tab · ^O inspect · Back unfocus"}
+	}
 	if narrow {
 		if m.working {
 			queued := ""
@@ -120,7 +126,11 @@ func (m *ui) statusHints(page, pages int, narrow bool) []string {
 	if n := len(m.queue); n > 0 {
 		held = fmt.Sprintf("%d queued", n) + " · "
 	}
-	return []string{state + " · " + held + position + " · Enter send · PgUp/PgDn · Ctrl+G composer", state + " · " + position + " · PgUp/PgDn Enter ^G", position + " · PgUp/PgDn Enter", position + " · PgUp/PgDn"}
+	hints := []string{state + " · " + held + position + " · Enter send · PgUp/PgDn · Ctrl+G composer", state + " · " + position + " · PgUp/PgDn Enter ^G", position + " · PgUp/PgDn Enter", position + " · PgUp/PgDn"}
+	if len(m.toolRecords) > 0 {
+		return []string{state + " · " + held + position + " · Tab tool · Ctrl+O inspect · Enter send", position + " Tab tool · ^O inspect · Enter", position + " ^O inspect · Enter"}
+	}
+	return hints
 }
 
 // Keep control characters out of measurements and render only plain text.
@@ -315,7 +325,13 @@ func (m *ui) statusIdentity(maxWidth int, usage string) []statusSegment {
 	usage = statusField(usage, m.width)
 	ctx := m.contextSegment()
 	makeParts := func(p, name string) []statusSegment {
-		parts := []statusSegment{{p, m.theme.Selected}, {name, m.theme.Normal}, ctx}
+		// Plan mode is an unmissable persistent marker on every frame: it
+		// precedes the identity so trimming the model retires before it.
+		marker := []statusSegment{}
+		if m.planMode {
+			marker = []statusSegment{{"PLAN MODE", m.theme.Selected}}
+		}
+		parts := append(marker, []statusSegment{{p, m.theme.Selected}, {name, m.theme.Normal}, ctx}...)
 		if usage != "" {
 			parts = append(parts, statusSegment{usage, m.theme.Help})
 		}
