@@ -171,10 +171,15 @@ func (m *ui) startSetupCheck(p model.Provider, key string) tea.Cmd {
 	m.setup.err, m.setup.checking = "", true
 	m.setup.models = nil
 	m.setup.contextWindows = nil
+	observe := m.conn.ModelMetadataObserver
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		start := time.Now()
 		details, err := model.ListModelsWithDetails(ctx, p.BaseURL, key)
+		if observe != nil {
+			observe(p.Name, "first-run setup /models", time.Since(start), details, err)
+		}
 		ids := make([]string, 0, len(details))
 		windows := make(map[string]int64)
 		for _, detail := range details {
@@ -278,6 +283,7 @@ func (m *ui) finishSetup(modelID string) tea.Cmd {
 		Provider: p.DisplayName, ProviderCanonical: p.Name, Verified: true,
 		Theme: m.themeName, Nerd: m.conn.Nerd, ComposerStyle: m.composerStyle,
 		ContextWindows: m.setup.contextWindows, ContextWindowOverrides: m.conn.ContextWindowOverrides,
+		ModelMetadataObserver: m.conn.ModelMetadataObserver,
 	}
 	m.resolveContextWindow()
 	m.setup.stage = setupTheme

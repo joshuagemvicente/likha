@@ -74,6 +74,13 @@ Code and docs this feature touches.
 - Groq, xAI, Together AI, Mistral AI, and Cerebras are wired as pending-probe providers;
   no credentialed compatibility probes have been run for them. Documentation evidence
   establishes route intent only, not acceptance.
+- Anthropic Claude (`claude`) is wired as a pending-probe provider against the OpenAI SDK
+  compatibility layer (`https://api.anthropic.com/v1`, Bearer key, slot
+  `LIKHA_CLAUDE_API_KEY`, blank default). Route checks on 2026-10-04 without a valid
+  key: unauthenticated `GET /v1/models` → `x-api-key header is required`; invalid Bearer
+  key → `invalid x-api-key`. No credentialed probe has run: the first gate (valid-key
+  Bearer `GET /v1/models` decoding `data[].id`) and the full admission probe remain
+  outstanding. https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk
 - Top agent TUIs defer failures to prompt time and validate on first use rather than
   preflight; Likha's startup + pre-run checks are deliberately stricter.
   https://opencode.ai/docs/troubleshooting/

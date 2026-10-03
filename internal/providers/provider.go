@@ -4,10 +4,16 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"likha/internal/mcp"
 	"likha/internal/model"
 )
+
+// ModelMetadataObserver receives sanitized summaries of model-list metadata
+// when model diagnostics are enabled. It never receives credentials or prompt
+// content.
+type ModelMetadataObserver func(provider, operation string, elapsed time.Duration, details []model.ModelDetails, err error)
 
 // connection is the provider identity and startup health the UI displays.
 type Connection struct {
@@ -21,6 +27,7 @@ type Connection struct {
 	StatusLine             StoredStatusLineConfig      // optional status segments loaded from config.json
 	ContextWindows         map[string]int64            // positive provider-reported windows for the active provider
 	ContextWindowOverrides map[string]map[string]int64 // user overrides by canonical provider and model ID
+	ModelMetadataObserver  ModelMetadataObserver       // optional opt-in diagnostics for model-list metadata
 	Nerd                   bool                        // user opted into Nerd Font markers
 	Mcp                    *mcp.McpManager
 }

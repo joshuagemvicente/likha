@@ -90,9 +90,10 @@ var observeModelsFetch func(provider string, elapsed time.Duration, err error)
 // modelsTarget is one fetch unit: the provider plus the key to list with.
 // oauth targets skip the network and contribute the curated list.
 type modelsTarget struct {
-	provider model.Provider
-	key      string
-	oauth    bool
+	provider         model.Provider
+	key              string
+	oauth            bool
+	metadataObserver providers.ModelMetadataObserver
 }
 
 // fetchModelsTarget lists one target: oauth targets contribute the curated
@@ -101,6 +102,9 @@ type modelsTarget struct {
 // observeModelsFetch.
 func fetchModelsTarget(tg modelsTarget) ([]string, map[string]int64, error) {
 	if tg.oauth {
+		if tg.metadataObserver != nil {
+			tg.metadataObserver(tg.provider.Name, "models dialog (curated OAuth list; no /models endpoint)", 0, nil, nil)
+		}
 		return model.ChatGPTModels, nil, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -109,8 +113,12 @@ func fetchModelsTarget(tg modelsTarget) ([]string, map[string]int64, error) {
 	ctx = context.WithValue(ctx, modelDetailsContextKey{}, sink)
 	start := time.Now()
 	ids, err := listModelsFunc(ctx, tg.provider.BaseURL, tg.key)
+	elapsed := time.Since(start)
+	if tg.metadataObserver != nil {
+		tg.metadataObserver(tg.provider.Name, "models dialog /models", elapsed, sink.details, err)
+	}
 	if observeModelsFetch != nil {
-		observeModelsFetch(tg.provider.Name, time.Since(start), err)
+		observeModelsFetch(tg.provider.Name, elapsed, err)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -253,6 +261,9 @@ func (m *ui) startModelsFetch() tea.Cmd {
 	}
 	stateDir, canonical, display := m.stateDir, m.conn.ProviderCanonical, m.conn.Provider
 	targets := buildModelsTargets(stateDir, activeBase, canonical, activeKey, display)
+	for i := range targets {
+		targets[i].metadataObserver = m.conn.ModelMetadataObserver
+	}
 	m.modelsArrived = map[string]modelsSection{}
 	m.modelsTargetOrder = m.modelsTargetOrder[:0]
 	for _, tg := range targets {

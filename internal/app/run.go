@@ -53,6 +53,8 @@ Options:
   --resume ID       Resume a saved session for the selected repository.
   --device-login    Sign in to the selected OAuth provider (e.g. chatgpt)
                     headlessly and store the login; no TUI or repository needed.
+  --debug-models    Log model IDs and context metadata to
+                    model-metadata.log (also LIKHA_DEBUG_MODELS=1).
   --version         Print the build version and exit.
   --help            Print this help and exit.
 
@@ -62,9 +64,9 @@ ChatGPT signs in through your browser at first run instead of using an API
 key; the login is stored for later runs.
 
 Environment: LIKHA_MODEL, LIKHA_ENDPOINT, LIKHA_PROVIDER, LIKHA_API_KEY,
-LIKHA_STATE_DIR (private storage directory; default is the OS user
-configuration directory's "likha" child). Each provider also accepts its own
-LIKHA_<NAME>_API_KEY (see the provider list above).
+LIKHA_DEBUG_MODELS, LIKHA_STATE_DIR (private storage directory; default is the
+OS user configuration directory's "likha" child). Each provider also accepts
+its own LIKHA_<NAME>_API_KEY (see the provider list above).
 
 Examples:
   likha ~/projects/app                                        # first-run setup
@@ -93,12 +95,20 @@ var listModelDetailsFunc = model.ListModelsWithDetails
 // A missing, invalid, or unavailable value is unknown; callers can still use
 // the stored override or documented catalog. This never sends a prompt.
 func discoverContextWindow(modelID, endpoint, apiKey string) map[string]int64 {
+	return discoverContextWindowWithObserver(modelID, endpoint, apiKey, "", nil)
+}
+
+func discoverContextWindowWithObserver(modelID, endpoint, apiKey, provider string, observe providers.ModelMetadataObserver) map[string]int64 {
 	if strings.TrimSpace(modelID) == "" || strings.TrimSpace(endpoint) == "" {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), contextWindowMetadataTimeout)
 	defer cancel()
+	start := time.Now()
 	details, err := listModelDetailsFunc(ctx, endpoint, apiKey)
+	if observe != nil {
+		observe(provider, "startup /models", time.Since(start), details, err)
+	}
 	if err != nil {
 		return nil
 	}
@@ -147,6 +157,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	resumeID := flags.String("resume", "", "resume a previous session ID")
 	themeFlag := flags.String("theme", os.Getenv("LIKHA_THEME"), "color theme (see --help list; stored in config.json when set)")
 	nerdFlag := flags.Bool("nerd-fonts", os.Getenv("LIKHA_NERD") == "1", "use Nerd Font glyphs for status markers")
+	debugModels := flags.Bool("debug-models", os.Getenv("LIKHA_DEBUG_MODELS") == "1", "log connected model metadata to the private state directory")
 	showVersion := flags.Bool("version", false, "print the build version")
 	deviceLogin := flags.Bool("device-login", false, "sign in to the selected OAuth provider headlessly and store the login")
 	if err := flags.Parse(args); err != nil {
@@ -316,6 +327,18 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "likha: interactive terminal required")
 		return 2
 	}
+	var metadataLog *modelMetadataLog
+	var metadataObserver providers.ModelMetadataObserver
+	if *debugModels {
+		metadataLog, err = openModelMetadataLog(stateDir)
+		if err != nil {
+			fmt.Fprintf(stderr, "likha: model metadata diagnostics unavailable: %v\n", err)
+		} else {
+			defer metadataLog.close()
+			metadataObserver = metadataLog.observer()
+			fmt.Fprintf(stderr, "likha: model metadata debug log: %s\n", metadataLog.path)
+		}
+	}
 	var startupErr error
 	var contextWindows map[string]int64
 	if client != nil {
@@ -325,7 +348,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		// connection is verified interactively instead.
 		startupErr = client.EnsureConnected(context.Background())
 		if !res.OAuth {
-			contextWindows = discoverContextWindow(modelName, chosen, key)
+			providerID := selected.Name
+			if providerID == "" {
+				providerID = "custom"
+			}
+			contextWindows = discoverContextWindowWithObserver(modelName, chosen, key, providerID, metadataObserver)
 		}
 	}
 	var snapshot session.Snapshot
@@ -347,7 +374,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	program := tea.NewProgram(tui.NewUI(root, repo, client, modelName, providers.Connection{
 		Provider: display, ProviderCanonical: selected.Name, Verified: verified, Err: startupErr,
 		Setup: setupNeeded, Theme: themeName, ComposerStyle: composerStyle, StatusLine: statusLine,
-		ContextWindows: contextWindows, ContextWindowOverrides: stored.ContextWindows,
+		ContextWindows: contextWindows, ContextWindowOverrides: stored.ContextWindows, ModelMetadataObserver: metadataObserver,
 		Nerd: *nerdFlag || os.Getenv("LIKHA_NERD") == "1", Mcp: mcpServers,
 	}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
 	if _, err := program.Run(); err != nil {

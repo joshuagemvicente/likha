@@ -40,6 +40,33 @@ func TestDiscoverContextWindowUsesConfiguredModelPositiveMetadata(t *testing.T) 
 	}
 }
 
+func TestDiscoverContextWindowReportsEveryModelToObserver(t *testing.T) {
+	wantDetails := []model.ModelDetails{
+		{ID: "selected-model", ContextWindow: 128_000, ContextWindowSource: "context_length"},
+		{ID: "other-model"},
+	}
+	withModelDetailsFunc(t, func(context.Context, string, string) ([]model.ModelDetails, error) {
+		return wantDetails, nil
+	})
+
+	var observed bool
+	got := discoverContextWindowWithObserver("selected-model", "https://provider.example/v1", "key", "openrouter", func(provider, operation string, elapsed time.Duration, details []model.ModelDetails, err error) {
+		observed = true
+		if provider != "openrouter" || operation != "startup /models" || elapsed < 0 || err != nil {
+			t.Fatalf("observer event = (%q, %q, %s, %v), want successful startup model metadata", provider, operation, elapsed, err)
+		}
+		if !reflect.DeepEqual(details, wantDetails) {
+			t.Fatalf("observed models = %#v, want %#v", details, wantDetails)
+		}
+	})
+	if !observed {
+		t.Fatal("model metadata observer was not called")
+	}
+	if got["selected-model"] != 128_000 {
+		t.Fatalf("context windows = %#v, want selected-model:128000", got)
+	}
+}
+
 func TestDiscoverContextWindowTreatsMissingOrInvalidValuesAsUnknown(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

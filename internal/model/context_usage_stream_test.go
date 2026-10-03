@@ -183,10 +183,10 @@ func TestListModelsWithDetailsEnvelopesAndMetadata(t *testing.T) {
 			name: "data envelope",
 			body: `{"object":"list","data":[{"id":"window","context_window":65536},{"id":"length","context_length":131072},{"id":"camel","contextWindow":32768},{"id":"nested","limit":{"context":200000}},{"id":"zero","context_length":0},{"id":"negative","context_length":-1},{"id":"malformed","context_window":"large","limit":"not-an-object"}]}`,
 			want: []ModelDetails{
-				{ID: "window", ContextWindow: 65536},
-				{ID: "length", ContextWindow: 131072},
-				{ID: "camel", ContextWindow: 32768},
-				{ID: "nested", ContextWindow: 200000},
+				{ID: "window", ContextWindow: 65536, ContextWindowSource: "context_window"},
+				{ID: "length", ContextWindow: 131072, ContextWindowSource: "context_length"},
+				{ID: "camel", ContextWindow: 32768, ContextWindowSource: "contextWindow"},
+				{ID: "nested", ContextWindow: 200000, ContextWindowSource: "limit.context"},
 				{ID: "zero"},
 				{ID: "negative"},
 				{ID: "malformed"},
@@ -195,7 +195,7 @@ func TestListModelsWithDetailsEnvelopesAndMetadata(t *testing.T) {
 		{
 			name: "top-level array",
 			body: `[{"id":"local","limit":{"context":98304}},{"id":"unknown"}]`,
-			want: []ModelDetails{{ID: "local", ContextWindow: 98304}, {ID: "unknown"}},
+			want: []ModelDetails{{ID: "local", ContextWindow: 98304, ContextWindowSource: "limit.context"}, {ID: "unknown"}},
 		},
 	}
 

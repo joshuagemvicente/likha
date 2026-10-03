@@ -93,7 +93,7 @@ func TestRunHelpDoesNotRequireRepository(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Usage: likha") || stderr.Len() != 0 {
 		t.Fatalf("stdout = %q, stderr = %q", stdout.String(), stderr.String())
 	}
-	for _, expected := range []string{"--provider", "--api-key", "--model", "--endpoint", "--sessions", "--resume", "--version", "LIKHA_STATE_DIR", "Providers", "BYOK"} {
+	for _, expected := range []string{"--provider", "--api-key", "--model", "--endpoint", "--sessions", "--resume", "--debug-models", "LIKHA_DEBUG_MODELS", "--version", "LIKHA_STATE_DIR", "Providers", "BYOK"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Fatalf("help is missing %q: %q", expected, stdout.String())
 		}

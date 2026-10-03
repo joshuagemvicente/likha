@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -132,6 +134,39 @@ func TestBuildModelsTargetsActiveProviderFirstPreservesEveryTarget(t *testing.T)
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("target order = %v, want %v", got, want)
+	}
+}
+
+func TestFetchModelsTargetReportsMetadataToObserver(t *testing.T) {
+	want := []model.ModelDetails{
+		{ID: "alpha", ContextWindow: 128_000, ContextWindowSource: "context_length"},
+		{ID: "beta"},
+	}
+	previous := listModelDetailsFunc
+	listModelDetailsFunc = func(context.Context, string, string) ([]model.ModelDetails, error) {
+		return want, nil
+	}
+	t.Cleanup(func() { listModelDetailsFunc = previous })
+
+	var observed bool
+	target := modelsTarget{
+		provider: model.Provider{Name: "openrouter"},
+		metadataObserver: func(provider, operation string, elapsed time.Duration, details []model.ModelDetails, err error) {
+			observed = true
+			if provider != "openrouter" || operation != "models dialog /models" || elapsed < 0 || err != nil {
+				t.Fatalf("observer event = (%q, %q, %s, %v), want successful model-list metadata", provider, operation, elapsed, err)
+			}
+			if !reflect.DeepEqual(details, want) {
+				t.Fatalf("observed model details = %#v, want %#v", details, want)
+			}
+		},
+	}
+	ids, windows, err := fetchModelsTarget(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !observed || !reflect.DeepEqual(ids, []string{"alpha", "beta"}) || windows["alpha"] != 128_000 {
+		t.Fatalf("fetch result = (%v, %#v, observed=%t), want both models and metadata", ids, windows, observed)
 	}
 }
 
