@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"likha/internal/agent"
@@ -20,6 +21,11 @@ func (m *ui) webHooks() (
 	[]string,
 ) {
 	config, err := webtools.LoadConfig(m.stateDir)
+	state := fmt.Sprintf("%+v", config)
+	if err != nil {
+		state = "invalid: " + err.Error()
+	}
+	m.resetWebGrantsOnConfigChange(state)
 	if err != nil {
 		return nil, nil, []string{"Web tools remain disabled: " + err.Error()}
 	}

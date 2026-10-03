@@ -173,7 +173,9 @@ type ui struct {
 	consent               consentState
 	reportedSkillErrors   string
 	webGrants             map[string]bool // conversation-scoped web consents
-	grantsMu              sync.Mutex      // serializes UI writes with tool-goroutine reads
+	webConfigState        string          // last loaded web config; a change clears webGrants
+	webConfigSeen         bool
+	grantsMu              sync.Mutex // serializes UI writes with tool-goroutine reads
 }
 
 // dialogMatches documents the shared selection-dialog filter: a

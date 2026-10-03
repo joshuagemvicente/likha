@@ -164,7 +164,8 @@ func consentScopeText(req *agent.ConsentRequest) string {
 }
 
 // grantWeb records one conversation-scoped consent. Grants never leave this
-// process: session switch (m.webGrants = nil) and app exit clear them. The
+// process: session switch (m.webGrants = nil), app exit, and any web
+// configuration change (resetWebGrantsOnConfigChange) clear them. The
 // mutex serializes UI-goroutine writes against tool-goroutine reads.
 func (m *ui) grantWeb(key string) {
 	m.grantsMu.Lock()
@@ -179,4 +180,18 @@ func (m *ui) webGranted(key string) bool {
 	m.grantsMu.Lock()
 	defer m.grantsMu.Unlock()
 	return m.webGrants != nil && m.webGrants[key]
+}
+
+// resetWebGrantsOnConfigChange clears every web grant when the loaded web
+// configuration differs from the one last seen (decisions: grants clear on
+// backend configuration changes). Switching brave→tavily→brave therefore
+// asks again for brave, and fetch origins re-prompt after a toggle. The
+// first observation only records the state.
+func (m *ui) resetWebGrantsOnConfigChange(state string) {
+	m.grantsMu.Lock()
+	defer m.grantsMu.Unlock()
+	if m.webConfigSeen && m.webConfigState != state {
+		m.webGrants = nil
+	}
+	m.webConfigSeen, m.webConfigState = true, state
 }
