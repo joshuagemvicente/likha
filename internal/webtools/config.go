@@ -1,5 +1,5 @@
-// Package webtools holds configuration, consent vocabulary, and the Brave
-// search client for the optional web tools. It intentionally depends on the
+// Package webtools holds configuration, consent vocabulary, and the search
+// provider clients for the optional web tools. It intentionally depends on the
 // standard library only, so internal/tools can import it to wrap search as a
 // builtin tool without creating an import cycle.
 package webtools
@@ -20,11 +20,15 @@ import (
 const (
 	configFileName = "tools.json"
 	keyFileName    = "tool-keys.json"
-	// braveBackend is the only supported search backend in this milestone.
+	// braveBackend is the Brave search backend name; the full supported list
+	// lives in SupportedBackends (provider.go).
 	braveBackend = "brave"
 
-	// SearchKeyEnv is the environment variable that wins over tool-keys.json.
+	// SearchKeyEnv is the Brave environment variable that wins over
+	// tool-keys.json; the other key-bearing backends have their own below.
 	SearchKeyEnv = "BRAVE_SEARCH_API_KEY"
+	TavilyKeyEnv = "TAVILY_API_KEY"
+	ExaKeyEnv    = "EXA_API_KEY"
 )
 
 // Config is the nonsecret web-tool enablement loaded from
@@ -96,26 +100,46 @@ func LoadConfig(stateDir string) (Config, error) {
 	}
 	if config.Search.Backend == "" {
 		if config.Search.Enabled {
-			return config, fmt.Errorf("%s: web.search.enabled requires web.search.backend %q", configFileName, braveBackend)
+			return config, fmt.Errorf("%s: web.search.enabled requires web.search.backend (one of: %s)",
+				configFileName, strings.Join(SupportedBackends, ", "))
 		}
-	} else if config.Search.Backend != braveBackend {
-		return config, fmt.Errorf("%s: web.search.backend %q is not supported; the only supported backend is %q",
-			configFileName, config.Search.Backend, braveBackend)
+	} else if !supportedBackend(config.Search.Backend) {
+		return config, fmt.Errorf("%s: web.search.backend %q is not supported; supported backends are: %s",
+			configFileName, config.Search.Backend, strings.Join(SupportedBackends, ", "))
 	}
 	return config, nil
 }
 
-// LoadSearchKey resolves the Brave Search credential: BRAVE_SEARCH_API_KEY
-// wins over the private <stateDir>/tool-keys.json entry shaped
-// {"brave":"<key>"}. A missing source returns "" with a nil error. Never reads
-// a repository .env, never logs or returns the key itself in errors, and never
-// relaxes or chown-corrects permissions: the file must be 0600 in a 0700
-// directory, and a world/group-readable or writable location fails with an
-// error asking the user to fix it manually.
-func LoadSearchKey(stateDir string) (string, error) {
-	if key := strings.TrimSpace(os.Getenv(SearchKeyEnv)); key != "" {
+// searchKeyEnv maps each key-bearing search backend to the environment
+// variable that wins over tool-keys.json. DuckDuckGo is absent: it needs no
+// credential and LoadSearchKey returns "" for it.
+var searchKeyEnv = map[string]string{
+	braveBackend:  SearchKeyEnv,
+	tavilyBackend: TavilyKeyEnv,
+	exaBackend:    ExaKeyEnv,
+}
+
+// LoadSearchKey resolves the search credential for one backend: the backend's
+// environment variable (BRAVE_SEARCH_API_KEY, TAVILY_API_KEY, or EXA_API_KEY)
+// wins over the private <stateDir>/tool-keys.json entry keyed by the backend
+// name ("brave", "tavily", or "exa"). DuckDuckGo needs no key and returns ""
+// with a nil error, as does a missing key source for the other backends. An
+// unknown backend returns an error naming it and the supported list. Never
+// reads a repository .env, never logs or returns the key itself in errors,
+// and never relaxes or chown-corrects permissions: the file must be 0600 in a
+// 0700 directory, and a world/group-readable or writable location fails with
+// an error asking the user to fix it manually.
+func LoadSearchKey(stateDir, backend string) (string, error) {
+	if !supportedBackend(backend) {
+		return "", unsupportedBackendError(backend)
+	}
+	if backend == duckduckgoBackend {
+		return "", nil
+	}
+	envVar := searchKeyEnv[backend]
+	if key := strings.TrimSpace(os.Getenv(envVar)); key != "" {
 		if !validKey(key) {
-			return "", errors.New(SearchKeyEnv + " contains control or invalid characters")
+			return "", errors.New(envVar + " contains control or invalid characters")
 		}
 		return key, nil
 	}
@@ -137,22 +161,29 @@ func LoadSearchKey(stateDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	raw, exists := root[braveBackend]
+	raw, exists := root[backend]
 	if !exists {
 		return "", nil
 	}
 	text, ok := raw.(string)
 	if !ok {
-		return "", fmt.Errorf("%s: %q must be a JSON string", keyFileName, braveBackend)
+		return "", fmt.Errorf("%s: %q must be a JSON string", keyFileName, backend)
 	}
 	key := strings.TrimSpace(text)
 	if key == "" {
 		return "", nil
 	}
 	if !validKey(key) {
-		return "", fmt.Errorf("%s: the %q entry contains control or invalid characters", keyFileName, braveBackend)
+		return "", fmt.Errorf("%s: the %q entry contains control or invalid characters", keyFileName, backend)
 	}
 	return key, nil
+}
+
+// LoadBraveSearchKey resolves the Brave credential for callers that have not
+// yet moved to the per-backend LoadSearchKey; it is a transitional shim and
+// can be removed once no caller needs it.
+func LoadBraveSearchKey(stateDir string) (string, error) {
+	return LoadSearchKey(stateDir, braveBackend)
 }
 
 func validKey(key string) bool {

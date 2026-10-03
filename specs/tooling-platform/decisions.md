@@ -27,12 +27,12 @@ the user's agreement and updates to its acceptance guide.
 | Retained output | Five MiB per call, 50 MiB per session, private session-linked artifacts; no automatic context injection |
 | Output lifetime | Persist with session; explicit clear and session deletion remove artifacts; missing output never triggers rerun |
 | Checklist | At most 32 steps; persist with session; restored state grants no permissions/restart |
-| Web search | One explicitly configured Brave Web Search backend; no vendor/shell fallback; at most 10 results |
+| Web search | One explicitly configured search backend: `brave`, `tavily`, `exa`, or `duckduckgo` (revised 2026-10-04 by user approval — OpenCode-style pluggable providers); no vendor/shell fallback; at most 10 results |
 | Web fetch | Explicitly enabled unauthenticated public HTTPS, local text/HTML/Markdown conversion; two MiB received-body cap |
 | Web timeout | 30 seconds for network/processing after consent; pending consent remains cancellable |
 | Redirects | At most five for fetch; validate address/origin on every hop; new origin needs its own grant; search credentials never follow redirects |
-| Web grants | Active conversation, in-memory only; clear on session switch/resume, exit, or backend configuration changes |
-| Web disclosure | Search query reaches Brave; fetch reaches destination sites; selected result content reaches the configured model provider; Brave default API query records may persist up to 90 days |
+| Web grants | Active conversation, in-memory only; clear on session switch/resume, exit, or backend configuration changes; switching backends requires fresh consent |
+| Web disclosure | Search query reaches the configured backend (Brave keeps its 90-day retention disclosure; Tavily/Exa disclose flow with retention per their policies; DuckDuckGo discloses its unofficial-endpoint fragility); fetch reaches destination sites; selected result content reaches the configured model provider |
 | Existing confinement | Canonical root identity, traversal/symlink defenses, current repo/file safety caps remain unless a feature specifies a deliberate change |
 
 ## Permission distinctions

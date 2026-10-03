@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"strings"
 
 	"likha/internal/agent"
 	"likha/internal/webtools"
@@ -10,7 +11,9 @@ import (
 // webHooks resolves the optional web tools from private configuration: no
 // repo .env, no model credential reuse, no vendor fallback. Disabled tools
 // return nil so they register unavailable; invalid configuration produces a
-// visible issue entry and stays disabled for repository work.
+// visible issue entry and stays disabled for repository work. The configured
+// backend (web.search.backend) selects both the key source and the search
+// path; consent copy is per backend via webtools.BackendPrivacyCopy.
 func (m *ui) webHooks() (
 	func(context.Context, webtools.SearchRequest) (webtools.SearchOutcome, error),
 	func(context.Context, webtools.FetchRequest) (webtools.FetchOutcome, error),
@@ -24,18 +27,26 @@ func (m *ui) webHooks() (
 	var search func(context.Context, webtools.SearchRequest) (webtools.SearchOutcome, error)
 	var fetch func(context.Context, webtools.FetchRequest) (webtools.FetchOutcome, error)
 	if config.Search.Enabled {
-		key, kerr := webtools.LoadSearchKey(m.stateDir)
-		if kerr != nil {
+		backend := config.Search.Backend
+		key, kerr := webtools.LoadSearchKey(m.stateDir, backend)
+		envVar, keyed := searchKeyEnvName(backend)
+		switch {
+		case !searchBackendSupported(backend):
+			// Config validation already rejects unknown names; this is
+			// defensive so contract drift surfaces visibly instead of
+			// silently disabling the tool.
+			issues = append(issues, "Web search is enabled but the configured backend "+backend+" is not supported; supported backends are: "+strings.Join(webtools.SupportedBackends, ", ")+".")
+		case kerr != nil:
 			issues = append(issues, "Web search disabled: "+kerr.Error())
-		} else if key == "" {
-			issues = append(issues, "Web search is enabled but no Brave key is configured; set BRAVE_SEARCH_API_KEY or the private tool-keys file to use it.")
-		} else {
+		case keyed && key == "":
+			issues = append(issues, "Web search is enabled but no "+backend+" key is configured; set "+envVar+" or the private tool-keys file to use it.")
+		default:
 			search = func(ctx context.Context, req webtools.SearchRequest) (webtools.SearchOutcome, error) {
-				reqScope := &agent.ConsentRequest{Kind: "search-backend", Backend: "brave", Query: req.Query}
+				reqScope := &agent.ConsentRequest{Kind: "search-backend", Backend: backend, Query: req.Query}
 				if m.webGranted(reqScope.ScopeKey()) {
-					return webtools.Search(ctx, key, req)
+					return webtools.SearchWithBackend(ctx, backend, key, req)
 				}
-				bound := &agent.ConsentRequest{Kind: reqScope.Kind, Backend: reqScope.Backend, Query: req.Query, Privacy: searchPrivacyCopy()}
+				bound := &agent.ConsentRequest{Kind: reqScope.Kind, Backend: reqScope.Backend, Query: req.Query, Privacy: webtools.BackendPrivacyCopy(backend)}
 				allowed, err := m.requestConsent(ctx, bound)
 				if err != nil {
 					return webtools.SearchOutcome{}, err
@@ -43,7 +54,7 @@ func (m *ui) webHooks() (
 				if !allowed {
 					return webtools.SearchOutcome{}, webtools.ErrConsentDeclined
 				}
-				return webtools.Search(ctx, key, req)
+				return webtools.SearchWithBackend(ctx, backend, key, req)
 			}
 		}
 	}
@@ -55,10 +66,33 @@ func (m *ui) webHooks() (
 	return search, fetch, issues
 }
 
-func searchPrivacyCopy() string {
-	return webtools.BraveDefaultRetention +
-		". Brave receives the query and request metadata; selected results reach the configured model provider as untrusted excerpts. " +
-		"Model-written queries can contain project details — inspect the query before allowing."
+// searchBackendSupported reports whether the configured backend name is in
+// webtools.SupportedBackends. LoadConfig already rejects unknown names; this
+// keeps the wiring defensive against contract drift.
+func searchBackendSupported(backend string) bool {
+	for _, name := range webtools.SupportedBackends {
+		if name == backend {
+			return true
+		}
+	}
+	return false
+}
+
+// searchKeyEnvName names the environment variable that supplies one keyed
+// search backend's credential, for the visible missing-key issue. It mirrors
+// webtools' key sources (config.go searchKeyEnv); DuckDuckGo needs no key and
+// reports keyed=false, so an empty key proceeds without an issue.
+func searchKeyEnvName(backend string) (envVar string, keyed bool) {
+	switch backend {
+	case "brave":
+		return webtools.SearchKeyEnv, true
+	case "tavily":
+		return webtools.TavilyKeyEnv, true
+	case "exa":
+		return webtools.ExaKeyEnv, true
+	default:
+		return "", false
+	}
 }
 
 func fetchPrivacyCopy() string {

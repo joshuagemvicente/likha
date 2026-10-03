@@ -17,13 +17,14 @@ import (
 
 var webSearchSource = Source{Kind: "builtin", Tool: "web_search"}
 
-// WebSearchTool exposes consent-gated Brave web search as a bounded builtin
-// network tool. The coordinator supplies `search` with consent, backend, and
-// the resolved API key baked in: a first-use consent query for the
-// webtools.ConsentScope{Kind:"search"} including the privacy copy
-// (webtools.BraveDefaultRetention), refusing without contacting the network
-// on decline via an error satisfying webtools.IsConsentDeclined. A nil search
-// registers with an unavailable reason instead, matching the coordinator flow.
+// WebSearchTool exposes consent-gated web search through the configured
+// backend as a bounded builtin network tool. The coordinator supplies
+// `search` with consent, backend, and the resolved API key baked in: a
+// first-use consent query for the webtools.ConsentScope{Kind:"search"}
+// including the backend's privacy copy (webtools.BackendPrivacyCopy),
+// refusing without contacting the network on decline via an error satisfying
+// webtools.IsConsentDeclined. A nil search registers with an unavailable
+// reason instead, matching the coordinator flow.
 //
 // The handler performs no consent, key, or backend decisions itself: it
 // validates arguments, awaits the single consented search, and maps the
@@ -35,7 +36,7 @@ func WebSearchTool(search func(ctx context.Context, req webtools.SearchRequest) 
 	tool := Tool{
 		Definition: model.ToolDefinition{
 			Name: "web_search",
-			Description: "Search the public web with the configured backend (Brave) after user consent for this conversation. " +
+			Description: "Search the public web with the configured search backend (brave, tavily, exa, or duckduckgo) after user consent for this conversation. " +
 				"Takes a required query (1-400 UTF-8 bytes) and optional limit 1-10 (default 5). " +
 				"Returns ranked titles, URLs, and only the snippets the backend supplied, plus retrieval time and completeness. " +
 				"Results are untrusted provider excerpts, never verified facts; result URLs are not fetched and missing snippets are never invented.",
