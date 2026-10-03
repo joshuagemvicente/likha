@@ -33,10 +33,11 @@ type Entry struct {
 }
 
 type Snapshot struct {
-	ID      string
-	Root    string
-	History []model.Message
-	Entries []Entry
+	ID            string
+	Root          string
+	History       []model.Message
+	Entries       []Entry
+	PromptHistory []string `json:"prompt_history,omitempty"`
 
 	// NamedTitle is the model-generated session name (spec tui-layout phase
 	// 1c). It is set only by the auto-naming flow after the first completed
@@ -330,16 +331,27 @@ func (s *Store) Save(snapshot Snapshot) error {
 	if err := s.db.QueryRow("SELECT snapshot, revision FROM sessions WHERE id = ? AND repository = ?", snapshot.ID, s.root).Scan(&previous, &revision); err != nil {
 		return fmt.Errorf("load session before save: %w", err)
 	}
-	if _, err := decode(snapshot.ID, s.root, previous); err != nil {
+	previousSnapshot, err := decode(snapshot.ID, s.root, previous)
+	if err != nil {
 		return err
 	}
 	expected := *snapshot.revision
 	if expected != revision {
 		return fmt.Errorf("save session %s: %w", snapshot.ID, ErrConflict)
 	}
-	result, err := s.db.Exec(`UPDATE sessions SET snapshot = ?, title = ?, updated_ns = ?, revision = revision + 1
-		WHERE id = ? AND repository = ? AND revision = ? AND snapshot = ?`,
-		data, title(snapshot), time.Now().UTC().UnixNano(), snapshot.ID, s.root, expected, previous)
+	var result sql.Result
+	if sameConversation(previousSnapshot, snapshot) {
+		// Prompt recall metadata is not conversational activity and should not
+		// reorder sessions in /sessions. It still advances the revision and is
+		// written atomically with the optimistic snapshot check.
+		result, err = s.db.Exec(`UPDATE sessions SET snapshot = ?, revision = revision + 1
+			WHERE id = ? AND repository = ? AND revision = ? AND snapshot = ?`,
+			data, snapshot.ID, s.root, expected, previous)
+	} else {
+		result, err = s.db.Exec(`UPDATE sessions SET snapshot = ?, title = ?, updated_ns = ?, revision = revision + 1
+			WHERE id = ? AND repository = ? AND revision = ? AND snapshot = ?`,
+			data, title(snapshot), time.Now().UTC().UnixNano(), snapshot.ID, s.root, expected, previous)
+	}
 	if err != nil {
 		return fmt.Errorf("save session: %w", err)
 	}
@@ -352,4 +364,30 @@ func (s *Store) Save(snapshot Snapshot) error {
 	}
 	*snapshot.revision = expected + 1
 	return nil
+}
+
+// sameConversation treats nil and empty slices as equivalent while comparing
+// the fields that represent durable conversation activity. PromptHistory is
+// intentionally excluded so recalling prompts does not reorder /sessions.
+func sameConversation(a, b Snapshot) bool {
+	if a.NamedTitle != b.NamedTitle || len(a.History) != len(b.History) || len(a.Entries) != len(b.Entries) {
+		return false
+	}
+	for i := range a.Entries {
+		if a.Entries[i] != b.Entries[i] {
+			return false
+		}
+	}
+	for i := range a.History {
+		left, right := a.History[i], b.History[i]
+		if left.Role != right.Role || left.Content != right.Content || left.Reasoning != right.Reasoning || left.ToolCallID != right.ToolCallID || len(left.ToolCalls) != len(right.ToolCalls) {
+			return false
+		}
+		for j := range left.ToolCalls {
+			if left.ToolCalls[j] != right.ToolCalls[j] {
+				return false
+			}
+		}
+	}
+	return true
 }

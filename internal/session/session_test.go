@@ -405,6 +405,66 @@ func TestTitlePrefersNamedTitle(t *testing.T) {
 	}
 }
 
+func TestPromptHistorySaveLoad(t *testing.T) {
+	store, _, _ := testStore(t)
+	snapshot, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.PromptHistory = []string{"first prompt", "second prompt"}
+	if err := store.Save(snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := store.Load(snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(loaded.PromptHistory, snapshot.PromptHistory) {
+		t.Fatalf("prompt history = %#v; want %#v", loaded.PromptHistory, snapshot.PromptHistory)
+	}
+}
+
+func TestPromptHistorySaveDoesNotChangeConversationRecency(t *testing.T) {
+	store, _, _ := testStore(t)
+	snapshot, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Entries = []Entry{{Role: "user", Content: "conversation"}}
+	if err := store.Save(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot.PromptHistory = []string{"recall only"}
+	if err := store.Save(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	after, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before) != 1 || len(after) != 1 || !before[0].Updated.Equal(after[0].Updated) {
+		t.Fatalf("prompt history update changed session recency: before=%v after=%v", before, after)
+	}
+}
+
+func TestDecodeLegacySnapshotWithoutPromptHistory(t *testing.T) {
+	id := "0123456789abcdef0123456789abcdef"
+	legacy := []byte(`{"ID":"` + id + `","Root":"/repo","History":null,"Entries":null}`)
+	snapshot, err := decode(id, "/repo", legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.PromptHistory) != 0 {
+		t.Fatalf("legacy prompt history = %#v; want empty", snapshot.PromptHistory)
+	}
+}
+
 func TestListShowsGeneratedTitle(t *testing.T) {
 	store, _, _ := testStore(t)
 	snapshot, err := store.Create()

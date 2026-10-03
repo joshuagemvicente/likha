@@ -397,36 +397,37 @@ func TestConsumeCodexStreamUsage(t *testing.T) {
 		{
 			name:     "response.usage on completed",
 			terminal: `{"response":{"output":[],"usage":{"input_tokens":110,"output_tokens":25}}}`,
-			want:     TokenUsage{Prompt: 110, Completion: 25},
+			want:     TokenUsage{Prompt: 110, Completion: 25, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
 			name:     "top-level usage on completed",
 			terminal: `{"response":{"output":[]},"usage":{"input_tokens":50,"output_tokens":8}}`,
-			want:     TokenUsage{Prompt: 50, Completion: 8},
+			want:     TokenUsage{Prompt: 50, Completion: 8, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
 			name:     "top-level usage wins over response.usage",
 			terminal: `{"response":{"output":[],"usage":{"input_tokens":1,"output_tokens":1}},"usage":{"input_tokens":2,"output_tokens":2}}`,
-			want:     TokenUsage{Prompt: 2, Completion: 2},
+			want:     TokenUsage{Prompt: 2, Completion: 2, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
 			name:     "chat-completions alias naming accepted",
 			terminal: `{"response":{"output":[],"usage":{"prompt_tokens":33,"completion_tokens":44}}}`,
-			want:     TokenUsage{Prompt: 33, Completion: 44},
+			want:     TokenUsage{Prompt: 33, Completion: 44, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
 			name:     "zero totals are valid usage",
 			terminal: `{"response":{"output":[],"usage":{"input_tokens":0,"output_tokens":0}}}`,
+			want:     TokenUsage{PromptSeen: true},
 			wantSeen: true,
 		},
 		{
 			name:     "usage on incomplete terminal",
 			terminal: `{"response":{"output":[],"status":"incomplete","usage":{"input_tokens":12,"output_tokens":3}}}`,
-			want:     TokenUsage{Prompt: 12, Completion: 3},
+			want:     TokenUsage{Prompt: 12, Completion: 3, PromptSeen: true},
 			wantSeen: true,
 		},
 		{

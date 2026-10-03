@@ -82,6 +82,34 @@ flattens newlines to spaces. Esc clears an idle draft. Tool output and model
 reasoning render in the theme's muted color.
 `
 
+const contextWindowMetadataTimeout = 2 * time.Second
+
+// listModelDetailsFunc is the bounded, best-effort startup metadata seam.
+// Keeping it separate from connection checks lets tests prove startup metadata
+// failures do not affect session setup.
+var listModelDetailsFunc = model.ListModelsWithDetails
+
+// discoverContextWindow fetches reported metadata for the configured model.
+// A missing, invalid, or unavailable value is unknown; callers can still use
+// the stored override or documented catalog. This never sends a prompt.
+func discoverContextWindow(modelID, endpoint, apiKey string) map[string]int64 {
+	if strings.TrimSpace(modelID) == "" || strings.TrimSpace(endpoint) == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), contextWindowMetadataTimeout)
+	defer cancel()
+	details, err := listModelDetailsFunc(ctx, endpoint, apiKey)
+	if err != nil {
+		return nil
+	}
+	for _, detail := range details {
+		if detail.ID == modelID && detail.ContextWindow > 0 {
+			return map[string]int64{detail.ID: detail.ContextWindow}
+		}
+	}
+	return nil
+}
+
 // usageText builds the help text with the provider block generated from the
 // provider table so help cannot drift from the accepted list.
 func usageText() string {
@@ -289,12 +317,16 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	var startupErr error
+	var contextWindows map[string]int64
 	if client != nil {
 		// Startup connection check: verify the provider answers before the
 		// first prompt. A failure is reported in the interface, not fatal, so
 		// the session stays available for another attempt. In setup mode the
 		// connection is verified interactively instead.
 		startupErr = client.EnsureConnected(context.Background())
+		if !res.OAuth {
+			contextWindows = discoverContextWindow(modelName, chosen, key)
+		}
 	}
 	var snapshot session.Snapshot
 	if *resumeID != "" {
@@ -312,7 +344,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		client.SetSessionHeader(selected.SessionHeader)
 		client.SetSession(snapshot.ID)
 	}
-	program := tea.NewProgram(tui.NewUI(root, repo, client, modelName, providers.Connection{Provider: display, ProviderCanonical: selected.Name, Verified: verified, Err: startupErr, Setup: setupNeeded, Theme: themeName, ComposerStyle: composerStyle, StatusLine: statusLine, Nerd: *nerdFlag || os.Getenv("LISA_NERD") == "1", Mcp: mcpServers}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
+	program := tea.NewProgram(tui.NewUI(root, repo, client, modelName, providers.Connection{
+		Provider: display, ProviderCanonical: selected.Name, Verified: verified, Err: startupErr,
+		Setup: setupNeeded, Theme: themeName, ComposerStyle: composerStyle, StatusLine: statusLine,
+		ContextWindows: contextWindows, ContextWindowOverrides: stored.ContextWindows,
+		Nerd: *nerdFlag || os.Getenv("LISA_NERD") == "1", Mcp: mcpServers,
+	}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(stderr, "lisa: terminal: %v\n", err)
 		return 1

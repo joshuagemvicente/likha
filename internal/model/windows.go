@@ -14,6 +14,7 @@ import "strings"
 type TokenUsage struct {
 	Prompt     int64
 	Completion int64
+	PromptSeen bool // true only when the response reported an input/prompt count
 }
 
 // contextWindowEntry is one documented context-window size. prefix "" means
@@ -70,4 +71,19 @@ func ContextWindow(modelName string) (int64, bool) {
 		}
 	}
 	return 0, false
+}
+
+// ResolveContextWindow resolves a context limit for the selected provider and
+// model. A positive user override takes precedence over positive provider
+// metadata, followed by Lisa's documented model catalog. Provider-specific
+// values are supplied by the caller; the static catalog is keyed by model ID,
+// so providerID does not affect the catalog fallback.
+func ResolveContextWindow(providerID, modelID string, override, metadata int64) (int64, bool) {
+	if override > 0 {
+		return override, true
+	}
+	if metadata > 0 {
+		return metadata, true
+	}
+	return ContextWindow(modelID)
 }

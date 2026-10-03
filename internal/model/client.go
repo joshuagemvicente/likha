@@ -74,6 +74,8 @@ type Client struct {
 	tokenPrompt       int64
 	tokenCompletion   int64
 	tokenSeen         bool
+	tokenPromptSeen   bool
+	tokenRequest      uint64
 }
 
 // New accepts a local loopback HTTP /v1 base URL or an HTTPS endpoint from the
@@ -164,6 +166,14 @@ func (c *Client) Base() string {
 		return ""
 	}
 	return c.base
+}
+
+// Model returns the model ID used by subsequent requests.
+func (c *Client) Model() string {
+	if c == nil {
+		return ""
+	}
+	return c.model
 }
 
 // APIKey returns the credential the client sends, or "" when none is set.
@@ -346,15 +356,21 @@ func (c *Client) Stream(ctx context.Context, messages []Message, tools []ToolDef
 	if c == nil {
 		return result, errors.New("model client is nil")
 	}
+	requestID := c.beginTokenUsage()
 	if c.oauth != nil {
-		return c.streamCodex(ctx, messages, tools, onText, onReasoning)
+		return c.streamCodex(ctx, messages, tools, onText, onReasoning, requestID)
+	}
+	type streamOptions struct {
+		IncludeUsage bool `json:"include_usage"`
 	}
 	body := struct {
-		Model    string           `json:"model"`
-		Messages []requestMessage `json:"messages"`
-		Tools    []requestTool    `json:"tools,omitempty"`
-		Stream   bool             `json:"stream"`
+		Model         string           `json:"model"`
+		Messages      []requestMessage `json:"messages"`
+		Tools         []requestTool    `json:"tools,omitempty"`
+		Stream        bool             `json:"stream"`
+		StreamOptions *streamOptions   `json:"stream_options,omitempty"`
 	}{Model: c.model, Messages: make([]requestMessage, 0, len(messages)), Stream: true}
+	body.StreamOptions = &streamOptions{IncludeUsage: true}
 	for _, m := range messages {
 		if m.Role != "system" && m.Role != "developer" && m.Role != "user" && m.Role != "assistant" && m.Role != "tool" {
 			return result, fmt.Errorf("invalid message role %q", m.Role)
@@ -381,35 +397,53 @@ func (c *Client) Stream(ctx context.Context, messages []Message, tools []ToolDef
 		rt.Function.Name, rt.Function.Description, rt.Function.Parameters = t.Name, t.Description, t.Parameters
 		body.Tools = append(body.Tools, rt)
 	}
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return result, fmt.Errorf("encode model request: %w", err)
+	newRequest := func(payload []byte) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(payload))
+		if err != nil {
+			return nil, fmt.Errorf("create model request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("User-Agent", UserAgent)
+		if c.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		}
+		if c.sessionHeader != "" && c.sessionID != "" {
+			req.Header.Set(c.sessionHeader, c.sessionID)
+		}
+		return req, nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(payload))
-	if err != nil {
-		return result, fmt.Errorf("create model request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("User-Agent", UserAgent)
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-	if c.sessionHeader != "" && c.sessionID != "" {
-		req.Header.Set(c.sessionHeader, c.sessionID)
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return result, fmt.Errorf("model request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	var resp *http.Response
+	for attempt := 0; attempt < 2; attempt++ {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			return result, fmt.Errorf("encode model request: %w", err)
+		}
+		req, err := newRequest(payload)
+		if err != nil {
+			return result, err
+		}
+		resp, err = c.http.Do(req)
+		if err != nil {
+			return result, fmt.Errorf("model request: %w", err)
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			break
+		}
 		detail, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBytes+1))
+		resp.Body.Close()
 		if readErr != nil {
 			return result, fmt.Errorf("model HTTP %s (reading error: %v)", resp.Status, readErr)
 		}
 		if len(detail) > maxErrorBytes {
 			detail = detail[:maxErrorBytes]
+		}
+		if attempt == 0 && streamUsageOptionRejected(resp.StatusCode, detail) {
+			// Some OpenAI-compatible providers reject optional stream_options.
+			// The failed request did not generate a response, so retry once
+			// without optional telemetry rather than breaking the user's turn.
+			body.StreamOptions = nil
+			continue
 		}
 		message := fmt.Sprintf("model HTTP %s: %s", resp.Status, strings.TrimSpace(string(detail)))
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
@@ -417,16 +451,25 @@ func (c *Client) Stream(ctx context.Context, messages []Message, tools []ToolDef
 		}
 		return result, errors.New(message)
 	}
+	defer resp.Body.Close()
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || mediaType != "text/event-stream" {
 		return result, fmt.Errorf("model returned incompatible content type %q (expected SSE)", resp.Header.Get("Content-Type"))
 	}
 	message, usage, seenUsage, err := consumeStream(ctx, io.LimitReader(resp.Body, maxResponseBytes+1), onText, onReasoning)
 	if err == nil {
-		c.setTokenUsage(usage, seenUsage)
+		c.setTokenUsage(requestID, usage, seenUsage)
 		c.markConnected()
 	}
 	return message, err
+}
+
+func streamUsageOptionRejected(status int, detail []byte) bool {
+	if status != http.StatusBadRequest && status != http.StatusUnprocessableEntity {
+		return false
+	}
+	message := strings.ToLower(string(detail))
+	return strings.Contains(message, "stream_options") || strings.Contains(message, "include_usage")
 }
 
 // parseFinalUsage extracts prompt/completion token totals from a final
@@ -434,30 +477,46 @@ func (c *Client) Stream(ctx context.Context, messages []Message, tools []ToolDef
 // completion_tokens) and the input/output aliases are accepted. ok is false
 // when usage is absent or not an object; zero totals are valid usage.
 func parseFinalUsage(raw json.RawMessage) (TokenUsage, bool) {
-	if len(raw) == 0 || string(raw) == "null" {
+	if len(raw) == 0 {
 		return TokenUsage{}, false
 	}
-	var usage struct {
-		Prompt     *int64 `json:"prompt_tokens"`
-		Completion *int64 `json:"completion_tokens"`
-		Input      *int64 `json:"input_tokens"`
-		Output     *int64 `json:"output_tokens"`
-	}
-	if err := json.Unmarshal(raw, &usage); err != nil {
+	var usage map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &usage); err != nil || usage == nil {
 		return TokenUsage{}, false
+	}
+	readCount := func(key string) (int64, bool) {
+		value, ok := usage[key]
+		if !ok {
+			return 0, false
+		}
+		var count int64
+		if json.Unmarshal(value, &count) != nil || count < 0 {
+			return 0, false
+		}
+		return count, true
 	}
 	var result TokenUsage
-	switch {
-	case usage.Prompt != nil:
-		result.Prompt = *usage.Prompt
-	case usage.Input != nil:
-		result.Prompt = *usage.Input
+	prompt, hasPrompt := readCount("prompt_tokens")
+	if !hasPrompt {
+		prompt, hasPrompt = readCount("input_tokens")
 	}
-	switch {
-	case usage.Completion != nil:
-		result.Completion = *usage.Completion
-	case usage.Output != nil:
-		result.Completion = *usage.Output
+	completion, hasCompletion := readCount("completion_tokens")
+	if !hasCompletion {
+		completion, hasCompletion = readCount("output_tokens")
+	}
+	result.Prompt, result.Completion = prompt, completion
+	result.PromptSeen = hasPrompt
+	if hasPrompt || hasCompletion {
+		return result, true
+	}
+	// Preserve the historical signal for a valid usage object with no known
+	// token fields; malformed recognized fields, by contrast, are ignored.
+	_, promptRecognized := usage["prompt_tokens"]
+	_, inputRecognized := usage["input_tokens"]
+	_, completionRecognized := usage["completion_tokens"]
+	_, outputRecognized := usage["output_tokens"]
+	if promptRecognized || inputRecognized || completionRecognized || outputRecognized {
+		return TokenUsage{}, false
 	}
 	return result, true
 }
@@ -467,7 +526,7 @@ func parseFinalUsage(raw json.RawMessage) (TokenUsage, bool) {
 // after a forced refresh on HTTP 401, and parses the SSE stream. The three
 // x-codex-primary-* rate-limit headers of the last response are captured for
 // Usage, and the terminal event's token usage for LastTokenUsage.
-func (c *Client) streamCodex(ctx context.Context, messages []Message, tools []ToolDefinition, onText func(string), onReasoning func(string)) (Message, error) {
+func (c *Client) streamCodex(ctx context.Context, messages []Message, tools []ToolDefinition, onText func(string), onReasoning func(string), requestID uint64) (Message, error) {
 	var result Message
 	token, err := c.oauth.access(ctx, false)
 	if err != nil {
@@ -520,7 +579,7 @@ func (c *Client) streamCodex(ctx context.Context, messages []Message, tools []To
 		message, usage, seenUsage, err := ConsumeCodexStream(ctx, io.LimitReader(resp.Body, maxResponseBytes+1), onText, onReasoning)
 		resp.Body.Close()
 		if err == nil {
-			c.setTokenUsage(usage, seenUsage)
+			c.setTokenUsage(requestID, usage, seenUsage)
 			c.markConnected()
 		}
 		return message, err
@@ -572,13 +631,27 @@ func (c *Client) Usage() string {
 	}
 }
 
+// beginTokenUsage clears the previous request's usage and returns an ID that
+// prevents an older concurrent response from replacing this request's state.
+func (c *Client) beginTokenUsage() uint64 {
+	c.rateMu.Lock()
+	defer c.rateMu.Unlock()
+	c.tokenRequest++
+	c.tokenPrompt, c.tokenCompletion, c.tokenSeen, c.tokenPromptSeen = 0, 0, false, false
+	return c.tokenRequest
+}
+
 // setTokenUsage records the token usage of the last completed response:
 // seen=true with the reported totals, or seen=false when the response
 // carried no usage (the last response alone is reported, never a running
 // total). Zero totals are valid usage (seen = true).
-func (c *Client) setTokenUsage(usage TokenUsage, seen bool) {
+func (c *Client) setTokenUsage(requestID uint64, usage TokenUsage, seen bool) {
 	c.rateMu.Lock()
-	c.tokenPrompt, c.tokenCompletion, c.tokenSeen = usage.Prompt, usage.Completion, seen
+	if requestID != c.tokenRequest {
+		c.rateMu.Unlock()
+		return
+	}
+	c.tokenPrompt, c.tokenCompletion, c.tokenSeen, c.tokenPromptSeen = usage.Prompt, usage.Completion, seen, usage.PromptSeen
 	c.rateMu.Unlock()
 }
 
@@ -593,7 +666,7 @@ func (c *Client) LastTokenUsage() (TokenUsage, bool) {
 	if !c.tokenSeen {
 		return TokenUsage{}, false
 	}
-	return TokenUsage{Prompt: c.tokenPrompt, Completion: c.tokenCompletion}, true
+	return TokenUsage{Prompt: c.tokenPrompt, Completion: c.tokenCompletion, PromptSeen: c.tokenPromptSeen}, true
 }
 
 // formatWindowHours renders a window length in minutes as hours ("5h",
@@ -631,19 +704,15 @@ func (c *Client) Check(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var list struct {
-		Data   json.RawMessage `json:"data"`
-		Object string          `json:"object"`
-	}
-	if json.Unmarshal(raw, &list) != nil || len(list.Data) == 0 && list.Object == "" {
+	if _, err := decodeModelIDs(raw); err != nil {
 		return fmt.Errorf("%w: response is not a model list", ErrUnexpectedResponse)
 	}
 	return nil
 }
 
 // ListModels returns the model IDs the endpoint reports on its /models route.
-// OpenAI-compatible local servers and hosted providers expose this list; Lisa
-// uses it to run without an explicit model name.
+// It accepts both the OpenAI data envelope and a bare array of model objects;
+// Lisa uses the result for setup, connection checks, and model selection.
 func ListModels(ctx context.Context, endpoint, apiKey string) ([]string, error) {
 	base, err := parseEndpoint(endpoint)
 	if err != nil {
@@ -653,18 +722,149 @@ func ListModels(ctx context.Context, endpoint, apiKey string) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	var list struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if json.Unmarshal(raw, &list) != nil {
+	ids, err := decodeModelIDs(raw)
+	if err != nil {
 		return nil, fmt.Errorf("%w: response is not a model list", ErrUnexpectedResponse)
 	}
-	ids := make([]string, 0, len(list.Data))
-	for _, item := range list.Data {
-		if item.ID != "" {
-			ids = append(ids, item.ID)
+	return ids, nil
+}
+
+// ModelDetails describes a model reported by an endpoint. ContextWindow is
+// zero when the model list has no supported positive context-window metadata.
+type ModelDetails struct {
+	ID            string
+	ContextWindow int64
+}
+
+// ListModelsWithDetails returns model IDs and any positive context-window
+// metadata exposed by the endpoint's /models route. It accepts both the
+// OpenAI data envelope and a bare array of model objects.
+func ListModelsWithDetails(ctx context.Context, endpoint, apiKey string) ([]ModelDetails, error) {
+	base, err := parseEndpoint(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnexpectedResponse, err)
+	}
+	raw, err := fetchModelList(ctx, base, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	details, err := decodeModelDetails(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%w: response is not a model list", ErrUnexpectedResponse)
+	}
+	return details, nil
+}
+
+// decodeModelDetails accepts the same model-list envelopes as decodeModelIDs.
+// It reads documented context metadata used by compatible model registries:
+// OpenRouter's context_length, OMP's contextWindow, and OpenCode's limit.context.
+func decodeModelDetails(raw []byte) ([]ModelDetails, error) {
+	type item struct {
+		ID                 string          `json:"id"`
+		ContextWindow      json.RawMessage `json:"context_window"`
+		ContextLength      json.RawMessage `json:"context_length"`
+		ContextWindowCamel json.RawMessage `json:"contextWindow"`
+		Limit              json.RawMessage `json:"limit"`
+	}
+	var items []item
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, errors.New("empty model list")
+	}
+	switch trimmed[0] {
+	case '[':
+		if err := json.Unmarshal(trimmed, &items); err != nil {
+			return nil, err
+		}
+	case '{':
+		var envelope struct {
+			Object string          `json:"object"`
+			Data   json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(trimmed, &envelope); err != nil {
+			return nil, err
+		}
+		if len(envelope.Data) == 0 {
+			if envelope.Object == "" {
+				return nil, errors.New("missing model-list data")
+			}
+		} else if err := json.Unmarshal(envelope.Data, &items); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, errors.New("unexpected model-list JSON type")
+	}
+	details := make([]ModelDetails, 0, len(items))
+	for _, entry := range items {
+		if entry.ID == "" {
+			continue
+		}
+		window := positiveWindow(entry.ContextWindow, entry.ContextLength, entry.ContextWindowCamel)
+		if window == 0 && len(entry.Limit) > 0 {
+			var limit struct {
+				Context json.RawMessage `json:"context"`
+			}
+			if json.Unmarshal(entry.Limit, &limit) == nil {
+				window = positiveWindow(limit.Context)
+			}
+		}
+		details = append(details, ModelDetails{ID: entry.ID, ContextWindow: window})
+	}
+	return details, nil
+}
+
+func positiveWindow(candidates ...json.RawMessage) int64 {
+	for _, candidate := range candidates {
+		if len(candidate) == 0 {
+			continue
+		}
+		var window int64
+		if json.Unmarshal(candidate, &window) == nil && window > 0 {
+			return window
+		}
+	}
+	return 0
+}
+
+// decodeModelIDs accepts the OpenAI model-list envelope and a bare array of
+// model objects. Some documented OpenAI-compatible providers return the latter
+// even though their SDK schema describes the former.
+func decodeModelIDs(raw []byte) ([]string, error) {
+	type item struct {
+		ID string `json:"id"`
+	}
+	var items []item
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, errors.New("empty model list")
+	}
+	switch trimmed[0] {
+	case '[':
+		if err := json.Unmarshal(trimmed, &items); err != nil {
+			return nil, err
+		}
+	case '{':
+		var envelope struct {
+			Object string          `json:"object"`
+			Data   json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(trimmed, &envelope); err != nil {
+			return nil, err
+		}
+		if len(envelope.Data) == 0 {
+			if envelope.Object == "" {
+				return nil, errors.New("missing model-list data")
+			}
+		} else if err := json.Unmarshal(envelope.Data, &items); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, errors.New("unexpected model-list JSON type")
+	}
+	ids := make([]string, 0, len(items))
+	for _, entry := range items {
+		if entry.ID != "" {
+			ids = append(ids, entry.ID)
 		}
 	}
 	return ids, nil
@@ -746,6 +946,7 @@ type streamChunk struct {
 			} `json:"tool_calls"`
 		} `json:"delta"`
 	} `json:"choices"`
+	Usage json.RawMessage `json:"usage"`
 	Error json.RawMessage `json:"error"`
 }
 type streamedToolCall struct {
@@ -778,17 +979,14 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 		if len(chunk.Error) > 0 && string(chunk.Error) != "null" {
 			return fmt.Errorf("model stream error: %s", chunk.Error)
 		}
+		if usage, ok := parseFinalUsage(chunk.Usage); ok {
+			lastUsage, seenUsage = usage, true
+		}
 		if len(chunk.Choices) == 0 {
-			// OpenAI-compatible servers may send a final usage-only event.
-			var envelope map[string]json.RawMessage
-			if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
-				return fmt.Errorf("malformed model stream event: %w", err)
-			}
-			if _, ok := envelope["usage"]; !ok || !seenChoice {
+			// OpenAI-compatible servers may send a final usage-only event. Usage
+			// is optional telemetry: even malformed usage must not fail a turn.
+			if len(chunk.Usage) == 0 {
 				return errors.New("model stream event has no choices")
-			}
-			if usage, ok := parseFinalUsage(envelope["usage"]); ok {
-				lastUsage, seenUsage = usage, true
 			}
 			return nil
 		}

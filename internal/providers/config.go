@@ -32,11 +32,12 @@ type StoredStatusLineConfig struct {
 // status line preferences in the private state directory, never in the
 // repository or session database.
 type StoredProviderConfig struct {
-	Provider   string                  `json:"provider"`
-	Model      string                  `json:"model"`
-	Theme      string                  `json:"theme,omitempty"`
-	Composer   *StoredComposerConfig   `json:"composer,omitempty"`
-	StatusLine *StoredStatusLineConfig `json:"status_line,omitempty"`
+	Provider       string                      `json:"provider"`
+	Model          string                      `json:"model"`
+	Theme          string                      `json:"theme,omitempty"`
+	Composer       *StoredComposerConfig       `json:"composer,omitempty"`
+	StatusLine     *StoredStatusLineConfig     `json:"status_line,omitempty"`
+	ContextWindows map[string]map[string]int64 `json:"context_windows,omitempty"`
 }
 
 // flagEnabled resolves an optional-segment pointer: nil (the key was absent

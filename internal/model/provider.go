@@ -30,10 +30,9 @@ const (
 	AuthOAuth
 )
 
-// Providers is the predefined accepted list. Every listed provider is hosted:
-// it receives the user's API key and the conversation content, and must pass
-// the full probe before it is described as accepted. Lisa hosts no models and
-// does not bundle a local inference server.
+// Providers is the predefined hosted-provider list. Rows without a completed
+// admission probe are pending-probe and must not be described as accepted.
+// Lisa hosts no models and does not bundle a local inference server.
 var Providers = []Provider{
 	{Name: "openai", DisplayName: "OpenAI", BaseURL: "https://api.openai.com/v1", KeyEnv: "LISA_OPENAI_API_KEY", DefaultModel: "gpt-4o-mini", Hosted: true},
 	{Name: "openrouter", DisplayName: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", KeyEnv: "LISA_OPENROUTER_API_KEY", DefaultModel: "openai/gpt-4o-mini", Hosted: true},
@@ -42,6 +41,11 @@ var Providers = []Provider{
 	{Name: "opencode-zen", DisplayName: "Opencode Zen", BaseURL: "https://opencode.ai/zen/v1", KeyEnv: "LISA_OPENCODE_ZEN_API_KEY", DefaultModel: "gpt-5.3-codex", Hosted: true, SessionHeader: "x-opencode-session"},
 	{Name: "opencode-go", DisplayName: "Opencode Go", BaseURL: "https://opencode.ai/zen/go/v1", KeyEnv: "LISA_OPENCODEGO_API_KEY", DefaultModel: "glm-5.3-flash", Hosted: true, SessionHeader: "x-opencode-session"},
 	{Name: "chatgpt", DisplayName: "ChatGPT (Plus/Pro)", BaseURL: "https://chatgpt.com/backend-api/codex", DefaultModel: "gpt-5.5", Hosted: true, SessionHeader: "session-id", Auth: AuthOAuth},
+	{Name: "groq", DisplayName: "Groq", BaseURL: "https://api.groq.com/openai/v1", KeyEnv: "LISA_GROQ_API_KEY", Hosted: true},
+	{Name: "xai", DisplayName: "xAI", BaseURL: "https://api.x.ai/v1", KeyEnv: "LISA_XAI_API_KEY", Hosted: true},
+	{Name: "together", DisplayName: "Together AI", BaseURL: "https://api.together.ai/v1", KeyEnv: "LISA_TOGETHER_API_KEY", Hosted: true},
+	{Name: "mistral", DisplayName: "Mistral AI", BaseURL: "https://api.mistral.ai/v1", KeyEnv: "LISA_MISTRAL_API_KEY", Hosted: true},
+	{Name: "cerebras", DisplayName: "Cerebras", BaseURL: "https://api.cerebras.ai/v1", KeyEnv: "LISA_CEREBRAS_API_KEY", Hosted: true},
 }
 
 // ChatGPT OAuth 2 login constants. They follow the flow OpenCode and other

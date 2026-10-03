@@ -209,7 +209,7 @@ func TestLastTokenUsageChatWire(t *testing.T) {
 				`{"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":34}}`,
 				`[DONE]`,
 			},
-			want:     TokenUsage{Prompt: 120, Completion: 34},
+			want:     TokenUsage{Prompt: 120, Completion: 34, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
@@ -219,7 +219,7 @@ func TestLastTokenUsageChatWire(t *testing.T) {
 				`{"choices":[],"usage":{"input_tokens":9,"output_tokens":3}}`,
 				`[DONE]`,
 			},
-			want:     TokenUsage{Prompt: 9, Completion: 3},
+			want:     TokenUsage{Prompt: 9, Completion: 3, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
@@ -229,7 +229,7 @@ func TestLastTokenUsageChatWire(t *testing.T) {
 				`{"choices":[],"usage":{"prompt_tokens":7,"input_tokens":99,"completion_tokens":2,"output_tokens":88}}`,
 				`[DONE]`,
 			},
-			want:     TokenUsage{Prompt: 7, Completion: 2},
+			want:     TokenUsage{Prompt: 7, Completion: 2, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
@@ -239,7 +239,7 @@ func TestLastTokenUsageChatWire(t *testing.T) {
 				`{"choices":[],"usage":{"prompt_tokens":0,"completion_tokens":0}}`,
 				`[DONE]`,
 			},
-			want:     TokenUsage{},
+			want:     TokenUsage{PromptSeen: true},
 			wantSeen: true,
 		},
 		{
@@ -260,7 +260,7 @@ func TestLastTokenUsageChatWire(t *testing.T) {
 				`{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":6}}`,
 				`[DONE]`,
 			},
-			want:     TokenUsage{Prompt: 5, Completion: 6},
+			want:     TokenUsage{Prompt: 5, Completion: 6, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
@@ -319,7 +319,7 @@ func TestLastTokenUsagePerResponseNotCumulative(t *testing.T) {
 	if _, err := client.Stream(context.Background(), []Message{{Role: "user", Content: "a"}}, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if usage, ok := client.LastTokenUsage(); !ok || usage != (TokenUsage{Prompt: 10, Completion: 5}) {
+	if usage, ok := client.LastTokenUsage(); !ok || usage != (TokenUsage{Prompt: 10, Completion: 5, PromptSeen: true}) {
 		t.Fatalf("first turn usage = (%+v, %v)", usage, ok)
 	}
 	if _, err := client.Stream(context.Background(), []Message{{Role: "user", Content: "b"}}, nil, nil, nil); err != nil {
@@ -884,13 +884,13 @@ func TestLastTokenUsageCodexWire(t *testing.T) {
 		{
 			name:     "usage in completed event",
 			terminal: `{"response":{"output":[],"usage":{"input_tokens":110,"output_tokens":25}}}`,
-			want:     TokenUsage{Prompt: 110, Completion: 25},
+			want:     TokenUsage{Prompt: 110, Completion: 25, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
 			name:     "alias naming in completed event",
 			terminal: `{"response":{"output":[],"usage":{"prompt_tokens":7,"completion_tokens":2}}}`,
-			want:     TokenUsage{Prompt: 7, Completion: 2},
+			want:     TokenUsage{Prompt: 7, Completion: 2, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
@@ -1075,5 +1075,32 @@ func TestListModelsErrorClasses(t *testing.T) {
 				t.Fatalf("ListModels ids = %v, want %v", ids, tc.wantIDs)
 			}
 		})
+	}
+}
+
+func TestCheckAndListModelsAcceptArrayModelList(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Errorf("request path = %q, want /v1/models", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[{"id":"model-a"},{"id":""},{"id":"model-b"}]`)
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := New(server.URL+"/v1", "model-a", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Check(context.Background()); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	ids, err := ListModels(context.Background(), server.URL+"/v1", "")
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	want := []string{"model-a", "model-b"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Fatalf("model ids = %v, want %v", ids, want)
 	}
 }

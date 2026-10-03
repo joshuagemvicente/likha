@@ -264,15 +264,17 @@ func parseCodexUsage(raw json.RawMessage) (TokenUsage, bool) {
 	}
 	var result TokenUsage
 	switch {
-	case usage.Prompt != nil:
+	case usage.Prompt != nil && *usage.Prompt >= 0:
 		result.Prompt = *usage.Prompt
-	case usage.Input != nil:
+		result.PromptSeen = true
+	case usage.Input != nil && *usage.Input >= 0:
 		result.Prompt = *usage.Input
+		result.PromptSeen = true
 	}
 	switch {
-	case usage.Completion != nil:
+	case usage.Completion != nil && *usage.Completion >= 0:
 		result.Completion = *usage.Completion
-	case usage.Output != nil:
+	case usage.Output != nil && *usage.Output >= 0:
 		result.Completion = *usage.Output
 	}
 	return result, true

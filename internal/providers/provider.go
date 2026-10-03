@@ -11,16 +11,18 @@ import (
 
 // connection is the provider identity and startup health the UI displays.
 type Connection struct {
-	Provider          string                 // display name, e.g. "OpenRouter" or "Local OpenAI-compatible"
-	ProviderCanonical string                 // canonical provider name ("chatgpt", "openai", ...); "" for custom endpoints and setup
-	Verified          bool                   // the endpoint matches the predefined accepted list
-	Err               error                  // startup connection-check result, nil when connected
-	Setup             bool                   // no provider configured; the TUI runs first-run setup
-	Theme             string                 // resolved theme name (env, flag, or stored config)
-	ComposerStyle     string                 // stored composer preference; UI resolves unknown values
-	StatusLine        StoredStatusLineConfig // optional status segments loaded from config.json
-	Nerd              bool                   // user opted into Nerd Font markers
-	Mcp               *mcp.McpManager
+	Provider               string                      // display name, e.g. "OpenRouter" or "Local OpenAI-compatible"
+	ProviderCanonical      string                      // canonical provider name ("chatgpt", "openai", ...); "" for custom endpoints and setup
+	Verified               bool                        // the endpoint matches the predefined accepted list
+	Err                    error                       // startup connection-check result, nil when connected
+	Setup                  bool                        // no provider configured; the TUI runs first-run setup
+	Theme                  string                      // resolved theme name (env, flag, or stored config)
+	ComposerStyle          string                      // stored composer preference; UI resolves unknown values
+	StatusLine             StoredStatusLineConfig      // optional status segments loaded from config.json
+	ContextWindows         map[string]int64            // positive provider-reported windows for the active provider
+	ContextWindowOverrides map[string]map[string]int64 // user overrides by canonical provider and model ID
+	Nerd                   bool                        // user opted into Nerd Font markers
+	Mcp                    *mcp.McpManager
 }
 
 // resolvedProvider is the concrete provider configuration after flag,

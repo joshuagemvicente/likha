@@ -22,11 +22,14 @@ type ApprovalRequest struct {
 }
 
 type TurnEvent struct {
-	Kind     string
-	Text     string
-	History  []model.Message
-	Approval *ApprovalRequest
-	RunID    uint64
+	Kind             string
+	Text             string
+	History          []model.Message
+	Approval         *ApprovalRequest
+	RunID            uint64
+	ContextTokens    int64
+	ContextKnown     bool
+	ContextEstimated bool
 }
 
 var agentTools = []model.ToolDefinition{
@@ -40,7 +43,7 @@ var agentTools = []model.ToolDefinition{
 // runTurn streams one user request and its tools. An edit or command can only
 // execute after the UI sends an explicit decision for that specific proposal.
 // mcp may be nil when no MCP servers are configured.
-func RunTurn(ctx context.Context, client *model.Client, repo *repository.Repository, root string, prior []model.Message, prompt string, mcpServers *mcp.McpManager, emit func(TurnEvent)) {
+func RunTurn(ctx context.Context, client *model.Client, repo *repository.Repository, root string, prior []model.Message, prompt string, mcpServers *mcp.McpManager, steer <-chan string, emit func(TurnEvent)) {
 	// @file references inline repository content so the model reads context
 	// directly; unresolved tokens stay literal.
 	prompt = ExpandFileReferences(prompt, repo)
@@ -48,6 +51,14 @@ func RunTurn(ctx context.Context, client *model.Client, repo *repository.Reposit
 	history = append(history, prior...)
 	history = append(history, model.Message{Role: "user", Content: prompt})
 	fail := func(err error) { emit(TurnEvent{Kind: "error", Text: err.Error(), History: history}) }
+	// applySteer folds drained steering prompts into the private history and
+	// reports each one to the UI, oldest first.
+	applySteer := func(drained []string) {
+		for _, text := range drained {
+			history = append(history, model.Message{Role: "user", Content: ExpandFileReferences(text, repo)})
+			emit(TurnEvent{Kind: "steer", Text: text, History: append([]model.Message(nil), history...)})
+		}
+	}
 	// Pre-run connection check: a dead endpoint or revoked key fails before any
 	// prompt round-trip. A successful earlier check or stream is remembered.
 	if err := client.EnsureConnected(ctx); err != nil {
@@ -64,6 +75,12 @@ func RunTurn(ctx context.Context, client *model.Client, repo *repository.Reposit
 			fail(err)
 			return
 		}
+		// Drain point (a): prompts queued while the previous round ran join the
+		// history before the next provider call. Never drains on cancel, above.
+		applySteer(drainSteer(steer))
+		// Refresh the visible context estimate for this exact outbound request.
+		contextTokens, contextKnown := model.EstimateInputTokens(client.Model(), history, tools)
+		emit(TurnEvent{Kind: "context", ContextTokens: contextTokens, ContextKnown: contextKnown, ContextEstimated: true})
 		assistant, err := client.Stream(ctx, history, tools, func(text string) {
 			emit(TurnEvent{Kind: "text", Text: text})
 		}, func(reasoning string) {
@@ -73,8 +90,23 @@ func RunTurn(ctx context.Context, client *model.Client, repo *repository.Reposit
 			fail(err)
 			return
 		}
+		if usage, ok := client.LastTokenUsage(); ok && usage.PromptSeen {
+			emit(TurnEvent{Kind: "context", ContextTokens: usage.Prompt, ContextKnown: true, ContextEstimated: false})
+		}
 		history = append(history, assistant)
 		if len(assistant.ToolCalls) == 0 {
+			// Drain point (b): a prompt queued during this final stream keeps the
+			// run alive for another provider round instead of ending it. A run
+			// cancelled after the response completed must not consume the queue
+			// (FR-21: cancellation holds queued prompts for the user).
+			if err := ctx.Err(); err != nil {
+				fail(err)
+				return
+			}
+			if drained := drainSteer(steer); len(drained) > 0 {
+				applySteer(drained)
+				continue
+			}
 			emit(TurnEvent{Kind: "done", History: history})
 			return
 		}
@@ -110,6 +142,24 @@ func RunTurn(ctx context.Context, client *model.Client, repo *repository.Reposit
 		}
 	}
 	fail(fmt.Errorf("model exceeded 32 consecutive tool rounds"))
+}
+
+// drainSteer performs a non-blocking FIFO drain of prompts queued while a run
+// is active. A nil steer channel (steering disabled) is safe: the receive case
+// is never ready, so the default branch returns immediately without blocking.
+func drainSteer(steer <-chan string) []string {
+	var drained []string
+	for {
+		select {
+		case text, ok := <-steer:
+			if !ok {
+				return drained
+			}
+			drained = append(drained, text)
+		default:
+			return drained
+		}
+	}
 }
 
 func appendUnexecuted(history *[]model.Message, calls []model.ToolCall) {

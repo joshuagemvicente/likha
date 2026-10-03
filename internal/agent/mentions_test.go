@@ -135,10 +135,87 @@ func TestRunTurnExpandsMentionedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	var events []TurnEvent
-	RunTurn(context.Background(), client, repo, root, nil, "summarize @context.txt", nil, func(ev TurnEvent) { events = append(events, ev) })
+	RunTurn(context.Background(), client, repo, root, nil, "summarize @context.txt", nil, nil, func(ev TurnEvent) { events = append(events, ev) })
 	for _, ev := range events {
 		if ev.Kind == "error" {
 			t.Fatalf("agent error: %s", ev.Text)
 		}
+	}
+}
+
+// A steered message's @file references are expanded for the model request
+// while the delivered steer event keeps the raw text.
+func TestSteerMessageExpandsReferencesOnWireOnly(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "context.txt"), []byte("secret-of-context"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := repository.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steer := make(chan string, 4)
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveModels(t, w, r) {
+			return
+		}
+		var body struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode model request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch calls.Add(1) {
+		case 1:
+			// Queue a message with a file reference while round 1 streams.
+			steer <- "summarize @context.txt"
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"context.txt\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n")
+		case 2:
+			n := len(body.Messages)
+			ok := n >= 4 && body.Messages[n-1].Role == "user" &&
+				strings.Contains(body.Messages[n-1].Content, "summarize @context.txt") &&
+				strings.Contains(body.Messages[n-1].Content, "secret-of-context")
+			if !ok {
+				t.Errorf("steered @file not expanded on the wire: %+v", body.Messages)
+			}
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Summarized.\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+		default:
+			t.Errorf("unexpected extra model request")
+		}
+	}))
+	defer server.Close()
+	client, err := model.New(server.URL+"/v1", "test-model", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []TurnEvent
+	RunTurn(context.Background(), client, repo, root, nil, "start", nil, steer, func(ev TurnEvent) { events = append(events, ev) })
+	if calls.Load() != 2 {
+		t.Fatalf("model requests = %d, want 2", calls.Load())
+	}
+	var steerEvent *TurnEvent
+	for i := range events {
+		if events[i].Kind == "steer" {
+			steerEvent = &events[i]
+		}
+	}
+	if steerEvent == nil {
+		t.Fatalf("no steer event: %+v", events)
+	}
+	if steerEvent.Text != "summarize @context.txt" || strings.Contains(steerEvent.Text, "secret-of-context") {
+		t.Fatalf("steer event text = %q, want raw message", steerEvent.Text)
+	}
+	if len(steerEvent.History) == 0 {
+		t.Fatalf("steer history empty: %+v", steerEvent)
+	}
+	if last := steerEvent.History[len(steerEvent.History)-1]; last.Role != "user" || !strings.Contains(last.Content, "secret-of-context") {
+		t.Fatalf("steer history did not carry expanded message: %+v", steerEvent.History)
 	}
 }
