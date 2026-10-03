@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -38,6 +39,17 @@ const logo = ` ____   ___  __ ___ __ __  _____
 // smaller viewports get an inline hint instead of broken layout.
 const minWidth, minHeight = 40, 12
 
+// Review decision focus (FR-22): the index of the focused button on the
+// decision bar. A new approval always starts on Approve.
+const focusApprove = 0
+const focusDecline = 1
+
+// workingLabel is the fixed generic activity text. It never claims to reveal
+// model reasoning; spinner frames remain literal ASCII in every terminal.
+const workingLabel = "Working…"
+
+var workingSpinnerFrames = []string{"|", "/", "-", "\\"}
+
 // contentWidth is the transcript's wrap width: the viewport minus two
 // padding columns. Popups and the composer keep the full width. The
 // transcript wraps to the full content width at every terminal size — no
@@ -48,81 +60,97 @@ func contentWidth(termWidth int) int {
 }
 
 type ui struct {
-	root, modelName   string
-	conn              providers.Connection
-	stateDir          string
-	repo              *repository.Repository
-	client            *model.Client
-	theme             lisaui.Theme
-	glyphs            lisaui.Glyphs
-	themeName         string
-	composerStyle     string
-	width, height     int
-	statusLineOpts    providers.StoredStatusLineConfig
-	statusFolder      string
-	statusTitle       string
-	entries           []entry
-	input             []rune
-	edit              editState // composer cursor + kill ring (specs/tool-rendering-terminal-keys)
-	escPrefix         bool      // armed after ESC: Return inside the decay window inserts a newline
-	lines             []string
-	lineStyles        []lipgloss.Style
-	lineSpans         [][]lisaui.Swatch
-	streamBuf         strings.Builder
-	reasoningBuf      strings.Builder
-	reasoningStream   int
-	layoutWidth       int
-	scroll            int  // top body line of the viewport; scrollMax() pins it to the newest content
-	following         bool // true: the viewport follows new lines like a chat/browser at the bottom
-	caretOn           bool // blink phase of the composer's block caret
-	caretTyped        bool // recent keystroke: caret renders solid until the blink resumes
-	streaming         int
-	working           bool
-	cancelling        bool
-	runID             uint64
-	cancel            context.CancelFunc
-	events            chan agent.TurnEvent
-	abandon           chan struct{}
-	history           []model.Message
-	store             *session.Store
-	snapshot          session.Snapshot
-	pending           *agent.ApprovalRequest
-	reviewSeen        []bool
-	status            string
-	mode              string
-	setup             setupState
-	lastModels        []string     // numbered list shown by /models
-	sessionIDs        []string     // ids from the last /sessions listing
-	mention           mentionState // @file completion popup state
-	commandPopup      commandState // /command completion popup state
-	dialogItems       []string     // display rows for the open dialog (theme names, session titles; /models uses dialogModelRows)
-	dialog            dialogState
-	dialogModelRows   []modelsRow              // parallel selectable rows for the /models dialog; headers render from sections, never rows
-	dialogModelCounts map[string]int           // model id → occurrence count across sections; >1 rows render the id with its provider name
-	dialogModelsNote  string                   // muted unreachable-provider note for the /models dialog; "" when every fetch succeeded
-	modelsCache       modelsCache              // in-memory last-good sections (specs/models-perf); dies with the process
-	modelsGen         uint64                   // /models open generation; per-section arrivals carry it, stale ones drop
-	modelsPending     int                      // outstanding per-provider fetches in the current open
-	modelsNavigated   bool                     // user navigated/typed in this open; arrivals must not yank the cursor after
-	modelsArrived     map[string]modelsSection // arrived sections by provider canonical Name
-	modelsTargetOrder []string                 // target provider Names in final display order
-	modelsFailures    []string                 // failed provider display names this open
-	modelsErrSample   string                   // first fetch error text this open
-	keyModal          keyState                 // /providers: provider auth overlay (key-entry modal and auth-state view)
+	root, modelName    string
+	conn               providers.Connection
+	stateDir           string
+	repo               *repository.Repository
+	client             *model.Client
+	theme              lisaui.Theme
+	glyphs             lisaui.Glyphs
+	themeName          string
+	composerStyle      string
+	width, height      int
+	statusLineOpts     providers.StoredStatusLineConfig
+	statusFolder       string
+	statusTitle        string
+	entries            []entry
+	input              []rune
+	edit               editState // composer cursor + kill ring (specs/tool-rendering-terminal-keys)
+	composerVertical   composerVerticalMover
+	escPrefix          bool // armed after ESC: Return inside the decay window inserts a newline
+	lines              []string
+	lineStyles         []lipgloss.Style
+	lineSpans          [][]lisaui.Swatch
+	lineActivity       []bool // marks the ephemeral activity row for render-time sweep styling
+	streamBuf          strings.Builder
+	reasoningBuf       strings.Builder
+	reasoningStream    int
+	layoutWidth        int
+	scroll             int  // top body line of the viewport; scrollMax() pins it to the newest content
+	following          bool // true: the viewport follows new lines like a chat/browser at the bottom
+	caretOn            bool // blink phase of the composer's block caret
+	caretTyped         bool // recent keystroke: caret renders solid until the blink resumes
+	streaming          int
+	activity           int    // entries index of ephemeral Working row; -1 when absent
+	activityFrame      int    // spinner and sweep frame advanced by activity ticks
+	activityGeneration uint64 // invalidates ticks from an earlier activity interval
+	working            bool
+	cancelling         bool
+	runID              uint64
+	cancel             context.CancelFunc
+	events             chan agent.TurnEvent
+	abandon            chan struct{}
+	history            []model.Message
+	promptHistory      promptHistory
+	queue              []string       // steering prompts typed while a run is active; UI mirror of the delivery channel
+	steer              chan string    // the active turn's steering input; nil while idle
+	priorLen           int            // m.history length at the active turn's start; reconcile baseline
+	turnSent           map[string]int // steer deliveries the UI processed this turn, by text
+	store              *session.Store
+	snapshot           session.Snapshot
+	pending            *agent.ApprovalRequest
+	reviewSeen         []bool
+	reviewFocus        int // focused decision-bar button while a review is pending (focusApprove/focusDecline)
+	status             string
+	mode               string
+	setup              setupState
+	lastModels         []string     // numbered list shown by /models
+	sessionIDs         []string     // ids from the last /sessions listing
+	mention            mentionState // @file completion popup state
+	commandPopup       commandState // /command completion popup state
+	dialogItems        []string     // display rows for the open dialog (theme names, session titles; /models uses dialogModelRows)
+	dialog             dialogState
+	dialogModelRows    []modelsRow              // parallel selectable rows for the /models dialog; headers render from sections, never rows
+	dialogModelCounts  map[string]int           // model id → occurrence count across sections; >1 rows render the id with its provider name
+	dialogModelsNote   string                   // muted unreachable-provider note for the /models dialog; "" when every fetch succeeded
+	modelsCache        modelsCache              // in-memory last-good sections (specs/models-perf); dies with the process
+	modelsGen          uint64                   // /models open generation; per-section arrivals carry it, stale ones drop
+	modelsPending      int                      // outstanding per-provider fetches in the current open
+	modelsNavigated    bool                     // user navigated/typed in this open; arrivals must not yank the cursor after
+	modelsArrived      map[string]modelsSection // arrived sections by provider canonical Name
+	modelsTargetOrder  []string                 // target provider Names in final display order
+	modelsFailures     []string                 // failed provider display names this open
+	modelsErrSample    string                   // first fetch error text this open
+	keyModal           keyState                 // /providers: provider auth overlay (key-entry modal and auth-state view)
 
 	// Session measurements and identity for the status line (spec §4).
-	started          time.Time // session start; drives the minutes segment
-	usagePrompt      int64     // cumulative prompt tokens across completed turns
-	usageCompletion  int64     // cumulative completion tokens across completed turns
-	lastPromptTokens int64     // prompt tokens of the last completed turn (ctx %)
-	usageSeen        bool      // provider usage reported at least once this session
-	updateVersion    string    // newer release tag when known; empty = none
-	git              gitState  // last successful git status read; zero value (and !gitStatusOK) on failure
-	gitOK            bool      // last git status call succeeded; false hides every git segment
-	spend            float64   // accumulated session cost in US dollars
-	spendKnown       bool      // pricing seen for at least one turn (subscription rows included)
-	freshSession     bool      // started with no stored entries; gates the auto-naming run
-	nameTried        bool      // the one auto-naming attempt already launched
+	contextTokens      int64     // input-context estimate or provider-reported value
+	contextSeen        bool      // context usage has a usable value
+	contextEstimated   bool      // value is approximate rather than provider-reported
+	contextWindow      int64     // selected model's resolved context limit
+	contextWindowKnown bool      // selected model's context limit is documented
+	started            time.Time // session start; drives the minutes segment
+	usagePrompt        int64     // cumulative prompt tokens across completed turns
+	usageCompletion    int64     // cumulative completion tokens across completed turns
+	lastPromptTokens   int64     // prompt tokens of the last completed turn (ctx %)
+	usageSeen          bool      // provider usage reported at least once this session
+	updateVersion      string    // newer release tag when known; empty = none
+	git                gitState  // last successful git status read; zero value (and !gitStatusOK) on failure
+	gitOK              bool      // last git status call succeeded; false hides every git segment
+	spend              float64   // accumulated session cost in US dollars
+	spendKnown         bool      // pricing seen for at least one turn (subscription rows included)
+	freshSession       bool      // started with no stored entries; gates the auto-naming run
+	nameTried          bool      // the one auto-naming attempt already launched
 }
 
 // dialogMatches documents the shared selection-dialog filter: a
@@ -141,7 +169,11 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 	if conn.Nerd {
 		glyphs = lisaui.NerdGlyphs()
 	}
-	m := &ui{root: root, repo: repo, client: client, modelName: name, conn: conn, stateDir: stateDir, store: store, snapshot: snapshot, history: snapshot.History, following: true, caretOn: true, streaming: -1, status: "Connected", mode: modeMain, theme: theme, glyphs: glyphs, themeName: themeName, composerStyle: validComposerStyle(conn.ComposerStyle), statusLineOpts: conn.StatusLine, started: time.Now(), freshSession: len(snapshot.Entries) == 0}
+	m := &ui{root: root, repo: repo, client: client, modelName: name, conn: conn, stateDir: stateDir, store: store, snapshot: snapshot, history: snapshot.History, promptHistory: newPromptHistory(restoredPromptHistory(snapshot)), following: true, caretOn: true, streaming: -1, activity: -1, status: "Connected", mode: modeMain, theme: theme, glyphs: glyphs, themeName: themeName, composerStyle: validComposerStyle(conn.ComposerStyle), statusLineOpts: conn.StatusLine, started: time.Now(), freshSession: len(snapshot.Entries) == 0}
+	m.resolveContextWindow()
+	if len(m.history) > 0 {
+		m.recalculateContext(m.history)
+	}
 	if providers.FlagEnabled(m.statusLineOpts.Folder) {
 		m.statusFolder = statusFolder(root)
 	}
@@ -215,8 +247,83 @@ func waitEvent(events <-chan agent.TurnEvent) tea.Cmd {
 	return func() tea.Msg { return <-events }
 }
 
+func (m *ui) hasActivity() bool {
+	for _, e := range m.entries {
+		if e.role == "Working" {
+			return true
+		}
+	}
+	return false
+}
+
+// showActivity appends one temporary row while a turn is active. Scroll
+// position is owned by submit/review interactions, never by animation.
+func (m *ui) showActivity() {
+	if !m.working || m.pending != nil {
+		return
+	}
+	if m.hasActivity() {
+		for i := range m.entries {
+			if m.entries[i].role == "Working" {
+				m.activity = i
+				return
+			}
+		}
+	}
+	m.entries = append(m.entries, entry{role: "Working", content: workingLabel})
+	m.activity = len(m.entries) - 1
+	m.activityFrame = 0
+	m.activityGeneration++
+	m.layoutWidth = 0
+}
+
+// hideActivity removes the temporary row and repairs stream-buffer indices.
+// Incrementing the generation invalidates any timer command already in flight.
+func (m *ui) hideActivity() {
+	idx := m.activity
+	if idx < 0 {
+		return
+	}
+	m.activityGeneration++
+	if idx >= len(m.entries) || m.entries[idx].role != "Working" {
+		idx = -1
+		for i := range m.entries {
+			if m.entries[i].role == "Working" {
+				idx = i
+				break
+			}
+		}
+	}
+	if idx >= 0 {
+		m.entries = append(m.entries[:idx], m.entries[idx+1:]...)
+		if m.streaming > idx {
+			m.streaming--
+		}
+		if m.reasoningStream > idx {
+			m.reasoningStream--
+		}
+		m.layoutWidth = 0
+	}
+	m.activity = -1
+}
+
+func (m *ui) activityTickCmd() tea.Cmd {
+	return activityTick(m.runID, m.activityGeneration)
+}
+
 // startTurn submits a user prompt to the model and enters the working state.
-func (m *ui) startTurn(prompt string) tea.Cmd {
+// queued pre-fills the fresh steering channel so a turn flushed from the
+// previous run's leftovers delivers its remaining messages in order.
+func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
+	steer := make(chan string, 64)
+	for _, q := range queued {
+		select {
+		case steer <- q:
+		default:
+		}
+	}
+	m.queue = append([]string(nil), queued...)
+	m.steer = steer
 	if m.client == nil {
 		m.entries = append(m.entries, entry{role: "Error", content: "No provider configured; complete first-run setup before prompting."})
 		m.input = []rune(prompt)
@@ -224,6 +331,8 @@ func (m *ui) startTurn(prompt string) tea.Cmd {
 		return nil
 	}
 	prior := m.history
+	m.priorLen = len(prior)
+	m.turnSent = make(map[string]int)
 	m.entries = append(m.entries, entry{role: "You", content: prompt})
 	m.history = append(m.history, model.Message{Role: "user", Content: prompt})
 	m.refreshStatusSessionTitle()
@@ -236,6 +345,7 @@ func (m *ui) startTurn(prompt string) tea.Cmd {
 	m.working = true
 	m.jumpBottom()
 	m.layoutWidth = 0
+	m.showActivity()
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.events = make(chan agent.TurnEvent, 64)
@@ -247,9 +357,12 @@ func (m *ui) startTurn(prompt string) tea.Cmd {
 	client, repo, root, mcp := m.client, m.repo, m.root, m.conn.Mcp
 	go func() {
 		defer close(events)
-		agent.RunTurn(ctx, client, repo, root, prior, prompt, mcp, func(ev agent.TurnEvent) {
+		agent.RunTurn(ctx, client, repo, root, prior, prompt, mcp, steer, func(ev agent.TurnEvent) {
 			ev.RunID = runID
-			if ev.Kind == "done" || ev.Kind == "error" || ev.Kind == "tool_result" {
+			// Steer deliveries join terminal events in the non-droppable
+			// path: the engine has already appended the message to its
+			// history, so the UI must account for it before the run ends.
+			if ev.Kind == "done" || ev.Kind == "error" || ev.Kind == "tool_result" || ev.Kind == "steer" {
 				select {
 				case events <- ev:
 				case <-abandon:
@@ -263,7 +376,89 @@ func (m *ui) startTurn(prompt string) tea.Cmd {
 			}
 		})
 	}()
-	return waitEvent(events)
+	return tea.Batch(waitEvent(events), m.activityTickCmd())
+}
+
+// enqueue records a steering prompt typed while a run is active: a visible
+// Queued row, the UI FIFO, and a non-blocking hand-off to the running turn.
+// A nil or full channel leaves the entry only in m.queue, where the turn-end
+// flush picks it up (spec FR-21).
+func (m *ui) enqueue(text string) {
+	m.entries = append(m.entries, entry{role: "Queued", content: text})
+	m.queue = append(m.queue, text)
+	if m.steer != nil {
+		select {
+		case m.steer <- text:
+		default:
+		}
+	}
+	m.input = nil
+	m.edit.endCaret(nil)
+	m.layoutWidth = 0
+}
+
+// sendHeldQueue starts a turn from the messages held when a previous run
+// ended: the head becomes the prompt and the rest pre-fill the fresh
+// steering channel, so the whole batch reaches the model in order. Only an
+// explicit Enter calls it — a run end never auto-starts a turn (FR-21).
+func (m *ui) sendHeldQueue() tea.Cmd {
+	if len(m.queue) == 0 {
+		return nil
+	}
+	kept := m.entries[:0]
+	for _, e := range m.entries {
+		if e.role != "Queued" {
+			kept = append(kept, e)
+		}
+	}
+	m.entries = kept
+	head, rest := m.queue[0], m.queue[1:]
+	m.queue = nil
+	return m.startTurn(head, rest)
+}
+
+// flipQueuedRow turns the first queued row with the given content into a
+// delivered You row. Reports whether a row matched.
+func (m *ui) flipQueuedRow(text string) bool {
+	for i := range m.entries {
+		if m.entries[i].role == "Queued" && m.entries[i].content == text {
+			m.entries[i].role = "You"
+			return true
+		}
+	}
+	return false
+}
+
+// reconcileQueue is the terminal backstop for a steer delivery the UI never
+// saw: when this turn's history holds more user messages than its own prompt
+// plus the steer events the UI processed, the oldest queued messages were
+// received anyway. Flip and drop them so a held batch is never sent twice.
+func (m *ui) reconcileQueue() {
+	if len(m.queue) == 0 || m.priorLen > len(m.history) {
+		return
+	}
+	users := 0
+	for _, msg := range m.history[m.priorLen:] {
+		if msg.Role == "user" {
+			users++
+		}
+	}
+	delivered := 0
+	for _, n := range m.turnSent {
+		delivered += n
+	}
+	missing := users - 1 - delivered // minus the turn's own prompt
+	if missing <= 0 {
+		return
+	}
+	for i := 0; i < missing && i < len(m.queue); i++ {
+		m.flipQueuedRow(m.queue[i])
+	}
+	if missing >= len(m.queue) {
+		m.queue = nil
+		return
+	}
+	m.queue = m.queue[missing:]
 }
 
 // startCompaction summarizes the conversation so far with one model call and
@@ -276,6 +471,7 @@ func (m *ui) startCompaction(focus string) tea.Cmd {
 	m.working = true
 	m.jumpBottom()
 	m.layoutWidth = 0
+	m.showActivity()
 	m.input = nil
 	m.edit.endCaret(m.input)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -304,7 +500,7 @@ func (m *ui) startCompaction(focus string) tea.Cmd {
 		case <-abandon:
 		}
 	}()
-	return waitEvent(events)
+	return tea.Batch(waitEvent(events), m.activityTickCmd())
 }
 
 // previewTheme re-resolves the live styles to a candidate family without
@@ -396,6 +592,7 @@ func (m *ui) applyModel(id string) {
 		return
 	}
 	m.modelName = id
+	m.resolveContextWindow()
 	if cfg, err := providers.LoadStoredConfig(m.stateDir); err == nil && cfg.Provider != "" {
 		cfg.Model = id
 		if err := providers.SaveStoredConfig(m.stateDir, cfg); err != nil {
@@ -404,6 +601,30 @@ func (m *ui) applyModel(id string) {
 		}
 	}
 	m.entries = append(m.entries, entry{role: "Lisa", content: "Model switched to " + id + " and stored for later runs."})
+}
+
+// resolveContextWindow refreshes the active model's context limit from the
+// selected provider's metadata, a user override, and the documented catalog.
+func (m *ui) resolveContextWindow() {
+	var metadata, override int64
+	if m.conn.ContextWindows != nil {
+		metadata = m.conn.ContextWindows[m.modelName]
+	}
+	if m.conn.ContextWindowOverrides != nil {
+		override = m.conn.ContextWindowOverrides[m.conn.ProviderCanonical][m.modelName]
+	}
+	m.contextWindow, m.contextWindowKnown = model.ResolveContextWindow(m.conn.ProviderCanonical, m.modelName, override, metadata)
+}
+
+// recalculateContext recomputes a best-effort estimate for restored or
+// rewritten history. It is deliberately marked estimated: no actual provider
+// request (and therefore no actual tool payload) exists at these lifecycle
+// boundaries.
+func (m *ui) recalculateContext(messages []model.Message) {
+	tokens, ok := model.EstimateInputTokens(m.modelName, messages, nil)
+	m.contextTokens = tokens
+	m.contextSeen = ok
+	m.contextEstimated = ok
 }
 
 func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -430,11 +651,18 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch v.Kind {
+		case "context":
+			// Each stream replaces the displayed context state. An unknown
+			// measurement intentionally clears any value from the prior turn.
+			m.contextTokens = v.ContextTokens
+			m.contextSeen = v.ContextKnown
+			m.contextEstimated = v.ContextEstimated
 		case "reasoning":
 			// Thinking output from a reasoning model; rendered muted and
 			// closed as soon as the first real content delta arrives. Deltas
 			// after content started are dropped so thinking cannot be
 			// mistaken for the answer.
+			m.hideActivity()
 			if m.streaming >= 0 {
 				return m, nil
 			}
@@ -445,6 +673,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reasoningBuf.WriteString(v.Text)
 			m.entries[m.reasoningStream].content = m.reasoningBuf.String()
 		case "text":
+			m.hideActivity()
 			m.reasoningStream = -1 // content after thinking closes the reasoning stream
 			if m.streaming < 0 {
 				m.entries = append(m.entries, entry{role: "Assistant"})
@@ -453,6 +682,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.streamBuf.WriteString(v.Text)
 			m.entries[m.streaming].content = m.streamBuf.String()
 		case "approval":
+			m.hideActivity()
 			if m.cancelling {
 				break
 			}
@@ -461,9 +691,11 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.following = false
 			m.layoutWidth = 0
 			m.reviewSeen = make([]bool, m.pageCount())
+			m.reviewFocus = focusApprove
 			m.markSeenFromScroll()
 			m.status = "Review " + m.pending.Kind + " before approval"
 		case "tool_start", "tool_result":
+			m.hideActivity()
 			m.streamBuf.Reset()
 			m.streaming = -1
 			m.entries = append(m.entries, entry{role: "Tool", content: v.Text})
@@ -480,11 +712,46 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.history = v.History
 				m.persist()
+				if m.working && !m.cancelling && m.pending == nil {
+					m.showActivity()
+					return m, tea.Batch(waitEvent(m.events), m.activityTickCmd())
+				}
+			}
+		case "steer":
+			m.hideActivity()
+			// A queued message reached the model: adopt the engine's history
+			// and flip its Queued row to You. A message from a sent batch
+			// has no row yet, so append one to keep the transcript in step
+			// with the history it just produced (spec FR-21).
+			m.history = v.History
+			// The delivery opens a new provider round: close any open
+			// assistant/reasoning stream so the next round's output starts
+			// fresh entries instead of appending to the previous answer.
+			m.streaming = -1
+			m.streamBuf.Reset()
+			m.reasoningStream = -1
+			m.reasoningBuf.Reset()
+			if !m.flipQueuedRow(v.Text) {
+				m.entries = append(m.entries, entry{role: "You", content: v.Text})
+			}
+			if len(m.queue) > 0 {
+				m.queue = m.queue[1:]
+			}
+			if m.turnSent == nil {
+				m.turnSent = make(map[string]int)
+			}
+			m.turnSent[v.Text]++
+			m.persist()
+			if m.working && !m.cancelling && m.pending == nil {
+				m.showActivity()
+				return m, tea.Batch(waitEvent(m.events), m.activityTickCmd())
 			}
 		case "compacted":
+			m.hideActivity()
 			// The single summarize call finished: swap the summarized turns
 			// for the brief and mark the point in the conversation.
 			m.history = v.History
+			m.recalculateContext(m.history)
 			m.entries = append(m.entries, entry{role: "Lisa", content: "Conversation compacted. Summary of earlier turns:\n\n" + v.Text})
 			m.status = "Ready"
 			m.working = false
@@ -494,9 +761,13 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancel = nil
 			m.persist()
 			m.layoutWidth = 0
+			// A finished compaction holds any queue for an explicit Enter.
+			m.steer = nil
 			return m, nil
 		case "done", "error":
+			m.hideActivity()
 			m.pending = nil
+			m.reviewFocus = focusApprove
 			m.history = v.History
 			m.working = false
 			if m.cancel != nil {
@@ -544,8 +815,13 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.cancelling = false
+			// A run end (done, error, cancel) holds the queue: reconcile the
+			// backstop against the adopted history, then leave the remaining
+			// messages queued for an explicit Enter (FR-21).
+			m.reconcileQueue()
 			m.persist()
 			m.refreshStatusSessionTitle()
+			m.steer = nil
 			if cmd := m.autoNameAfterFirstTurn(v.Kind); cmd != nil {
 				m.layoutWidth = 0
 				return m, cmd
@@ -616,16 +892,46 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.caretOn = !m.caretOn
 		}
 		return m, blinkCaret()
+	case activityTickMsg:
+		// Ticks are scoped to both the run and the current activity interval.
+		// Handoffs, re-arms, cancellation, and reviews invalidate old clocks.
+		if v.runID != m.runID || v.generation != m.activityGeneration || !m.working || m.pending != nil || !m.hasActivity() {
+			return m, nil
+		}
+		m.activityFrame++
+		m.layoutWidth = 0
+		return m, m.activityTickCmd()
 	case escDecayMsg:
 		// The Alt-prefix decay expired: this was a bare ESC, not the
 		// Alt+Return prefix — clear the draft as ESC did before the decay
 		// window existed (spec open item 2).
 		if m.escPrefix {
 			m.escPrefix = false
-			if !m.working && m.pending == nil && len(m.input) > 0 {
-				m.input = nil
-				m.edit.endCaret(nil)
-				m.layoutWidth = 0
+			if !m.working && m.pending == nil {
+				switch {
+				case len(m.input) > 0:
+					m.input = nil
+					m.edit.endCaret(nil)
+					m.promptHistory.resetNavigation()
+					m.layoutWidth = 0
+				case len(m.queue) > 0:
+					// A bare ESC with nothing else to clear drops the held
+					// queue: rows and their texts go together (FR-21).
+					n := len(m.queue)
+					m.queue = nil
+					kept := m.entries[:0]
+					for _, e := range m.entries {
+						if e.role != "Queued" {
+							kept = append(kept, e)
+						}
+					}
+					note := "Queued messages cleared."
+					if n == 1 {
+						note = "Queued message cleared."
+					}
+					m.entries = append(kept, entry{role: "Lisa", content: note})
+					m.layoutWidth = 0
+				}
 			}
 		}
 		return m, nil
@@ -658,6 +964,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setup.err = ""
 		m.setup.models = v.models
+		m.setup.contextWindows = v.contextWindows
 		if len(v.models) == 1 {
 			return m, m.finishSetup(v.models[0])
 		}
@@ -679,24 +986,39 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setup.err = ""
 		m.setup.creds = v.creds
 		m.setup.models = model.ChatGPTModels
+		m.setup.contextWindows = nil
 		m.setup.modelCursor = 0
 		m.setup.stage = setupModel
 		return m, nil
 	case tea.KeyMsg:
+		inputBeforeKey := string(m.input)
+		defer func() {
+			if string(m.input) != inputBeforeKey {
+				m.composerVertical.reset()
+			}
+		}()
 		if m.mode == modeSetup {
 			return m.updateSetup(v)
 		}
 		// The @ completion popup claims navigation and completion keys only
 		// while it has rows; everything else keeps editing the draft.
 		if m.mention.open {
+			before := string(m.input)
 			if claimed, cmd := m.updateMention(v); claimed {
+				if string(m.input) != before {
+					m.promptHistory.resetNavigation()
+				}
 				return m, cmd
 			}
 		}
 		// The / command popup mirrors it; the two popups are never open
 		// together, and Esc/Ctrl+C must still reach a running turn.
-		if m.commandPopup.open && !m.working {
+		if m.commandPopup.open {
+			before := string(m.input)
 			if claimed, cmd := m.updateCommand(v); claimed {
+				if string(m.input) != before {
+					m.promptHistory.resetNavigation()
+				}
 				return m, cmd
 			}
 		}
@@ -706,7 +1028,13 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.updateKeyModal(v)
 		}
 		if m.dialog.open {
-			return m.updateDialog(v)
+			snapshotID := m.snapshot.ID
+			updated, cmd := m.updateDialog(v)
+			if m.snapshot.ID != snapshotID {
+				m.promptHistory = newPromptHistory(restoredPromptHistory(m.snapshot))
+				m.composerVertical.reset()
+			}
+			return updated, cmd
 		}
 		if v.String() == "ctrl+g" {
 			if !m.working && m.pending == nil {
@@ -715,33 +1043,49 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.pending != nil {
+			// The review gate owns the decision: arrows/Tab move the focus,
+			// Enter confirms the focused button, and every other key —
+			// letters included — stays inert (FR-22).
 			switch v.String() {
-			case "y", "Y":
-				if m.width < minWidth || m.height < minHeight {
-					return m, nil
-				}
-				for _, seen := range m.reviewSeen {
-					if !seen {
-						m.status = "Review every page before approving"
+			case "left", "shift+tab":
+				m.reviewFocus = focusApprove
+				return m, nil
+			case "right", "tab":
+				m.reviewFocus = focusDecline
+				return m, nil
+			case "enter":
+				if m.reviewFocus == focusApprove {
+					if m.width < minWidth || m.height < minHeight {
 						return m, nil
 					}
+					if !m.reviewReady() {
+						m.status = reviewGateStatus
+						return m, nil
+					}
+					m.pending.Reply <- true
+					m.status = "Executing approved " + m.pending.Kind
+					m.pending = nil
+					m.reviewSeen = nil
+					m.reviewFocus = focusApprove
+					m.jumpBottom()
+					m.layoutWidth = 0
+					return m, nil
 				}
-				m.pending.Reply <- true
-				m.status = "Executing approved " + m.pending.Kind
-				m.pending = nil
-				m.reviewSeen = nil
-				m.jumpBottom()
-				m.layoutWidth = 0
-				return m, nil
-			case "n", "N":
 				m.pending.Reply <- false
 				m.status = "Rejected"
 				m.pending = nil
 				m.reviewSeen = nil
+				m.reviewFocus = focusApprove
 				m.jumpBottom()
 				m.layoutWidth = 0
 				return m, nil
 			}
+		}
+		// Composer arrows are history/caret navigation only after overlays
+		// have declined them. Popups, the review gate, dialogs, and key modal
+		// therefore retain ownership of their navigation keys.
+		if (v.String() == "up" || v.String() == "down") && m.editable() {
+			return m, m.navigatePromptHistory(v.String() == "up")
 		}
 		// The Alt-prefix decay window only carries Return; any other chord
 		// is processed as its own key and cancels the window (the ESC is
@@ -752,11 +1096,12 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch v.String() {
 		case "ctrl+c", "esc":
 			if m.working {
-				// Cancel-run stays immediate: while a turn runs, editing is
-				// inert, so ESC carries no newline-prefix ambiguity.
+				// Cancel-run stays immediate: ESC during a run never arms
+				// the newline prefix, so it carries no ambiguity.
 				m.cancel()
 				m.pending = nil
 				m.reviewSeen = nil
+				m.reviewFocus = focusApprove
 				m.cancelling = true
 				m.status = "Cancelling"
 				m.layoutWidth = 0
@@ -793,7 +1138,9 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "backspace", "ctrl+h":
 			if m.editable() && len(m.input) > 0 {
 				m.caretNote()
-				deleteBack(&m.input, &m.edit)
+				if deleteBack(&m.input, &m.edit) {
+					m.promptHistory.resetNavigation()
+				}
 				if cmd := m.syncPopups(); cmd != nil {
 					m.layoutWidth = 0
 					return m, cmd
@@ -804,6 +1151,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// (probe table in tasks.md), so it needs no distinct chord.
 			if m.editable() && killWordBack(&m.input, &m.edit) {
 				m.caretNote()
+				m.promptHistory.resetNavigation()
 				if cmd := m.syncPopups(); cmd != nil {
 					m.layoutWidth = 0
 					return m, cmd
@@ -812,6 +1160,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+delete", "alt+delete", "alt+d":
 			if m.editable() && killWordForward(&m.input, &m.edit) {
 				m.caretNote()
+				m.promptHistory.resetNavigation()
 				if cmd := m.syncPopups(); cmd != nil {
 					m.layoutWidth = 0
 					return m, cmd
@@ -821,15 +1170,18 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.editable() {
 				m.caretNote()
 				moveWordBack(m.input, &m.edit)
+				m.composerVertical.reset()
 			}
 		case "alt+f":
 			if m.editable() {
 				m.caretNote()
 				moveWordForward(m.input, &m.edit)
+				m.composerVertical.reset()
 			}
 		case "ctrl+u":
 			if m.editable() && killToStart(&m.input, &m.edit) {
 				m.caretNote()
+				m.promptHistory.resetNavigation()
 				if cmd := m.syncPopups(); cmd != nil {
 					m.layoutWidth = 0
 					return m, cmd
@@ -838,6 +1190,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+k":
 			if m.editable() && killToEnd(&m.input, &m.edit) {
 				m.caretNote()
+				m.promptHistory.resetNavigation()
 				if cmd := m.syncPopups(); cmd != nil {
 					m.layoutWidth = 0
 					return m, cmd
@@ -846,6 +1199,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+y":
 			if m.editable() && yank(&m.input, &m.edit) {
 				m.caretNote()
+				m.promptHistory.resetNavigation()
 				if cmd := m.syncPopups(); cmd != nil {
 					m.layoutWidth = 0
 					return m, cmd
@@ -854,6 +1208,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+t":
 			if m.editable() && transpose(&m.input, &m.edit) {
 				m.caretNote()
+				m.promptHistory.resetNavigation()
 			}
 		case "ctrl+j", "alt+enter", "ctrl+enter", "shift+enter":
 			// Newline insertion (the Return-modifier family). ctrl+enter
@@ -863,6 +1218,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.editable() && !m.mention.open && !m.commandPopup.open {
 				m.caretNote()
 				insertNewline(&m.input, &m.edit)
+				m.promptHistory.resetNavigation()
 			}
 		case "enter":
 			if m.escPrefix {
@@ -870,24 +1226,86 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.editable() && !m.mention.open && !m.commandPopup.open {
 					m.caretNote()
 					insertNewline(&m.input, &m.edit)
+					m.promptHistory.resetNavigation()
 					break
 				}
-			}
-			if m.working || m.width < minWidth || m.height < minHeight {
-				return m, nil
 			}
 			// Typed newlines flatten to spaces on submit, exactly as
 			// bracketed-paste newlines do (user-confirmed decision).
 			prompt := strings.TrimSpace(strings.ReplaceAll(string(m.input), "\n", " "))
-			if prompt == "" {
+			if m.working {
+				// Live composer (FR-21): Enter turns the draft into a
+				// steering prompt. A leading / is refused with the draft
+				// kept, while // queues the literal remainder. These paths
+				// carry no min-size guard.
+				switch {
+				case prompt == "":
+					return m, nil
+				case strings.HasPrefix(prompt, "//"):
+					if rest := prompt[2:]; rest != "" {
+						m.promptHistory.append(rest)
+						m.enqueue(rest)
+						m.persist()
+					}
+					return m, nil
+				case strings.HasPrefix(prompt, "/"):
+					m.entries = append(m.entries, entry{role: "Error", content: "Commands are inactive while a run is active. Esc cancels the run; // queues a literal slash."})
+					m.layoutWidth = 0
+					return m, nil
+				default:
+					m.promptHistory.append(prompt)
+					m.enqueue(prompt)
+					m.persist()
+					return m, nil
+				}
+			}
+			if m.width < minWidth || m.height < minHeight {
 				return m, nil
+			}
+			if prompt == "" {
+				// Enter on an empty draft sends the held queue (FR-21):
+				// a run end never auto-starts it, this is the only send.
+				if len(m.queue) > 0 {
+					return m, m.sendHeldQueue()
+				}
+				return m, nil
+			}
+			submitted := prompt
+			if strings.HasPrefix(submitted, "//") {
+				// handleCommand strips one slash before dispatching an escaped
+				// literal prompt; history stores the exact queued text.
+				submitted = submitted[1:]
+			}
+			record := false
+			switch {
+			case strings.HasPrefix(prompt, "//"):
+				record = m.client != nil
+			case strings.HasPrefix(prompt, "/"):
+				record = recognizedCommand(prompt)
+			default:
+				record = m.client != nil
+			}
+			if record {
+				m.promptHistory.append(submitted)
 			}
 			m.input = nil
 			m.edit.endCaret(nil)
 			if strings.HasPrefix(prompt, "/") {
-				return m, m.handleCommand(prompt)
+				snapshotID := m.snapshot.ID
+				if record && !strings.HasPrefix(prompt, "//") {
+					// Preserve the accepted command in its originating session even
+					// when it immediately resumes another session.
+					m.persist()
+				}
+				cmd := m.handleCommand(prompt)
+				if m.snapshot.ID != snapshotID {
+					m.promptHistory = newPromptHistory(restoredPromptHistory(m.snapshot))
+				} else {
+					m.persist()
+				}
+				return m, cmd
 			}
-			return m, m.startTurn(prompt)
+			return m, m.startTurn(prompt, nil)
 		default:
 			if m.editable() {
 				if v.Type == tea.KeyRunes {
@@ -899,9 +1317,13 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.caretNote() // solid caret while typing
 					insertRunes(&m.input, &m.edit, runes)
+					if len(runes) > 0 {
+						m.promptHistory.resetNavigation()
+					}
 				} else if v.Type == tea.KeySpace {
 					m.caretNote()
 					insertRunes(&m.input, &m.edit, []rune{' '})
+					m.promptHistory.resetNavigation()
 				}
 			}
 			if cmd := m.syncPopups(); cmd != nil {
@@ -914,17 +1336,110 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// editable reports whether the composer accepts edits: not while a turn
-// streams or an approval is pending.
+// editable reports whether the composer accepts edits: not while an approval
+// is pending. The composer stays live while a turn streams (FR-21).
 func (m *ui) editable() bool {
-	return !m.working && m.pending == nil
+	return m.pending == nil
+}
+
+// recognizedCommand reports whether an idle slash submission dispatches to a
+// reserved application command. Unknown slash input is restored in the
+// composer and must not become history.
+func recognizedCommand(prompt string) bool {
+	name, _, _ := strings.Cut(strings.TrimPrefix(prompt, "/"), " ")
+	for _, command := range commands {
+		if name == command.Name {
+			return true
+		}
+	}
+	return false
+}
+
+// composerInputWidth is the usable width of the text area, matching the
+// composer style's insets so vertical caret moves track the rendered wraps.
+func (m *ui) composerInputWidth() int {
+	style := m.composerStyle
+	if style == "" {
+		style = "minimal"
+	}
+	if m.width <= minWidth && (style == "bordered" || style == "chatter") {
+		style = "minimal"
+	}
+	width := m.width
+	switch style {
+	case "bordered":
+		width -= 4
+	case "chatter":
+		width -= runewidth.StringWidth("You › ")
+	}
+	return max(1, width)
+}
+
+// navigatePromptHistory gives the composer the usual two-step edge behavior:
+// the first edge press moves to the row boundary, and the next recalls a
+// prompt. Within a wrapped draft, it moves vertically without touching history.
+func (m *ui) navigatePromptHistory(up bool) tea.Cmd {
+	width := m.composerInputWidth()
+	caret := min(len(m.input), max(0, m.edit.caret))
+	row := composerVisualRow(m.input, caret, width)
+	firstRow := composerVisualRow(m.input, 0, width)
+	lastRow := composerVisualRow(m.input, len(m.input), width)
+
+	if up {
+		if row > firstRow {
+			if next, ok := m.composerVertical.move(m.input, caret, width, -1); ok {
+				m.edit.caret = next
+				m.caretNote()
+				m.layoutWidth = 0
+			}
+			return nil
+		}
+		if caret != 0 {
+			m.edit.caret = 0
+			m.composerVertical.reset()
+			m.caretNote()
+			m.layoutWidth = 0
+			return nil
+		}
+		recalled, ok := m.promptHistory.previous(m.input)
+		if !ok {
+			return nil
+		}
+		m.input = append([]rune(nil), recalled...)
+	} else {
+		if row < lastRow {
+			if next, ok := m.composerVertical.move(m.input, caret, width, 1); ok {
+				m.edit.caret = next
+				m.caretNote()
+				m.layoutWidth = 0
+			}
+			return nil
+		}
+		if caret != len(m.input) {
+			m.edit.caret = len(m.input)
+			m.composerVertical.reset()
+			m.caretNote()
+			m.layoutWidth = 0
+			return nil
+		}
+		recalled, ok := m.promptHistory.next()
+		if !ok {
+			return nil
+		}
+		m.input = append([]rune(nil), recalled...)
+	}
+	m.edit.endCaret(m.input)
+	m.composerVertical.reset()
+	m.caretNote()
+	m.layoutWidth = 0
+	return m.syncPopups()
 }
 
 // syncPopups re-filters the @-mention and /-command popups after a draft
 // edit; the popups are never open together, and an @ anywhere wins.
 // Returns the background command for a freshly started mention index walk.
 func (m *ui) syncPopups() tea.Cmd {
-	if !m.working && m.repo != nil {
+	if m.repo != nil {
 		if _, active := agent.MentionQuery(string(m.input)); active {
 			m.commandPopup.open = false // the popups never coexist
 			if cmd := m.startMention(); cmd != nil {
@@ -936,14 +1451,12 @@ func (m *ui) syncPopups() tea.Cmd {
 		m.mention.open = false
 	}
 	// A typed / opens the command popup while no argument has begun.
-	if !m.working {
-		if _, active := commandQuery(string(m.input)); active && !strings.Contains(string(m.input), "@") {
-			m.commandPopup.open = true
-			m.syncCommand()
-			m.mention.open = false
-		} else {
-			m.commandPopup.open = false
-		}
+	if _, active := commandQuery(string(m.input)); active && !strings.Contains(string(m.input), "@") {
+		m.commandPopup.open = true
+		m.syncCommand()
+		m.mention.open = false
+	} else {
+		m.commandPopup.open = false
 	}
 	return nil
 }
@@ -985,14 +1498,15 @@ func (m *ui) autoNameAfterFirstTurn(kind string) tea.Cmd {
 }
 
 func (m *ui) persist() {
+	m.snapshot.PromptHistory = m.promptHistory.all()
 	if m.store == nil {
 		return
 	}
 	m.snapshot.History = m.history
 	m.snapshot.Entries = make([]session.Entry, 0, len(m.entries))
 	for _, current := range m.entries {
-		if current.role == "Logo" {
-			continue // startup block is per-run furniture, never stored
+		if current.role == "Logo" || current.role == "Queued" || current.role == "Working" {
+			continue // per-run furniture: startup art, undelivered queue rows, and ephemeral activity are never stored
 		}
 		m.snapshot.Entries = append(m.snapshot.Entries, session.Entry{Role: current.role, Content: current.content})
 	}

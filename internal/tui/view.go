@@ -56,11 +56,26 @@ func (m *ui) rebuild() {
 	plain := lipgloss.NewStyle()
 	m.lines = m.lines[:0]
 	m.lineStyles = m.lineStyles[:0]
-	// add appends display lines and the style each one renders with.
+	m.lineSpans = m.lineSpans[:0]
+	m.lineActivity = m.lineActivity[:0]
+	// add appends display lines, the style each one renders with, and the
+	// inline color spans painted over it at render time. Logo art and the
+	// review proposal body skip detection: spans there would paint ASCII
+	// art and diff content, not model-emitted literals.
 	add := func(lines []string, style lipgloss.Style) {
 		for _, line := range lines {
 			m.lines = append(m.lines, line)
 			m.lineStyles = append(m.lineStyles, style)
+			m.lineSpans = append(m.lineSpans, nil)
+			m.lineActivity = append(m.lineActivity, false)
+		}
+	}
+	addSwatches := func(lines []string, style lipgloss.Style) {
+		for _, line := range lines {
+			m.lines = append(m.lines, line)
+			m.lineStyles = append(m.lineStyles, style)
+			m.lineSpans = append(m.lineSpans, lisaui.FindSwatches(line))
+			m.lineActivity = append(m.lineActivity, false)
 		}
 	}
 	width := contentWidth(m.width)
@@ -99,32 +114,63 @@ func (m *ui) rebuild() {
 				first = true
 				for _, line := range strings.Split(e.content, "\n") {
 					if runewidth.StringWidth(line) <= width {
-						add([]string{line}, m.theme.Title)
+						add([]string{line}, withBase(m.theme.Title, m.theme.Base))
 						continue
 					}
-					add(wrap(line, width), m.theme.Title)
+					add(wrap(line, width), withBase(m.theme.Title, m.theme.Base))
 				}
 				continue
 			}
 			if first {
-				add([]string{""}, plain)
+				add([]string{""}, withBase(plain, m.theme.Base))
 			}
 			first = true
-			style := plain
-			switch {
-			case e.role == "Reasoning" || e.role == "Tool":
-				// Reasoning output (FR-15) and tool activity render muted:
-				// machinery, not assistant content.
-				style = m.theme.Muted
-			case e.role == "Error":
-				// Conversation prose stays uncolored except error entries
-				// (themes spec); failures are the one colored role.
-				style = m.theme.Error
+			if e.role == "Working" {
+				plainText := activitySpinner(m.activityFrame) + " " + workingLabel
+				for i, line := range wrap(plainText, width) {
+					m.lines = append(m.lines, line)
+					m.lineStyles = append(m.lineStyles, m.theme.Muted)
+					m.lineSpans = append(m.lineSpans, nil)
+					m.lineActivity = append(m.lineActivity, i == 0)
+				}
+				continue
 			}
-			add(wrap(e.role+": "+e.content, width), style)
+			// Full-surface bands: authorship shows in the background, not in
+			// prose hue floods — You/Assistant prose adopts Normal fg on their
+			// band, Tool shares one Muted-on-BgTool band (activity and result
+			// stay distinct in prefix text), Reasoning stays Muted flat, and
+			// failures signal by Error fg on the bare canvas.
+			style := withBase(m.theme.Normal, m.theme.BgUser)
+			switch {
+			case e.role == "Assistant":
+				style = withBase(m.theme.Normal, m.theme.BgModel)
+			case e.role == "Reasoning":
+				// The quietest layer carries no band: foreground-muted only.
+				style = m.theme.Muted
+			case e.role == "Tool":
+				style = withBase(m.theme.Muted, m.theme.BgTool)
+			case e.role == "Error":
+				style = withBase(m.theme.Error, m.theme.Base)
+			case e.role == "Queued":
+				// Queued prompts sit on the user band but muted: they are the
+				// user's words, not yet sent.
+				style = withBase(m.theme.Muted, m.theme.BgUser)
+			case e.role != "You":
+				// Lisa/system and any future prose role keep their existing
+				// look on the canvas.
+				style = withBase(plain, m.theme.Base)
+			}
+			// Inline swatches: color literals paint their own background
+			// (with a contrast-picked foreground) over whatever band would
+			// apply, so "#4493f8" previews the color in place. Spans are
+			// detected per wrapped line, so no swatch ever crosses a line
+			// boundary: widths pre- and post-swatch are identical because the
+			// decoration is visual only — no text is added, removed, or
+			// reordered, only SGR spans wrap existing cells.
+			addSwatches(wrap(e.role+": "+e.content, width), style)
 		}
+		m.layoutWidth = m.width
 	}
-	m.layoutWidth = m.width
 }
 
 func (m *ui) View() string {
@@ -166,25 +212,38 @@ func (m *ui) mainView() string {
 	rows := make([]string, 0, m.height)
 	for i, line := range header {
 		if i == 0 {
-			rows = append(rows, m.theme.Title.Render(fit(line, m.width)))
+			rows = append(rows, withBase(m.theme.Title, m.theme.Base).Render(fit(line, m.width)))
 		} else {
-			rows = append(rows, fit(line, m.width))
+			rows = append(rows, m.theme.Base.Render(fit(line, m.width)))
 		}
 	}
 	start := m.scroll
 	for i := range body {
 		line := ""
 		style := m.theme.Base
+		var spans []lisaui.Swatch
 		if start+i < len(m.lines) {
 			line = m.lines[start+i]
 			if start+i < len(m.lineStyles) {
 				style = withBase(m.lineStyles[start+i], m.theme.Base)
 			}
+			if start+i < len(m.lineSpans) {
+				spans = m.lineSpans[start+i]
+			}
 		}
 		// Style the padded line: foreground on padding spaces is invisible,
-		// while the Base background paints the full row. Roles never carry
-		// their own background, so Base is the only SGR 48 emitter here.
-		rows = append(rows, style.Render(fit(line, m.width)))
+		// while the band background paints the full row; spans repaint only
+		// the literal's own cells on top. lineSpans rides parallel to lines
+		// (same indices, cleared with them in rebuild) so stale swatches
+		// can never paint a reused row.
+		fitted := fit(line, m.width)
+		if start+i < len(m.lineActivity) && m.lineActivity[start+i] {
+			muted := withBase(m.theme.Muted, m.theme.Base)
+			accent := withBase(m.theme.Title, m.theme.Base)
+			rows = append(rows, renderActivityRow(fitted, line, m.activityFrame, muted, accent))
+			continue
+		}
+		rows = append(rows, renderSwatches(style, spans, fitted))
 	}
 	m.spliceScrollbar(rows, len(header), body)
 	rows = append(rows, mention...)
@@ -196,11 +255,95 @@ func (m *ui) mainView() string {
 	return strings.Join(rows, "\n")
 }
 
+func activitySpinner(frame int) string {
+	return workingSpinnerFrames[frame%len(workingSpinnerFrames)]
+}
+
+// renderActivityRow applies the muted base and one moving accent cell without
+// changing visible text or cell widths. Spinner and sweep share the frame.
+func renderActivityRow(fitted, plainLine string, frame int, muted, accent lipgloss.Style) string {
+	runes := []rune(fitted)
+	plainCount := len([]rune(plainLine))
+	labelCount := len([]rune(workingLabel))
+	if len(runes) == 0 || labelCount == 0 {
+		return muted.Render(fitted)
+	}
+	head := frame % labelCount
+	if head < 0 {
+		head += labelCount
+	}
+	headIdx := 2 + head // spinner and space precede the label
+	styleAt := func(i int) bool {
+		return i < plainCount && (i == 0 || i == headIdx)
+	}
+	var out strings.Builder
+	start := 0
+	current := styleAt(0)
+	flush := func(end int, useAccent bool) {
+		if end <= start {
+			return
+		}
+		style := muted
+		if useAccent {
+			style = accent
+		}
+		out.WriteString(style.Render(string(runes[start:end])))
+		start = end
+	}
+	for i := 1; i < len(runes); i++ {
+		if next := styleAt(i); next != current {
+			flush(i, current)
+			current = next
+		}
+	}
+	flush(len(runes), current)
+	return out.String()
+}
+
+// renderSwatches styles a fitted row with the band style, then repaints each
+// detected color span on its own swatch background. Spans are rune offsets
+// into the pre-fit line; fit only appends padding (never reorders), so they
+// address the padded row unchanged. Zero spans render the band style alone.
+// The swatch shows the literal's own runes (decoration only), so padding
+// and wrapping are unaffected.
+func renderSwatches(band lipgloss.Style, spans []lisaui.Swatch, fitted string) string {
+	if len(spans) == 0 {
+		return band.Render(fitted)
+	}
+	runes := []rune(fitted)
+	var out strings.Builder
+	pos := 0
+	emit := func(end int, style lipgloss.Style) {
+		if end > pos {
+			out.WriteString(style.Render(string(runes[pos:end])))
+			pos = end
+		}
+	}
+	for _, sp := range spans {
+		if sp.Start < pos || sp.Start >= sp.End || sp.End > len(runes) {
+			continue
+		}
+		emit(sp.Start, band)
+		out.WriteString(lisaui.SwatchStyle(sp.Hex).Render(string(runes[sp.Start:sp.End])))
+		pos = sp.End
+	}
+	emit(len(runes), band)
+	return out.String()
+}
+
 // withBase layers a role's foreground attributes over the theme canvas
-// background: roles set fg/bold only, Base sets bg only, so the union paints
-// the row's text in the role color on the theme background. When the theme
-// leaves the terminal default (default family), the role renders unchanged.
+// background: canvas roles (Base, BgUser, BgTool, BgModel) set bg only,
+// foreground roles set fg/bold only, so the union paints the row's text in
+// the role color on the intended background. A role that already carries
+// its own band background keeps it; Base fills in only behind background-
+// free roles. When the theme leaves the terminal default (default family),
+// the role renders unchanged.
 func withBase(role, base lipgloss.Style) lipgloss.Style {
+	if bg := role.GetBackground(); bg != nil {
+		if _, isNoColor := bg.(lipgloss.NoColor); !isNoColor {
+			return role
+		}
+	}
 	if bg := base.GetBackground(); bg != nil {
 		if _, isNoColor := bg.(lipgloss.NoColor); !isNoColor {
 			return role.Background(bg)

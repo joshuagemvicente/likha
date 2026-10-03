@@ -19,8 +19,9 @@ import (
 // per configured provider and the section handlers render the sections in
 // order, so the dialog never needs a /providers switch first.
 type modelsSection struct {
-	provider model.Provider
-	models   []string
+	provider       model.Provider
+	models         []string
+	contextWindows map[string]int64
 }
 
 // modelsRow is one selectable dialog row: a model id plus the section's
@@ -28,8 +29,9 @@ type modelsSection struct {
 // cursor space, dialogMatches, and the confirm guards only ever see
 // selectable rows.
 type modelsRow struct {
-	provider model.Provider
-	model    string
+	provider      model.Provider
+	model         string
+	contextWindow int64
 }
 
 // modelsSectionMsg carries one provider's arrived /models section. gen is
@@ -48,11 +50,36 @@ type modelsProviderFailedMsg struct {
 	errSample   string
 }
 
-// listModelsFunc fetches one provider's model ids. It exists so tests can
-// point rows at canned data: model.Providers URLs are fixed, so the dialog
-// cannot redirect rows at httptest servers without this seam.
+type modelDetailsContextKey struct{}
+
+type modelDetailsSink struct {
+	details []model.ModelDetails
+}
+
+// listModelDetailsFunc fetches ids and optional context-window metadata. It
+// remains independently injectable for metadata-specific tests.
+var listModelDetailsFunc = model.ListModelsWithDetails
+
+// listModelsFunc preserves the original ID-only injection seam used by the
+// /models tests. Its default implementation performs the richer request and
+// places the details in the per-fetch context sink; an injected legacy test
+// implementation can continue to return only ids without making a network
+// request.
 var listModelsFunc = func(ctx context.Context, base, apiKey string) ([]string, error) {
-	return model.ListModels(ctx, base, apiKey)
+	details, err := listModelDetailsFunc(ctx, base, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	if sink, ok := ctx.Value(modelDetailsContextKey{}).(*modelDetailsSink); ok {
+		sink.details = details
+	}
+	ids := make([]string, 0, len(details))
+	for _, detail := range details {
+		if detail.ID != "" {
+			ids = append(ids, detail.ID)
+		}
+	}
+	return ids, nil
 }
 
 // observeModelsFetch reports one API list fetch: provider canonical name,
@@ -69,20 +96,34 @@ type modelsTarget struct {
 }
 
 // fetchModelsTarget lists one target: oauth targets contribute the curated
-// list with no network, API targets list through listModelsFunc under the
-// existing 5 s bound and report through observeModelsFetch.
-func fetchModelsTarget(tg modelsTarget) ([]string, error) {
+// list with no network, API targets list ids and metadata through
+// listModelsFunc under the existing 5 s bound and report through
+// observeModelsFetch.
+func fetchModelsTarget(tg modelsTarget) ([]string, map[string]int64, error) {
 	if tg.oauth {
-		return model.ChatGPTModels, nil
+		return model.ChatGPTModels, nil, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	sink := &modelDetailsSink{}
+	ctx = context.WithValue(ctx, modelDetailsContextKey{}, sink)
 	start := time.Now()
 	ids, err := listModelsFunc(ctx, tg.provider.BaseURL, tg.key)
 	if observeModelsFetch != nil {
 		observeModelsFetch(tg.provider.Name, time.Since(start), err)
 	}
-	return ids, err
+	if err != nil {
+		return nil, nil, err
+	}
+	contextWindows := make(map[string]int64)
+	for _, detail := range sink.details {
+		if detail.ID != "" && detail.ContextWindow > 0 {
+			if _, exists := contextWindows[detail.ID]; !exists {
+				contextWindows[detail.ID] = detail.ContextWindow
+			}
+		}
+	}
+	return ids, contextWindows, nil
 }
 
 // buildModelsTargets computes the /models fetch set in final display order:
@@ -131,7 +172,12 @@ func buildModelsTargets(stateDir, activeBase, activeCanonical, activeKey, active
 		}
 	}
 	if activeIdx > 0 {
-		targets = append([]modelsTarget{targets[activeIdx]}, append(targets[:activeIdx], targets[activeIdx+1:]...)...)
+		active := targets[activeIdx]
+		ordered := make([]modelsTarget, 0, len(targets))
+		ordered = append(ordered, active)
+		ordered = append(ordered, targets[:activeIdx]...)
+		ordered = append(ordered, targets[activeIdx+1:]...)
+		targets = ordered
 	} else if activeIdx < 0 && activeBase != "" {
 		if p, ok := lookupProviderByBase(activeBase, activeCanonical); ok {
 			if p.Auth == model.AuthOAuth {
@@ -247,7 +293,7 @@ func (m *ui) startModelsFetch() tea.Cmd {
 			continue
 		}
 		cmds = append(cmds, func() tea.Msg {
-			ids, err := fetchModelsTarget(tg)
+			ids, contextWindows, err := fetchModelsTarget(tg)
 			if err != nil || len(ids) == 0 {
 				sample := ""
 				if err != nil {
@@ -255,7 +301,7 @@ func (m *ui) startModelsFetch() tea.Cmd {
 				}
 				return modelsProviderFailedMsg{gen: gen, displayName: tg.provider.DisplayName, errSample: sample}
 			}
-			return modelsSectionMsg{gen: gen, section: modelsSection{provider: tg.provider, models: ids}}
+			return modelsSectionMsg{gen: gen, section: modelsSection{provider: tg.provider, models: ids, contextWindows: contextWindows}}
 		})
 	}
 	return tea.Batch(cmds...)
@@ -320,7 +366,7 @@ func (m *ui) applyModelsSections(sections []modelsSection) {
 				continue
 			}
 			seen[id] = true
-			rows = append(rows, modelsRow{provider: s.provider, model: id})
+			rows = append(rows, modelsRow{provider: s.provider, model: id, contextWindow: s.contextWindows[id]})
 			flat = append(flat, id)
 			counts[id]++
 		}
@@ -432,6 +478,7 @@ func (m *ui) modelLabel(orig int) string {
 func (m *ui) applyModelRow(row modelsRow) {
 	if m.isLiveProvider(row.provider) {
 		m.applyModel(row.model)
+		m.setActiveContextWindows(row.provider, row.model, row.contextWindow, true)
 		return
 	}
 	if row.provider.Auth == model.AuthOAuth {
@@ -481,6 +528,7 @@ func (m *ui) applyModelRow(row modelsRow) {
 // The swap mirrors activateProvider: stream buffers reset so no bytes from
 // the previous provider bleed into the next turn.
 func (m *ui) activateModelClient(p model.Provider, client *model.Client, modelID string) {
+	sameProvider := m.isLiveProvider(p)
 	if p.SessionHeader != "" {
 		client.SetSessionHeader(p.SessionHeader)
 		client.SetSession(m.snapshot.ID)
@@ -497,6 +545,7 @@ func (m *ui) activateModelClient(p model.Provider, client *model.Client, modelID
 	m.conn.Provider = p.DisplayName
 	m.conn.ProviderCanonical = p.Name
 	m.conn.Verified = true
+	m.setActiveContextWindows(p, modelID, m.rowContextWindow(p.Name, modelID), sameProvider)
 	m.status = "Connected"
 	m.layoutWidth = 0
 	m.entries = append(m.entries, entry{role: "Lisa", content: "Model switched to " + modelID + " on " + p.DisplayName + " and stored for later runs."})
@@ -509,4 +558,46 @@ func (m *ui) activateModelClient(p model.Provider, client *model.Client, modelID
 	if err := providers.SaveStoredConfig(m.stateDir, cfg); err != nil {
 		m.entries = append(m.entries, entry{role: "Error", content: "Store model: " + err.Error()})
 	}
+}
+
+// rowContextWindow returns metadata carried by the most recently fetched
+// section, if present. The catalog and configured overrides remain separate
+// fallbacks resolved by the context-window consumer.
+func (m *ui) rowContextWindow(providerID, modelID string) int64 {
+	if m.modelsCache.sections == nil {
+		return 0
+	}
+	return m.modelsCache.sections[providerID].contextWindows[modelID]
+}
+
+// setActiveContextWindows installs metadata from the selected provider's
+// cached /models section and ensures the selected row's value is represented.
+// A zero value removes any stale value for that model rather than treating an
+// old model's window as current.
+func (m *ui) setActiveContextWindows(p model.Provider, modelID string, window int64, preserveCurrent bool) {
+	windows := make(map[string]int64)
+	if section, ok := m.modelsCache.sections[p.Name]; ok {
+		for id, value := range section.contextWindows {
+			if value > 0 {
+				windows[id] = value
+			}
+		}
+	}
+	if window > 0 {
+		windows[modelID] = window
+	} else if preserveCurrent {
+		if current := m.conn.ContextWindows[modelID]; current > 0 {
+			windows[modelID] = current
+		}
+	}
+	if len(windows) == 0 {
+		m.conn.ContextWindows = nil
+	} else {
+		m.conn.ContextWindows = windows
+	}
+	m.resolveContextWindow()
+	// A measurement from the previously selected model/provider describes a
+	// different request. Re-estimate the unchanged conversation under the new
+	// model until its next request reports fresh usage.
+	m.recalculateContext(m.history)
 }

@@ -158,7 +158,7 @@ func (m *ui) handleCommand(line string) tea.Cmd {
 	m.layoutWidth = 0 // command results change the conversation body
 	if strings.HasPrefix(line, "//") {
 		// Escaped literal slash: strip one and send as a normal prompt.
-		return m.startTurn(line[1:])
+		return m.startTurn(line[1:], nil)
 	}
 	name, arg, _ := strings.Cut(line[1:], " ")
 	arg = strings.TrimSpace(arg)
@@ -251,6 +251,7 @@ func (m *ui) resumeSession(id string) tea.Cmd {
 	}
 	m.snapshot = snapshot
 	m.history = snapshot.History
+	m.recalculateContext(m.history)
 	m.freshSession = false // a resumed session never re-generates its name
 	m.entries = m.entries[:0]
 	for _, saved := range snapshot.Entries {
@@ -263,6 +264,7 @@ func (m *ui) resumeSession(id string) tea.Cmd {
 	m.reasoningStream = -1
 	m.pending = nil
 	m.reviewSeen = nil
+	m.reviewFocus = focusApprove
 	m.jumpBottom()
 	m.layoutWidth = 0
 	m.status = "Resumed session"
@@ -413,6 +415,12 @@ func (m *ui) confirmDialog(matches []int) tea.Cmd {
 		m.dialogModelsNote = ""
 		m.layoutWidth = 0
 		m.applyModelRow(row)
+		// applyModelRow installs metadata for the newly selected provider/model;
+		// resolve after that update so the new limit wins over the old model's.
+		if m.modelName == row.model && m.isLiveProvider(row.provider) {
+			m.resolveContextWindow()
+			m.recalculateContext(m.history)
+		}
 		return nil
 	}
 	// Guard the parallel arrays: matches were computed for the list seen at
@@ -529,32 +537,32 @@ func (m *ui) dialogView() string {
 	// Every content row is fitted to the inner width BEFORE styling; a style
 	// is never applied over an escape sequence and never re-fitted after.
 	var content []string
-	content = append(content, m.theme.Title.Render(fit(title, inner)))
-	content = append(content, fit("", inner))
+	content = append(content, withBase(m.theme.Title, m.theme.Base).Render(fit(title, inner)))
+	content = append(content, m.theme.Base.Render(fit("", inner)))
 	if m.dialog.loadErr != "" {
 		for _, line := range wrap("Error: "+m.dialog.loadErr, inner) {
-			content = append(content, m.theme.Error.Render(fit(line, inner)))
+			content = append(content, withBase(m.theme.Error, m.theme.Base).Render(fit(line, inner)))
 		}
 	} else if m.dialog.loading && (m.dialog.kind != dialogModels || len(m.dialogModelRows) == 0) {
-		content = append(content, m.theme.Muted.Render(fit("Fetching model list…", inner)))
+		content = append(content, withBase(m.theme.Muted, m.theme.Base).Render(fit("Fetching model list…", inner)))
 	} else if len(visible) == 0 {
 		// Empty match set under a query: an explicit row instead of a blank
 		// box; Enter is a no-op while nothing is selectable.
-		content = append(content, m.theme.Muted.Render(fit("No "+m.dialogKindName()+" match \""+m.dialog.query+"\"", inner)))
+		content = append(content, withBase(m.theme.Muted, m.theme.Base).Render(fit("No "+m.dialogKindName()+" match \""+m.dialog.query+"\"", inner)))
 	} else if !isModels {
 		windowed, start := windowList(len(visible), m.dialog.cursor, max(1, height-10))
 		for i := start; i < start+windowed; i++ {
 			label := visible[i].label
 			if i == m.dialog.cursor {
-				content = append(content, m.theme.Selected.Render(fit("> "+label, inner)))
+				content = append(content, withBase(m.theme.Selected, m.theme.Base).Render(fit("> "+label, inner)))
 			} else {
-				content = append(content, fit("  "+label, inner))
+				content = append(content, m.theme.Base.Render(fit("  "+label, inner)))
 			}
 		}
 	} else {
 		if m.dialogModelsNote != "" {
 			for _, line := range wrap(m.dialogModelsNote, inner) {
-				content = append(content, m.theme.Muted.Render(fit(line, inner)))
+				content = append(content, withBase(m.theme.Muted, m.theme.Base).Render(fit(line, inner)))
 			}
 		}
 		// Headers ride with their rows: find the visible index of the
@@ -597,22 +605,22 @@ func (m *ui) dialogView() string {
 					}
 				}
 			}
-			content = append(content, m.theme.Title.Render(fit(pinned, inner)))
+			content = append(content, withBase(m.theme.Title, m.theme.Base).Render(fit(pinned, inner)))
 		}
 		for _, row := range visible[start:rowsEnd] {
 			if row.header != "" {
-				content = append(content, m.theme.Title.Render(fit(row.header, inner)))
+				content = append(content, withBase(m.theme.Title, m.theme.Base).Render(fit(row.header, inner)))
 				continue
 			}
 			if row.pos == m.dialog.cursor {
-				content = append(content, m.theme.Selected.Render(fit("> "+row.label, inner)))
+				content = append(content, withBase(m.theme.Selected, m.theme.Base).Render(fit("> "+row.label, inner)))
 			} else {
-				content = append(content, fit("  "+row.label, inner))
+				content = append(content, m.theme.Base.Render(fit("  "+row.label, inner)))
 			}
 		}
 	}
-	content = append(content, fit("", inner))
-	content = append(content, m.theme.Help.Render(fit(hint, inner)))
+	content = append(content, m.theme.Base.Render(fit("", inner)))
+	content = append(content, withBase(m.theme.Help, m.theme.Base).Render(fit(hint, inner)))
 
 	top := max(0, (height-len(content)-2)/2)
 	left := max(2, (width-boxWidth)/2)
@@ -623,11 +631,12 @@ func (m *ui) dialogView() string {
 		var box string
 		switch {
 		case j == 0:
-			box = m.theme.Border.Render("╭" + strings.Repeat("─", boxWidth-2) + "╮")
+			box = withBase(m.theme.Border, m.theme.Base).Render("╭" + strings.Repeat("─", boxWidth-2) + "╮")
 		case j == len(content)+1:
-			box = m.theme.Border.Render("╰" + strings.Repeat("─", boxWidth-2) + "╯")
+			box = withBase(m.theme.Border, m.theme.Base).Render("╰" + strings.Repeat("─", boxWidth-2) + "╯")
 		default:
-			box = m.theme.Border.Render("│ ") + content[j-1] + m.theme.Border.Render(" │")
+			border := withBase(m.theme.Border, m.theme.Base)
+			box = border.Render("│ ") + content[j-1] + border.Render(" │")
 		}
 		base[top+j] = spliceRowOn(base[top+j], left, boxWidth, box, m.theme.BaseBG())
 	}

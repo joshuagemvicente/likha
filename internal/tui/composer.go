@@ -21,6 +21,11 @@ func validComposerStyle(style string) string {
 // composerLines reserves its own viewport rows; a long draft shows its editable
 // tail without displacing the transcript, mention popup, or status line.
 func (m *ui) composerLines() []string {
+	if m.pending != nil {
+		// A pending review replaces the composer with the decision bar; the
+		// draft, caret, and borders do not render.
+		return m.reviewActionLines()
+	}
 	width := m.width
 	style := m.composerStyle
 	if width <= minWidth && (style == "bordered" || style == "chatter") {
@@ -49,15 +54,19 @@ func (m *ui) composerLines() []string {
 	if m.caretVisible() {
 		caret = "█"
 	}
-	if m.pending != nil {
-		if m.status == "Review every page before approving" {
-			text = m.reviewMark("Read all pages before approving")
-		} else {
-			text = m.reviewMark("Review before approval")
-		}
-		placeholder = false
-	} else if placeholder {
+	if placeholder {
 		text = "Ask Likha… // escapes a slash"
+		if m.working {
+			// A run is active but editable (no review pending): the draft is
+			// a steering prompt queued for the next provider-call boundary.
+			text = "Type to queue… (Enter queues, Esc cancels)"
+		} else if n := len(m.queue); n > 0 {
+			// A run ended with messages held: Enter sends them (FR-21).
+			text = "Enter sends the queued message… (Esc clears)"
+			if n > 1 {
+				text = "Enter sends the queued messages… (Esc clears)"
+			}
+		}
 		if caret != "" {
 			// An empty draft renders the caret before the placeholder, like
 			// a browser's placeholder with a focused empty input.
@@ -80,46 +89,85 @@ func (m *ui) composerLines() []string {
 	gap := m.theme.Base.Render(fit("", width))
 	rows = append(rows, gap)
 	if style == "minimal" {
-		rows = append(rows, m.theme.Border.Render(strings.Repeat("─", width)))
+		rows = append(rows, withBase(m.theme.Border, m.theme.Base).Render(strings.Repeat("─", width)))
 	} else if style == "bordered" {
-		rows = append(rows, m.theme.Border.Render("╭"+strings.Repeat("─", width-2)+"╮"))
+		rows = append(rows, withBase(m.theme.Border, m.theme.Base).Render("╭"+strings.Repeat("─", width-2)+"╮"))
 	}
 	for i, line := range input {
 		switch style {
 		case "bordered":
-			inner := withBase(m.theme.Base, m.theme.Base).Render(fit(line, width-4))
+			inner := withBase(m.theme.Normal, m.theme.Base).Render(fit(line, width-4))
 			if placeholder {
 				inner = withBase(m.theme.Muted, m.theme.Base).Render(fit(line, width-4))
-			} else if m.pending != nil {
-				inner = withBase(m.theme.Warning, m.theme.Base).Render(fit(line, width-4))
 			}
-			rows = append(rows, m.theme.Border.Render("│ ")+inner+m.theme.Border.Render(" │"))
+			border := withBase(m.theme.Border, m.theme.Base)
+			rows = append(rows, border.Render("│ ")+inner+border.Render(" │"))
 		case "chatter":
 			prefix := "      "
 			if i == 0 {
 				prefix = "You › "
 			}
-			content := withBase(m.theme.Base, m.theme.Base).Render(fit(line, inputWidth))
+			content := withBase(m.theme.Normal, m.theme.Base).Render(fit(line, inputWidth))
 			if placeholder {
 				content = withBase(m.theme.Muted, m.theme.Base).Render(fit(line, inputWidth))
-			} else if m.pending != nil {
-				content = withBase(m.theme.Warning, m.theme.Base).Render(fit(line, inputWidth))
 			}
-			rows = append(rows, m.theme.Selected.Render(prefix)+content)
+			rows = append(rows, withBase(m.theme.Selected, m.theme.Base).Render(prefix)+content)
 		default:
-			content := withBase(m.theme.Base, m.theme.Base).Render(fit(line, width))
+			content := withBase(m.theme.Normal, m.theme.Base).Render(fit(line, width))
 			if placeholder {
 				content = withBase(m.theme.Muted, m.theme.Base).Render(fit(line, width))
-			} else if m.pending != nil {
-				content = withBase(m.theme.Warning, m.theme.Base).Render(fit(line, width))
 			}
 			rows = append(rows, content)
 		}
 	}
 	if style == "bordered" {
-		rows = append(rows, m.theme.Border.Render("╰"+strings.Repeat("─", width-2)+"╯"))
+		rows = append(rows, withBase(m.theme.Border, m.theme.Base).Render("╰"+strings.Repeat("─", width-2)+"╯"))
 	}
 	return rows
+}
+
+// reviewActionLines renders the pinned decision bar that replaces the
+// composer while a review is pending (FR-22): two labelled buttons with
+// exactly one focus marker, then the key hint. It reuses the composer's
+// reserved rows, so the layout budget is unchanged. Approve stays muted and
+// cannot be confirmed until every review page has been seen; Decline is
+// always available.
+func (m *ui) reviewActionLines() []string {
+	ready := m.reviewReady()
+	approveStyle := withBase(m.theme.Muted, m.theme.Base)
+	approve := approveStyle.Render("  [ Approve ]")
+	if m.reviewFocus == focusApprove {
+		style := m.theme.Muted
+		if ready {
+			style = m.theme.Selected
+		}
+		approve = withBase(style, m.theme.Base).Render("> [ Approve ]")
+	}
+	decline := approveStyle.Render("  [ Decline ]")
+	if m.reviewFocus == focusDecline {
+		decline = withBase(m.theme.Selected, m.theme.Base).Render("> [ Decline ]")
+	}
+	hint := "←/→ choose · Enter confirm · Esc cancel run"
+	if !ready {
+		hint = reviewGateStatus + " · ←/→ choose · Esc cancel run"
+	}
+	if m.width < 50 {
+		// The narrow bar keeps the gate message: it is the only surface that
+		// explains why Approve is muted.
+		hint = "←/→ Enter Esc"
+		if !ready {
+			hint = reviewGateStatus
+		}
+	}
+	// Each button reserves a two-column marker slot ("  ", or "> " when
+	// focused); a two-space gap between the cells leaves the four-space
+	// separation the spec shows. fit measures plain text only, so pad the
+	// styled row to the full width explicitly.
+	buttons := approve + m.theme.Base.Render("  ") + decline
+	if w := runewidth.StringWidth(stripANSI(buttons)); w < m.width {
+		buttons += m.theme.Base.Render(strings.Repeat(" ", m.width-w))
+	}
+	return []string{buttons, withBase(m.theme.Muted, m.theme.Base).Render(fit(hint, m.width))}
 }
 
 // An unsuccessful write leaves both the active appearance and the stored

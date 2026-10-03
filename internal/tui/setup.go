@@ -30,14 +30,15 @@ const (
 )
 
 type setupState struct {
-	stage       int
-	cursor      int
-	keyInput    []rune
-	creds       model.OAuthCredentials // OAuth providers: the browser-login token set
-	models      []string
-	modelCursor int
-	err         string
-	checking    bool
+	stage          int
+	cursor         int
+	keyInput       []rune
+	creds          model.OAuthCredentials // OAuth providers: the browser-login token set
+	models         []string
+	contextWindows map[string]int64
+	modelCursor    int
+	err            string
+	checking       bool
 }
 
 // updateSetup drives the first-run setup stages. It runs while ui.mode is
@@ -86,6 +87,7 @@ func (m *ui) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.setup.cursor++
 			}
 		case "enter":
+			m.setup.contextWindows = nil
 			if model.Providers[m.setup.cursor].Auth == model.AuthOAuth {
 				m.setup.stage = setupLogin
 				m.setup.err, m.setup.checking = "", false
@@ -168,19 +170,29 @@ func (m *ui) startSetupCheck(p model.Provider, key string) tea.Cmd {
 	m.setup.stage = setupChecking
 	m.setup.err, m.setup.checking = "", true
 	m.setup.models = nil
+	m.setup.contextWindows = nil
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		ids, err := model.ListModels(ctx, p.BaseURL, key)
-		return setupCheckMsg{provider: p, key: key, models: ids, err: err}
+		details, err := model.ListModelsWithDetails(ctx, p.BaseURL, key)
+		ids := make([]string, 0, len(details))
+		windows := make(map[string]int64)
+		for _, detail := range details {
+			ids = append(ids, detail.ID)
+			if detail.ContextWindow > 0 {
+				windows[detail.ID] = detail.ContextWindow
+			}
+		}
+		return setupCheckMsg{provider: p, key: key, models: ids, contextWindows: windows, err: err}
 	}
 }
 
 type setupCheckMsg struct {
-	provider model.Provider
-	key      string
-	models   []string
-	err      error
+	provider       model.Provider
+	key            string
+	models         []string
+	contextWindows map[string]int64
+	err            error
 }
 
 // openBrowser opens url in the default browser; tests replace it.
@@ -262,7 +274,12 @@ func (m *ui) finishSetup(modelID string) tea.Cmd {
 		client.SetSession(m.snapshot.ID)
 	}
 	m.modelName = modelID
-	m.conn = providers.Connection{Provider: p.DisplayName, ProviderCanonical: p.Name, Verified: true, Theme: m.themeName, Nerd: m.conn.Nerd, ComposerStyle: m.composerStyle}
+	m.conn = providers.Connection{
+		Provider: p.DisplayName, ProviderCanonical: p.Name, Verified: true,
+		Theme: m.themeName, Nerd: m.conn.Nerd, ComposerStyle: m.composerStyle,
+		ContextWindows: m.setup.contextWindows, ContextWindowOverrides: m.conn.ContextWindowOverrides,
+	}
+	m.resolveContextWindow()
 	m.setup.stage = setupTheme
 	m.setup.cursor = 0
 	return nil
@@ -303,7 +320,7 @@ func (m *ui) applySetupTheme() tea.Cmd {
 func (m *ui) setupView() string {
 	body := max(1, m.height-6) // compact header, blank separator, three footer rows.
 	rows := make([]string, 0, m.height)
-	rows = append(rows, m.theme.Title.Render(fit("Lisa  |  First-run setup  |  Repo: "+m.root, m.width)))
+	rows = append(rows, withBase(m.theme.Title, m.theme.Base).Render(fit("Lisa  |  First-run setup  |  Repo: "+m.root, m.width)))
 	rows = append(rows, fit("", m.width))
 	content := m.setupLines(body)
 	for _, line := range content {
@@ -324,7 +341,7 @@ func (m *ui) setupView() string {
 			status = "SETUP  |  Check failed"
 		}
 	}
-	rows = append(rows, m.theme.Help.Render(fit(status, m.width)))
+	rows = append(rows, withBase(m.theme.Help, m.theme.Base).Render(fit(status, m.width)))
 	rows = append(rows, fit(m.setupActions(), m.width))
 	rows = append(rows, fit("Esc back  Ctrl+C quit", m.width))
 	return m.frame(rows)

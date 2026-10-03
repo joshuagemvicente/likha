@@ -100,11 +100,25 @@ func blinkCaret() tea.Cmd {
 	return tea.Tick(caretBlinkInterval, func(time.Time) tea.Msg { return caretTickMsg{} })
 }
 
+// activityTickMsg advances the ephemeral Working row's spinner and sweep.
+type activityTickMsg struct {
+	runID      uint64
+	generation uint64
+}
+
+const activityTickInterval = 120 * time.Millisecond
+
+func activityTick(runID, generation uint64) tea.Cmd {
+	return tea.Tick(activityTickInterval, func(time.Time) tea.Msg {
+		return activityTickMsg{runID: runID, generation: generation}
+	})
+}
+
 // caretVisible reports whether the block caret renders at the end of the
 // draft: only while the composer is editable. A recent keystroke forces the
 // solid phase so the caret never blinks away mid-typing.
 func (m *ui) caretVisible() bool {
-	if m.working || m.pending != nil || m.keyModal.open || m.dialog.open {
+	if m.pending != nil || m.keyModal.open || m.dialog.open {
 		return false
 	}
 	return m.caretOn || m.caretTyped
@@ -139,8 +153,8 @@ func (m *ui) scrollbarRows(body int) []string {
 	if maxScroll := m.scrollMax(); maxScroll > 0 {
 		pos = travel * min(m.scroll, maxScroll) / maxScroll
 	}
-	track := m.theme.Help.Render("│")
-	knob := m.theme.Selected.Render("█")
+	track := withBase(m.theme.Help, m.theme.Base).Render("│")
+	knob := withBase(m.theme.Selected, m.theme.Base).Render("█")
 	for i := range body {
 		if i >= pos && i < pos+thumb {
 			rows = append(rows, knob)
@@ -229,6 +243,21 @@ func (m *ui) updateScrollbarMouse(v tea.MouseMsg) bool {
 		m.following = false
 	}
 	m.markSeenFromScroll()
+	return true
+}
+
+// reviewGateStatus is the hint shown when Approve is pressed before every
+// review page has been scrolled into view.
+const reviewGateStatus = "Scroll to the end to approve"
+
+// reviewReady reports whether the pending review may be approved: every page
+// must have been seen, and a pending proposal with no pages is ready.
+func (m *ui) reviewReady() bool {
+	for _, seen := range m.reviewSeen {
+		if !seen {
+			return false
+		}
+	}
 	return true
 }
 

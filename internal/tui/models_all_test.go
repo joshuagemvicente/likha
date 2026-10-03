@@ -100,6 +100,41 @@ func openModels(t *testing.T, m *ui) []tea.Msg {
 	return runModelsCmds(t, m, cmd)
 }
 
+// TestBuildModelsTargetsActiveProviderFirstPreservesEveryTarget pins the
+// active-provider reorder when it sits between other configured providers.
+// The old nested append reused the target slice's backing array and could
+// replace the active provider with the provider after it.
+func TestBuildModelsTargetsActiveProviderFirstPreservesEveryTarget(t *testing.T) {
+	stateDir := t.TempDir()
+	var configured []model.Provider
+	for _, p := range model.Providers {
+		if p.Auth != model.AuthAPIKey {
+			continue
+		}
+		storedProviderKey(t, stateDir, p.Name, "test-key")
+		configured = append(configured, p)
+	}
+	if len(configured) < 3 {
+		t.Skip("need at least three API-key providers to exercise a middle active target")
+	}
+
+	active := configured[len(configured)/2]
+	targets := buildModelsTargets(stateDir, active.BaseURL, active.Name, "active-test-key", active.DisplayName)
+	got := make([]string, 0, len(targets))
+	for _, target := range targets {
+		got = append(got, target.provider.Name)
+	}
+	want := []string{active.Name}
+	for _, p := range configured {
+		if p.Name != active.Name {
+			want = append(want, p.Name)
+		}
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("target order = %v, want %v", got, want)
+	}
+}
+
 // arrivedSections collects the per-section arrivals fed by runModelsCmds.
 func arrivedSections(msgs []tea.Msg) []modelsSection {
 	var out []modelsSection

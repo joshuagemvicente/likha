@@ -102,22 +102,47 @@ func TestComposerReviewFooterAndPageGate(t *testing.T) {
 		if m.pageCount() < 2 {
 			t.Fatal("expected multiple review pages")
 		}
-		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
-		if m.pending == nil || len(request.Reply) != 0 || !strings.Contains(m.View(), "Read all pages") {
-			t.Fatalf("unseen review page was approved at %dx%d", size[0], size[1])
+		// The composer is replaced by the decision bar: both buttons render
+		// with exactly one focus marker, starting on Approve.
+		if m.reviewFocus != focusApprove {
+			t.Fatalf("approval did not focus Approve at %dx%d", size[0], size[1])
+		}
+		bar := stripANSI(strings.Join(m.composerLines(), "\n"))
+		if !strings.Contains(bar, "[ Approve ]") || !strings.Contains(bar, "[ Decline ]") || !strings.Contains(bar, reviewGateStatus) || strings.Contains(bar, "█") || strings.Count(bar, "> ") != 1 {
+			t.Fatalf("decision bar wrong at %dx%d: %q", size[0], size[1], bar)
+		}
+		// The wide bar carries the key legend; at 40 columns the gate reason
+		// takes that row and the status line carries the keys.
+		if size[0] >= 50 && !strings.Contains(bar, "←/→") {
+			t.Fatalf("wide decision bar lost the key hint at %dx%d: %q", size[0], size[1], bar)
+		}
+		// Arrow keys move focus; the marker follows the focused button.
+		m.Update(tea.KeyMsg{Type: tea.KeyRight})
+		if m.reviewFocus != focusDecline || !strings.Contains(stripANSI(strings.Join(m.composerLines(), "\n")), "> [ Decline ]") {
+			t.Fatalf("Right did not focus Decline at %dx%d", size[0], size[1])
+		}
+		m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+		if m.reviewFocus != focusApprove {
+			t.Fatalf("Left did not focus Approve at %dx%d", size[0], size[1])
+		}
+		// Enter on a not-yet-read review refuses: the gate status shows and
+		// no reply reaches the agent.
+		m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if m.pending == nil || len(request.Reply) != 0 || m.status != reviewGateStatus {
+			t.Fatalf("unseen review page was approved at %dx%d: status %q", size[0], size[1], m.status)
 		}
 		for page := range m.pageCount() {
 			view := m.View()
 			assertViewport(t, view, size[0], size[1])
 			footer := strings.Split(view, "\n")[size[1]-1]
-			for _, label := range []string{"Page ", "Y", "N", "PgUp/PgDn"} {
+			for _, label := range []string{"Page ", "←/→", "Enter"} {
 				if !strings.Contains(footer, label) {
 					t.Fatalf("review footer lost %s at page %d: %q", label, page, footer)
 				}
 			}
 			m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
 		}
-		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+		m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		if m.pending != nil || len(request.Reply) != 1 || !<-request.Reply {
 			t.Fatalf("fully reviewed command was not approvable at %dx%d", size[0], size[1])
 		}

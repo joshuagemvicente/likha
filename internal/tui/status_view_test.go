@@ -127,23 +127,25 @@ func TestContextSegmentFormats(t *testing.T) {
 	}
 	m := NewUI("/sample", nil, client, "gpt-4o", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-	m.startTurn("first question")
+	m.startTurn("first question", nil)
 	defer m.cancel()
 	defer close(m.abandon)
 	driveTurn(m)
 
-	// Wide row: percentage plus the compact used/total pair.
-	if got := stripANSI(m.contextSegment().text); got != "ctx 50% · 64k/128k" {
+	// Wide row: used/limit followed by the percentage.
+	if got := stripANSI(m.contextSegment().text); got != "ctx 64k/128k · 50%" {
 		t.Fatalf("wide ctx = %q", got)
 	}
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
-	if got := stripANSI(m.contextSegment().text); got != "ctx 50%" {
+	if got := stripANSI(m.contextSegment().text); got != "ctx 64k/128k" {
 		t.Fatalf("narrow ctx = %q", got)
 	}
-	// Usage seen but an unknown window: still no fabricated denominator.
+	// Usage seen but an unknown window: retain the count and show the unknown
+	// denominator rather than fabricating a percentage.
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.modelName = "model-alpha"
-	if got := stripANSI(m.contextSegment().text); got != "ctx —" {
+	m.resolveContextWindow()
+	if got := stripANSI(m.contextSegment().text); got != "ctx 64k/?" {
 		t.Fatalf("unknown-window ctx = %q", got)
 	}
 	// Nothing measured at all.
@@ -275,7 +277,7 @@ func TestSpendSegmentPricing(t *testing.T) {
 	// Documented pricing accumulates: 40k prompt + 1k completion on gpt-4o
 	// is $0.10 + $0.01 = $0.11 (cents precision under $1).
 	m := newSession("gpt-4o", "openai")
-	m.startTurn("first question")
+	m.startTurn("first question", nil)
 	defer m.cancel()
 	defer close(m.abandon)
 	driveTurn(m)
@@ -288,7 +290,7 @@ func TestSpendSegmentPricing(t *testing.T) {
 
 	// The subscription row renders the known zero.
 	m = newSession("gpt-5.5", "chatgpt")
-	m.startTurn("first question")
+	m.startTurn("first question", nil)
 	defer m.cancel()
 	defer close(m.abandon)
 	driveTurn(m)
@@ -298,7 +300,7 @@ func TestSpendSegmentPricing(t *testing.T) {
 
 	// Unknown pricing keeps the segment hidden.
 	m = newSession("mystery-model", "openai")
-	m.startTurn("first question")
+	m.startTurn("first question", nil)
 	defer m.cancel()
 	defer close(m.abandon)
 	driveTurn(m)
@@ -388,7 +390,7 @@ func TestAutoSessionNameAppliesAndPersists(t *testing.T) {
 	}
 	m := NewUI(root, nil, client, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true, StatusLine: providers.StoredStatusLineConfig{Session: true}}, t.TempDir(), store, snapshot)
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-	m.startTurn("I want you to fix the parser bug")
+	m.startTurn("I want you to fix the parser bug", nil)
 	defer m.cancel()
 	defer close(m.abandon)
 	driveTurn(m)
@@ -415,7 +417,7 @@ func TestAutoSessionNameAppliesAndPersists(t *testing.T) {
 	}
 
 	// The second turn triggers no new naming request.
-	m.startTurn("second question")
+	m.startTurn("second question", nil)
 	driveTurn(m)
 	if got := naming.Load(); got != 1 {
 		t.Fatalf("second turn re-ran naming: %d requests", got)
@@ -439,7 +441,7 @@ func TestAutoSessionNameFailureStaysSilent(t *testing.T) {
 	}
 	m := NewUI(root, nil, client, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true, StatusLine: providers.StoredStatusLineConfig{Session: true}}, t.TempDir(), store, snapshot)
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-	m.startTurn("first prompt")
+	m.startTurn("first prompt", nil)
 	defer m.cancel()
 	defer close(m.abandon)
 	driveTurn(m)
@@ -483,7 +485,7 @@ func TestAutoSessionNameSkipsResumedSessions(t *testing.T) {
 		t.Fatal("a snapshot with entries must not count as fresh")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-	m.startTurn("follow-up prompt")
+	m.startTurn("follow-up prompt", nil)
 	defer m.cancel()
 	defer close(m.abandon)
 	driveTurn(m)
@@ -509,7 +511,7 @@ func TestAutoSessionNameExitBeforeCompletionPersistsNothing(t *testing.T) {
 	}
 	m := NewUI(root, nil, client, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, t.TempDir(), store, snapshot)
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-	m.startTurn("first prompt")
+	m.startTurn("first prompt", nil)
 	defer close(m.abandon)
 	for m.working {
 		// Deliver the turn's events but drop the naming command: an exit

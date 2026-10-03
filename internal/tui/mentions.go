@@ -113,10 +113,10 @@ func (m *ui) mentionLines() []string {
 		return nil
 	}
 	if m.mention.err != "" {
-		return []string{m.theme.Warning.Render(fit("@ "+m.mention.err, m.width))}
+		return []string{withBase(m.theme.Warning, m.theme.Base).Render(fit("@ "+m.mention.err, m.width))}
 	}
 	if len(m.mention.matches) == 0 {
-		return []string{m.theme.Help.Render(fit("@ no matching files", m.width))}
+		return []string{withBase(m.theme.Help, m.theme.Base).Render(fit("@ no matching files", m.width))}
 	}
 	visible := min(5, len(m.mention.matches), available)
 	start := max(0, min(m.mention.cursor-visible+1, len(m.mention.matches)-visible))
@@ -124,15 +124,15 @@ func (m *ui) mentionLines() []string {
 	for i := start; i < start+visible; i++ {
 		match := m.mention.matches[i]
 		if i == m.mention.cursor {
-			rows = append(rows, m.theme.Selected.Render(fit("> "+match, m.width)))
+			rows = append(rows, withBase(m.theme.Selected, m.theme.Base).Render(fit("> "+match, m.width)))
 		} else {
-			rows = append(rows, m.theme.Help.Render(fit("  "+match, m.width)))
+			rows = append(rows, withBase(m.theme.Help, m.theme.Base).Render(fit("  "+match, m.width)))
 		}
 	}
 	// Shared popup hint, only while the popup budget has a spare row: the
 	// same keys drive the / command popup.
 	if len(rows) < available {
-		rows = append(rows, m.theme.Help.Render(fit("  ↑/↓ select  Tab complete  Esc dismiss", m.width)))
+		rows = append(rows, withBase(m.theme.Help, m.theme.Base).Render(fit("  ↑/↓ select  Tab complete  Esc dismiss", m.width)))
 	}
 	return rows
 }

@@ -150,21 +150,66 @@ func TestStatusReviewPagesRemainReachableAfterResize(t *testing.T) {
 	if pages < 2 || pages != len(m.reviewSeen) || m.bodyHeight() < 1 {
 		t.Fatalf("review boundaries wrong: pages=%d seen=%d body=%d", pages, len(m.reviewSeen), m.bodyHeight())
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if len(request.Reply) != 0 || m.pending == nil {
 		t.Fatal("review gate skipped unread pages")
 	}
 	for page := range pages {
 		last := stripANSI(strings.Split(m.View(), "\n")[11])
-		if !strings.Contains(last, "Y/N") || !strings.Contains(last, "PgUp/PgDn") || !strings.Contains(last, "Page ") {
+		if !strings.Contains(last, "←/→") || !strings.Contains(last, "Enter") || !strings.Contains(last, "Page ") || strings.Contains(last, "Y/N") {
 			t.Fatalf("review controls hidden on page %d: %q", page, last)
 		}
 		assertViewport(t, m.View(), 40, 12)
 		m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if len(request.Reply) != 1 || !<-request.Reply {
 		t.Fatal("approval remained gated after reviewing all pages")
+	}
+}
+
+func TestStatusHintsQueueCountBothLayouts(t *testing.T) {
+	m := statusTestUI(t, "minimal", 130, 24, providers.StoredStatusLineConfig{})
+	m.working, m.status = true, "Waiting for model"
+	m.queue = []string{"first", "second"}
+	if wide := strings.Join(m.statusHints(1, 1, false), "\n"); !strings.Contains(wide, "2 queued") {
+		t.Fatalf("wide working hint lost the queued count: %q", wide)
+	}
+	if narrow := strings.Join(m.statusHints(1, 1, true), "\n"); !strings.Contains(narrow, "2Q") {
+		t.Fatalf("narrow working hint lost the queued count: %q", narrow)
+	}
+	// The compact count reaches the rendered narrow footer: a short state
+	// leaves room for it at 40 columns.
+	m.status = "Cancelling"
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
+	if rows := stripANSI(strings.Join(m.statusLineRows(1, 1), "\n")); !strings.Contains(rows, "2Q") {
+		t.Fatalf("narrow status row lost the queued count: %q", rows)
+	}
+	m.queue = nil
+	if wide := strings.Join(m.statusHints(1, 1, false), "\n"); strings.Contains(wide, "queued") {
+		t.Fatalf("empty queue still claims a wide queued count: %q", wide)
+	}
+	if narrow := strings.Join(m.statusHints(1, 1, true), "\n"); strings.Contains(narrow, "Q") {
+		t.Fatalf("empty queue still claims a narrow queued count: %q", narrow)
+	}
+}
+
+func TestStatusHintsDropReviewLetterKeys(t *testing.T) {
+	m := statusTestUI(t, "minimal", 130, 24, providers.StoredStatusLineConfig{})
+	m.pending = &agent.ApprovalRequest{Kind: "command", Title: "Review command", Body: "one line", Reply: make(chan bool, 1)}
+	for _, narrow := range []bool{false, true} {
+		hints := strings.Join(m.statusHints(1, 1, narrow), "\n")
+		if !strings.Contains(hints, "←/→") || !strings.Contains(hints, "Enter") {
+			t.Fatalf("pending hint lost the decision controls (narrow=%t): %q", narrow, hints)
+		}
+		if strings.Contains(hints, "Y/N") {
+			t.Fatalf("pending hint still advertises Y/N (narrow=%t): %q", narrow, hints)
+		}
+	}
+	m.status = reviewGateStatus
+	gate := strings.Join(m.statusHints(1, 1, false), "\n")
+	if !strings.Contains(gate, "←/→") || !strings.Contains(gate, "Enter") || strings.Contains(gate, "Y/N") {
+		t.Fatalf("gate hint lost the decision controls: %q", gate)
 	}
 }
 
@@ -175,7 +220,7 @@ func TestStatusTitleUpdatesOnPromptSubmission(t *testing.T) {
 	}
 	m := NewUI(t.TempDir(), nil, client, "local", providers.Connection{Provider: "Local", StatusLine: providers.StoredStatusLineConfig{Session: true}}, t.TempDir(), nil, session.Snapshot{ID: "fresh-session"})
 	m.Update(tea.WindowSizeMsg{Width: 130, Height: 24})
-	m.startTurn("First real prompt")
+	m.startTurn("First real prompt", nil)
 	defer m.cancel()
 	defer close(m.abandon)
 	if m.statusTitle != "First real prompt" || !strings.Contains(stripANSI(m.statusLineRows(1, 1)[0]), "First real prompt") {
@@ -267,32 +312,35 @@ func deterministicMcp() *mcp.McpManager {
 func TestStatusCtxPercentAndWarningThreshold(t *testing.T) {
 	m := statusTestUI(t, "minimal", 100, 24, providers.StoredStatusLineConfig{})
 	m.modelName = "gpt-4o" // known catalog window: 128000
-	m.usageSeen = true
+	m.resolveContextWindow()
+	m.contextSeen = true
 	for _, tc := range []struct {
 		tokens int64
 		text   string
 	}{
-		{64000, "ctx 50%"},
-		{102400, "ctx 80%"}, // 80% lands exactly on the warning threshold
+		{64000, "ctx 64k/128k · 50%"},
+		{102400, "ctx 102k/128k · 80%"}, // 80% lands exactly on the warning threshold
 	} {
-		m.lastPromptTokens = tc.tokens
+		m.contextTokens = tc.tokens
+		m.contextEstimated = false
 		if got := stripANSI(m.statusLineRows(1, 1)[0]); !strings.Contains(got, tc.text) {
 			t.Fatalf("%d/128000 tokens missing %q: %q", tc.tokens, tc.text, got)
 		}
 	}
-	m.lastPromptTokens = 64000
+	m.contextTokens = 64000
 	if warning := m.contextSegment(); warning.style.Render(warning.text) != m.theme.Normal.Render(warning.text) {
 		t.Fatalf("50%% context must not use the Warning role: %q", warning.text)
 	}
-	m.lastPromptTokens = 102400
+	m.contextTokens = 102400
 	if warning := m.contextSegment(); warning.style.Render(warning.text) != m.theme.Warning.Render(warning.text) {
 		t.Fatalf("80%% context lost its Warning role: %q", warning.text)
 	}
-	// Below the threshold the measured percentage keeps the muted styling; an
-	// unknown model window or unseen usage falls back to the placeholder.
-	m.lastPromptTokens = 64000
+	// Unknown model windows retain the measured input count without inventing
+	// a denominator. No request yet still renders the empty placeholder.
+	m.contextTokens = 64000
 	m.modelName = "model-alpha"
-	if got := m.contextSegment(); got.text != "ctx —" {
+	m.resolveContextWindow()
+	if got := m.contextSegment(); got.text != "ctx 64k/?" {
 		t.Fatalf("unknown model window rendered %q", got.text)
 	}
 }

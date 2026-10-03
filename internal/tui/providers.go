@@ -339,16 +339,16 @@ func (m *ui) keyModalView() string {
 	inner := boxWidth - 4
 
 	var content []string
-	content = append(content, m.theme.Title.Render(fit(title, inner)))
-	content = append(content, fit("", inner))
-	content = append(content, fit(masked, inner))
+	content = append(content, withBase(m.theme.Title, m.theme.Base).Render(fit(title, inner)))
+	content = append(content, m.theme.Base.Render(fit("", inner)))
+	content = append(content, m.theme.Base.Render(fit(masked, inner)))
 	if status != "" {
 		style := m.theme.Muted
 		if m.keyModal.err != "" {
 			style = m.theme.Error
 		}
 		for _, line := range wrap(status, inner) {
-			content = append(content, style.Render(fit(line, inner)))
+			content = append(content, withBase(style, m.theme.Base).Render(fit(line, inner)))
 		}
 	}
 	return m.drawOverlayBox(base, boxWidth, content)
@@ -393,16 +393,16 @@ func (m *ui) providerAuthView() string {
 	boxWidth = min(width-4, boxWidth+4)
 	inner := boxWidth - 4
 
-	content := []string{m.theme.Title.Render(fit(title, inner)), fit("", inner)}
+	content := []string{withBase(m.theme.Title, m.theme.Base).Render(fit(title, inner)), m.theme.Base.Render(fit("", inner))}
 	for _, line := range body {
 		// Long hints wrap instead of truncating: a clipped
 		// "lisa --provider chatgpt --device-login" is useless.
 		for _, chunk := range wrap(line, inner) {
-			content = append(content, fit(chunk, inner))
+			content = append(content, m.theme.Base.Render(fit(chunk, inner)))
 		}
 	}
-	content = append(content, fit("", inner))
-	content = append(content, m.theme.Help.Render(fit(footer, inner)))
+	content = append(content, m.theme.Base.Render(fit("", inner)))
+	content = append(content, withBase(m.theme.Help, m.theme.Base).Render(fit(footer, inner)))
 	return m.drawOverlayBox(base, boxWidth, content)
 }
 
@@ -418,11 +418,12 @@ func (m *ui) drawOverlayBox(base []string, boxWidth int, content []string) strin
 		var box string
 		switch {
 		case j == 0:
-			box = m.theme.Border.Render("╭" + strings.Repeat("─", boxWidth-2) + "╮")
+			box = withBase(m.theme.Border, m.theme.Base).Render("╭" + strings.Repeat("─", boxWidth-2) + "╮")
 		case j == len(content)+1:
-			box = m.theme.Border.Render("╰" + strings.Repeat("─", boxWidth-2) + "╯")
+			box = withBase(m.theme.Border, m.theme.Base).Render("╰" + strings.Repeat("─", boxWidth-2) + "╯")
 		default:
-			box = m.theme.Border.Render("│ ") + content[j-1] + m.theme.Border.Render(" │")
+			border := withBase(m.theme.Border, m.theme.Base)
+			box = border.Render("│ ") + content[j-1] + border.Render(" │")
 		}
 		base[top+j] = spliceRowOn(base[top+j], left, boxWidth, box, m.theme.BaseBG())
 	}

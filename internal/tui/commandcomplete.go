@@ -160,7 +160,7 @@ func (m *ui) commandLines() []string {
 	if len(m.commandPopup.matches) == 0 {
 		query, _ := commandQuery(string(m.input))
 		if query != "" {
-			return []string{m.theme.Help.Render(fit("/ no matching commands", m.width))}
+			return []string{withBase(m.theme.Help, m.theme.Base).Render(fit("/ no matching commands", m.width))}
 		}
 		return nil
 	}
@@ -169,14 +169,14 @@ func (m *ui) commandLines() []string {
 	for i, c := range m.commandPopup.matches[:visible] {
 		row := "/" + c.Name + " — " + c.Description
 		if i == m.commandPopup.cursor {
-			rows = append(rows, m.theme.Selected.Render(fit("> "+row, m.width)))
+			rows = append(rows, withBase(m.theme.Selected, m.theme.Base).Render(fit("> "+row, m.width)))
 		} else {
-			rows = append(rows, m.theme.Help.Render(fit("  "+row, m.width)))
+			rows = append(rows, withBase(m.theme.Help, m.theme.Base).Render(fit("  "+row, m.width)))
 		}
 	}
 	// Shared popup hint, only while the popup budget has a spare row.
 	if len(rows) < available {
-		rows = append(rows, m.theme.Help.Render(fit("  ↑/↓ select  Tab complete  Esc dismiss", m.width)))
+		rows = append(rows, withBase(m.theme.Help, m.theme.Base).Render(fit("  ↑/↓ select  Tab complete  Esc dismiss", m.width)))
 	}
 	return rows
 }

@@ -282,7 +282,7 @@ func isQuitMsg(msg tea.Msg) bool {
 }
 
 func TestModelSwitchCommandUsesListingAndLiveClient(t *testing.T) {
-	var sawModel string
+	sawModel := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/v1/models":
@@ -293,7 +293,7 @@ func TestModelSwitchCommandUsesListingAndLiveClient(t *testing.T) {
 				Model string `json:"model"`
 			}
 			json.NewDecoder(r.Body).Decode(&body)
-			sawModel = body.Model
+			sawModel <- body.Model
 			w.Header().Set("Content-Type", "text/event-stream")
 			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
 		default:
@@ -341,11 +341,28 @@ func TestModelSwitchCommandUsesListingAndLiveClient(t *testing.T) {
 	if !m.working {
 		t.Fatal("turn did not start")
 	}
-	// The turn runs asynchronously; the first streamed event proves the chat
-	// request carried the switched model.
-	m.Update(<-m.events)
-	if sawModel != "alpha" {
-		t.Fatalf("request model = %q, want alpha", sawModel)
+	// The request estimate now precedes the streamed response; keep processing
+	// events until the response arrives so this still verifies the wire model.
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case event := <-m.events:
+			m.Update(event)
+			if event.Kind == "text" {
+				goto responseReceived
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for the model response")
+		}
+	}
+responseReceived:
+	select {
+	case got := <-sawModel:
+		if got != "alpha" {
+			t.Fatalf("request model = %q, want alpha", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("model request did not reach the test server")
 	}
 	m.Update(agent.TurnEvent{RunID: m.runID, Kind: "done", History: m.history})
 }
@@ -607,11 +624,17 @@ func TestUICancelBeforeModelResponsePersistsPrompt(t *testing.T) {
 		t.Fatal("model request did not start")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	select {
-	case event := <-m.events:
-		m.Update(event)
-	case <-time.After(3 * time.Second):
-		t.Fatal("cancelled model request did not deliver terminal event")
+	deadline := time.After(3 * time.Second)
+	for m.working {
+		select {
+		case event, ok := <-m.events:
+			if !ok {
+				t.Fatal("cancelled model request closed before its terminal event")
+			}
+			m.Update(event)
+		case <-deadline:
+			t.Fatal("cancelled model request did not deliver terminal event")
+		}
 	}
 	promptSaved := false
 	for _, e := range m.entries {
@@ -686,12 +709,12 @@ func TestUIRequiresFullDiffReviewBeforeApproval(t *testing.T) {
 	if m.pageCount() < 2 || !strings.Contains(m.View(), "Edit: work.txt") {
 		t.Fatal("multi-page diff review not displayed")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // Approve is focused by default
 	if m.pending == nil || len(request.Reply) != 0 {
 		t.Fatal("unseen diff pages were approved")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEnd})
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.pending != nil || !<-request.Reply {
 		t.Fatal("reviewed diff was not approvable")
 	}
@@ -704,7 +727,8 @@ func TestUIRejectsCommandWithoutReviewingAllPages(t *testing.T) {
 	m.cancel = func() {}
 	request := &agent.ApprovalRequest{Kind: "command", Title: "Shell command", Body: strings.Repeat("dangerous command\n", 50), Reply: make(chan bool, 1)}
 	m.Update(agent.TurnEvent{RunID: 1, Kind: "approval", Approval: request})
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m.Update(tea.KeyMsg{Type: tea.KeyRight}) // focus Decline
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.pending != nil || <-request.Reply {
 		t.Fatal("command rejection was not honored immediately")
 	}
@@ -759,8 +783,8 @@ func TestUIReviewKeepsDecisionsAndPositionVisibleAtTerminalSizes(t *testing.T) {
 						t.Fatalf("review mode is not identified on page %d: %q", page+1, view)
 					}
 					hints := rows[len(rows)-1]
-					if !strings.Contains(hints, "Y") || !strings.Contains(hints, "N") || !strings.Contains(hints, "Pg") {
-						t.Fatalf("review decisions or page navigation missing at %dx%d: %q", size[0], size[1], hints)
+					if !strings.Contains(hints, "←") || !strings.Contains(hints, "Enter") {
+						t.Fatalf("review decisions missing at %dx%d: %q", size[0], size[1], hints)
 					}
 					if page == 0 {
 						first := "Edit: work.txt"
@@ -803,20 +827,107 @@ func TestUIResizeRequiresReviewingTheNewPageLayout(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnd})
 	m.Update(tea.WindowSizeMsg{Width: 39, Height: 11})
 	assertViewport(t, m.View(), 39, 11)
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.pending == nil || len(request.Reply) != 0 {
 		t.Fatal("approval was accepted in an undersized viewport")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
 	assertViewport(t, m.View(), 40, 12)
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
-	if m.pending == nil || len(request.Reply) != 0 || !strings.Contains(m.View(), "Read all pages") || !strings.Contains(m.View(), "Page 1/") {
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.pending == nil || len(request.Reply) != 0 || !strings.Contains(m.View(), reviewGateStatus) || !strings.Contains(m.View(), "Page 1/") {
 		t.Fatal("resized diff was approved without reviewing its new pages or lost page position")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEnd})
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.pending != nil || !<-request.Reply {
 		t.Fatal("fully reviewed resized diff was not approvable")
+	}
+}
+
+// tuiKeyReviewUI builds a main-mode 80x24 UI for the decision-bar review
+// tests; tuiKeyApproval puts it into a live run and raises the review.
+func tuiKeyReviewUI(t *testing.T) *ui {
+	t.Helper()
+	m := NewUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, "", nil, session.Snapshot{})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	return m
+}
+
+// tuiKeyApproval raises a pending review on m during a live run and returns
+// the request so tests can inspect the decision reply channel. The approval
+// event is what resets focus to Approve.
+func tuiKeyApproval(m *ui, kind, title, body string) *agent.ApprovalRequest {
+	m.working, m.runID = true, 1
+	m.cancel = func() {}
+	request := &agent.ApprovalRequest{Kind: kind, Title: title, Body: body, Reply: make(chan bool, 1)}
+	m.Update(agent.TurnEvent{RunID: 1, Kind: "approval", Approval: request})
+	return request
+}
+
+// The decision bar opens with Approve focused; arrows and Tab move the
+// focus without deciding anything (FR-22).
+func TestTuiKeyReviewFocusMovement(t *testing.T) {
+	m := tuiKeyReviewUI(t)
+	request := tuiKeyApproval(m, "command", "Shell command", "touch marker")
+	if m.reviewFocus != focusApprove {
+		t.Fatalf("initial review focus = %d, want Approve", m.reviewFocus)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if m.reviewFocus != focusDecline {
+		t.Fatalf("right focus = %d, want Decline", m.reviewFocus)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if m.reviewFocus != focusApprove {
+		t.Fatalf("left focus = %d, want Approve", m.reviewFocus)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if m.reviewFocus != focusDecline {
+		t.Fatalf("tab focus = %d, want Decline", m.reviewFocus)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	if m.reviewFocus != focusApprove {
+		t.Fatalf("shift+tab focus = %d, want Approve", m.reviewFocus)
+	}
+	if m.pending == nil || len(request.Reply) != 0 {
+		t.Fatalf("focus movement decided the review: pending=%v replies=%d", m.pending, len(request.Reply))
+	}
+}
+
+// Approve before every page is seen is refused: the gate status shows and
+// no reply reaches the agent.
+func TestTuiKeyGatedApproveSendsNoReply(t *testing.T) {
+	m := tuiKeyReviewUI(t)
+	request := tuiKeyApproval(m, "edit", "Edit: work.txt", strings.Repeat("-old\n+new\n", 40))
+	if m.pageCount() < 2 {
+		t.Fatal("review should span several pages")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.pending == nil {
+		t.Fatal("gated Approve closed the review")
+	}
+	if len(request.Reply) != 0 {
+		t.Fatalf("gated Approve sent %d replies", len(request.Reply))
+	}
+	if m.status != reviewGateStatus {
+		t.Fatalf("gated Approve status = %q, want %q", m.status, reviewGateStatus)
+	}
+}
+
+// y/n and their shifted forms never decide a review.
+func TestTuiKeyLetterKeysInertDuringReview(t *testing.T) {
+	m := tuiKeyReviewUI(t)
+	request := tuiKeyApproval(m, "command", "Shell command", "touch marker")
+	for _, letter := range []string{"y", "Y", "n", "N"} {
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(letter)})
+	}
+	if m.pending == nil {
+		t.Fatal("a letter key decided the review")
+	}
+	if len(request.Reply) != 0 {
+		t.Fatalf("a letter key sent %d replies", len(request.Reply))
+	}
+	if m.reviewFocus != focusApprove {
+		t.Fatalf("letter keys moved focus to %d", m.reviewFocus)
 	}
 }
 
@@ -1119,7 +1230,7 @@ func TestUsageAccumulatesFromProviderStream(t *testing.T) {
 	}
 	m := NewUI("/sample", nil, client, "local", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m.startTurn("first question")
+	m.startTurn("first question", nil)
 	defer m.cancel()
 	defer close(m.abandon)
 	for m.working {
@@ -1128,7 +1239,7 @@ func TestUsageAccumulatesFromProviderStream(t *testing.T) {
 	if !m.usageSeen || m.usagePrompt != 12 || m.usageCompletion != 34 || m.lastPromptTokens != 12 {
 		t.Fatalf("first turn usage not recorded: seen=%t prompt=%d completion=%d last=%d", m.usageSeen, m.usagePrompt, m.usageCompletion, m.lastPromptTokens)
 	}
-	m.startTurn("second question")
+	m.startTurn("second question", nil)
 	for m.working {
 		m.Update(waitEvent(m.events)())
 	}
@@ -1715,7 +1826,7 @@ func TestPendingReviewNeverOverflowsTheViewport(t *testing.T) {
 			m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
 		}
 		m.Update(tea.KeyMsg{Type: tea.KeyEnd})
-		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+		m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		if m.pending != nil || !<-request.Reply {
 			t.Fatalf("%d columns: fully paged review was not approvable", width)
 		}

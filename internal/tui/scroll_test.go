@@ -35,10 +35,11 @@ func TestCaretBlinksSolidWhileTyping(t *testing.T) {
 		t.Fatalf("block caret missing at the end of the draft: %q", view)
 	}
 
-	// While a run is active the composer has no caret.
+	// While a run is active the composer keeps its caret: the user can still
+	// type to queue the next prompt.
 	m.working = true
-	if m.caretVisible() {
-		t.Fatal("caret rendered while a run is active")
+	if !m.caretVisible() {
+		t.Fatal("caret hidden while a run is active")
 	}
 	m.working = false
 

@@ -76,8 +76,15 @@ func (m *ui) reviewMark(kind string) string {
 func (m *ui) statusHints(page, pages int, narrow bool) []string {
 	position := fmt.Sprintf("Page %d/%d", page, pages)
 	if m.pending != nil {
-		if m.status == "Review every page before approving" {
-			return []string{"Read all pages " + position + " Y/N PgUp/PgDn", "Review " + position + " Y/N PgUp/PgDn ^C"}
+		controls := "←/→ · Enter · Esc"
+		// The fallback row stays compact: the wider form pushes the model
+		// identity into a trim at 80 columns (FR-12 keeps it visible).
+		compact := "←/→ Enter Esc"
+		if narrow {
+			controls = compact
+		}
+		if m.status == reviewGateStatus {
+			return []string{"Read all pages " + position + " " + controls, "Review " + position + " " + compact}
 		}
 		kind := m.reviewMark("Review")
 		if m.pending.Kind == "command" {
@@ -85,19 +92,35 @@ func (m *ui) statusHints(page, pages int, narrow bool) []string {
 		} else if m.pending.Kind == "mcp" {
 			kind = m.reviewMark("MCP review")
 		}
-		return []string{kind + " · " + position + " · Y/N PgUp/PgDn ^C", "Review " + position + " Y/N PgUp/PgDn ^C"}
+		return []string{kind + " · " + position + " · " + controls, "Review " + position + " " + compact}
 	}
 	state := m.statusState()
 	if narrow {
 		if m.working {
-			return []string{state + " " + position + " PgUp/PgDn ^C", position + " PgUp/PgDn ^C"}
+			queued := ""
+			if n := len(m.queue); n > 0 {
+				queued = fmt.Sprintf("%dQ ", n)
+			}
+			return []string{state + " " + queued + position + " PgUp/PgDn ^C", position + " PgUp/PgDn ^C"}
 		}
-		return []string{state + " " + position + " PgUp/PgDn Enter ^G", position + " PgUp/PgDn Enter ^G"}
+		held := ""
+		if n := len(m.queue); n > 0 {
+			held = fmt.Sprintf("%dQ ", n)
+		}
+		return []string{state + " " + held + position + " PgUp/PgDn Enter ^G", position + " PgUp/PgDn Enter ^G"}
 	}
 	if m.working {
-		return []string{state + " · " + position + " · PgUp/PgDn · Ctrl+C cancel", state + " · " + position + " · PgUp/PgDn ^C", position + " · PgUp/PgDn ^C"}
+		queued := ""
+		if n := len(m.queue); n > 0 {
+			queued = fmt.Sprintf("%d queued", n) + " · "
+		}
+		return []string{state + " · " + queued + position + " · PgUp/PgDn · Ctrl+C cancel", state + " · " + queued + position + " · PgUp/PgDn ^C", position + " · PgUp/PgDn ^C"}
 	}
-	return []string{state + " · " + position + " · Enter send · PgUp/PgDn · Ctrl+G composer", state + " · " + position + " · PgUp/PgDn Enter ^G", position + " · PgUp/PgDn Enter", position + " · PgUp/PgDn"}
+	held := ""
+	if n := len(m.queue); n > 0 {
+		held = fmt.Sprintf("%d queued", n) + " · "
+	}
+	return []string{state + " · " + held + position + " · Enter send · PgUp/PgDn · Ctrl+G composer", state + " · " + position + " · PgUp/PgDn Enter ^G", position + " · PgUp/PgDn Enter", position + " · PgUp/PgDn"}
 }
 
 // Keep control characters out of measurements and render only plain text.
@@ -105,30 +128,33 @@ func statusField(text string, width int) string {
 	return strings.TrimRight(fit(text, max(1, width)), " ")
 }
 
-// contextSegment answers "how much room is left": prompt tokens from the
-// provider's last response over the model's window. Without a measured value
-// it renders "ctx —" instead of a fabricated number. Wide rows add the
-// used/total pair ("ctx 34% · 68k/200k"); the two-row narrow status keeps
-// the bare percentage (spec tui-layout 1b.1).
+// contextSegment shows the active conversation's input-token count and, when
+// known, the context window. Estimates remain visibly approximate; counts and
+// limits are retained on narrow rows while the percentage is omitted.
 func (m *ui) contextSegment() statusSegment {
-	if m.usageSeen {
-		if window, ok := model.ContextWindow(m.modelName); ok && window > 0 && m.lastPromptTokens >= 0 {
-			pct := int(math.Round(float64(m.lastPromptTokens) / float64(window) * 100))
-			if pct < 0 {
-				pct = 0
-			}
-			style := m.theme.Normal
-			if pct >= 80 {
-				style = m.theme.Warning
-			}
-			text := fmt.Sprintf("ctx %d%%", pct)
-			if m.statusLineHeight() == 1 {
-				text += " · " + humanTokens(m.lastPromptTokens) + "/" + humanTokens(window)
-			}
-			return statusSegment{text, style}
-		}
+	if !m.contextSeen || m.contextTokens < 0 {
+		return statusSegment{"ctx —", m.theme.Muted}
 	}
-	return statusSegment{"ctx —", m.theme.Muted}
+
+	approximation := ""
+	if m.contextEstimated {
+		approximation = "~"
+	}
+	text := "ctx " + approximation + humanTokens(m.contextTokens)
+	style := m.theme.Normal
+	if !m.contextWindowKnown || m.contextWindow <= 0 {
+		return statusSegment{text + "/?", style}
+	}
+
+	text += "/" + humanTokens(m.contextWindow)
+	pct := int(math.Round(float64(m.contextTokens) / float64(m.contextWindow) * 100))
+	if pct >= 80 {
+		style = m.theme.Warning
+	}
+	if m.statusLineHeight() == 1 {
+		text += " · " + approximation + strconv.Itoa(pct) + "%"
+	}
+	return statusSegment{text, style}
 }
 
 // humanTokens formats a token count compactly: raw under 1000, thousands
