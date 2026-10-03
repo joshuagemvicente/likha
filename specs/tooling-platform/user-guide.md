@@ -1,8 +1,9 @@
 # Tools and agents user guide
 
-**Status:** Phase 1 is implemented locally, with new walkthroughs unverified.
-Phases 2–3 describe planned, disabled behavior. This is not a published-release
-claim. See [implementation evidence](implementation.md).
+**Status:** Phases 1–5 are implemented locally. Headless probes and drills
+cover parts of each phase (labeled below); interactive walkthroughs are pending
+unless noted. This is not a published-release claim. See
+[implementation evidence](implementation.md).
 
 ## Phase 1: core tools
 
@@ -47,12 +48,22 @@ rolling back writes. The private `sessions.sqlite` `edit_journal` table retains
 original/proposed text, identities, and write intents for manual reconciliation.
 It may contain secrets and is not automatically sent to the model. Saved state
 is evidence, not proof of current disk state or permission to overwrite it.
+A headless kill -9 drill mid edit batch (2026-10-04) found recovery inspection
+matched the journal and disk with no auto-replay. Known gap: the `Unresolved`
+line stays empty after such a crash because the record's status stays
+`publishing`.
 Exact multi-file `edit` is disabled without a private session journal; compatible
 `edit_file` keeps its existing single-file approval contract.
 
 MCP remains stdio-configured in private state. Catalog/transcript names identify
 the original server/tool. First approval trusts that server until app relaunch,
 not just one tool; `/plan` later blocks all MCP calls even if the server is trusted.
+Tools with unsafe schemas (`$dynamicRef`, remote `$ref`, non-portable regex)
+stay unavailable with a named reason and never receive `tools/call`. Both
+behaviors are headless-probed against a real stdio server (2026-10-04). The
+plan-mode refusal carries the server and tool in its structured result source;
+the readable text shows the (possibly truncated) qualified name, and a legacy
+alias call in plan mode resolves to `unknown_tool` without identity.
 
 ## Phase 2: nested exploration
 
@@ -63,18 +74,29 @@ The main model calls `task`; explore may spawn another explore once. All childre
 use the active provider/model with a fresh scoped brief and repository-read-only
 tools. They cannot edit, shell, call MCP/web, ask questions, or acquire broader
 permissions from their prompt. Time/round/depth/spawn limits constrain work,
-but do not guarantee a dollar budget.
+but do not guarantee a dollar budget. A headless drill confirmed a child stops
+at 32 model requests with status `limited` and keeps partial findings.
+When a provider reports prompt-only usage, completion tokens show as unknown.
+Checks pass; the interactive walkthrough is pending.
 
 Open `/agents` while idle or Inspect a task row while running. The tree shows
-queued/running/waiting nodes, parent/depth, usage, and remaining budgets. Four
+queued/running/waiting nodes, parent/depth, usage, remaining budgets, and
+`wait Xs · active Ys` per task (narrow widths show only active; records saved
+before this release show `not recorded` with elapsed). Tree and `/agents`
+profile listing are user-verified (2026-10-04);
+transcripts, usage, timing, and branch cancellation await a walkthrough. Four
 children can execute; waiting parents release slots so nested work can run.
 Inspect a node's transcript without adding its full history to the main model.
 
 Cancel branch ends that node and descendants; other branches can continue.
 Esc/Ctrl+C cancels the main run and all children. Partial/limited findings remain
-visible. Resume shows unfinished nodes as interrupted and does not restart them.
+visible. Resume shows unfinished nodes as interrupted and does not restart them
+(headless kill -9 drill, 2026-10-04: parent sentinels repaired, no replay).
 
 ## Phase 3: questions and planning
+
+Headless-tested; the interactive question dialog and `/todo` await a
+walkthrough. `/plan` edit and shell refusal is user-verified (2026-10-04).
 
 `ask_user` pauses for one complete question, choices/free text, or Skip. Your
 answer reaches the configured provider. The interaction preserves the normal
@@ -95,7 +117,7 @@ checklist controls or cancel first when changing mode.
 
 Place a strict `SKILL.md` under `<stateDir>/skills/<name>/`, with only name and
 description frontmatter plus instructions. See the [format example](../markdown-skills/spec.md).
-`/skills` lists/inspects them; `/skill <name> [request]` invokes one as a normal
+`/skills` lists/inspects them (headless-tested; walkthrough pending); `/skill <name> [request]` invokes one as a normal
 main-agent turn. The model can also load a discovered skill on demand.
 
 Only global prompt-only skills ship. Project/foreign skills, scripts, extra
@@ -109,35 +131,81 @@ Use the private Likha state directory: `~/.config/likha/` on Linux or
 `~/Library/Application Support/likha/` on macOS. Protect the directory and secret
 files using the same private-state rules as provider credentials.
 
-In `tools.json`, enable only the web tools you want:
+In `tools.json`, enable only the web tools you want. `web.search.backend`
+selects exactly one search backend: `brave`, `tavily`, `exa`, or `duckduckgo`
+(phase 5). Any other value, `enabled: true` with no backend, or a malformed
+`tools.json` is a visible config error that disables both `web_search` and
+`web_fetch`. Pick one:
 
 ```json
 {"web":{"search":{"enabled":true,"backend":"brave"},"fetch":{"enabled":true}}}
 ```
 
-Provide `BRAVE_SEARCH_API_KEY` or private 0600 `tool-keys.json`:
-
 ```json
-{"brave":"<your-search-api-key>"}
+{"web":{"search":{"enabled":true,"backend":"tavily"},"fetch":{"enabled":true}}}
 ```
 
-An environment key wins over the saved key; neither enables search by itself.
-Fetch needs enablement but no search key. `/tools` explains missing/disabled
-setup. Avoid putting credentials in repo files, prompts, or skill content.
+```json
+{"web":{"search":{"enabled":true,"backend":"exa"},"fetch":{"enabled":true}}}
+```
 
-First search asks to authorize Brave for this conversation and displays the
-query. Brave's API notice states default query records may last up to 90 days.
-Review project details in queries before granting. Later searches use that
-same backend without another prompt; failures do not switch vendors.
+```json
+{"web":{"search":{"enabled":true,"backend":"duckduckgo"},"fetch":{"enabled":true}}}
+```
+
+Keyed backends read only their own key. The environment variable wins over the
+private 0600 `tool-keys.json` entry:
+
+| Backend | Environment variable | `tool-keys.json` entry | Verification status |
+| --- | --- | --- | --- |
+| `brave` | `BRAVE_SEARCH_API_KEY` | `{"brave":"<key>"}` | bad-key rejection live-verified 2026-10-04; successful search unverified |
+| `tavily` | `TAVILY_API_KEY` | `{"tavily":"<key>"}` | bad-key rejection live-verified 2026-10-04; successful search unverified |
+| `exa` | `EXA_API_KEY` | `{"exa":"<key>"}` | bad-key rejection live-verified 2026-10-04; successful search unverified |
+| `duckduckgo` | none (keyless) | none | live-verified 2026-10-04 (headless call through the real adapter) |
+
+`tool-keys.json` can hold several entries, but Likha reads only the configured
+backend's entry. A key never enables search on its own, and a keyed backend
+with no key stays unavailable: `/tools` shows the generic reason "The web
+search backend is not configured.", and the specific message (no `<backend>`
+key is configured; set `<ENV>`…) appears as a transcript entry when a run
+starts. Fetch needs
+enablement but no search key. Avoid putting credentials in repo files, prompts,
+or skill content.
+
+DuckDuckGo needs no key because it uses the unofficial `html.duckduckgo.com`
+HTML endpoint, not a sanctioned API. Its markup can change without notice, and
+automated use can be blocked or rate-limited at any time. When that happens the
+search fails with a named error (for example, no parsable results). It does not
+switch to another backend.
+
+The first search asks you to authorize the configured backend for this
+conversation and shows the query. Each backend has its own privacy notice:
+Brave's API notice says default query records may last up to 90 days. Tavily
+and Exa receive the query and request metadata, and retention follows their
+own privacy policies. DuckDuckGo's notice describes the unofficial-endpoint
+fragility above and makes no retention promises. Review queries for project
+details before you grant. Later searches on the same backend don't prompt
+again. Failures never switch vendors. Changing the backend is a config change,
+so by design it clears the grant: any change to the loaded web config clears
+every web grant, taking effect at the next run start, and switching back to a
+previous backend asks again. A backend switch in a live session has not
+been verified yet.
 
 First fetch asks per public HTTPS origin; new redirect origins ask too. Only
 public HTTPS on port 443 and supported text content are allowed. No cookies,
 credentials, private hosts, browser scripts, hidden extraction model, or shell
-fallback. The site sees the request; returned content sent to the configured
+fallback. This policy was live-probed on 2026-10-04: public HTTPS pages fetched
+as Markdown; plain HTTP, non-443 ports, loopback, private, and link-local
+addresses were refused before connecting; `https://localhost` and a
+DNS-rebinding name were rejected at the dialer before connect (inferred from
+the error path; no listener was bindable on :443), while the `http://localhost`
+refusal was confirmed with 0 listener accepts. Consent dialogs
+await an interactive walkthrough. The site sees the request; returned content sent to the configured
 model follows that provider's policy. Content can include malicious instructions;
 it supplies data, not authority to execute or disclose secrets.
 
-Grants reset on switching/resuming sessions or app exit/config changes. Inspect
+Grants reset on switching/resuming sessions, app exit, or any web config
+change (checked at the next run start). Inspect
 old results without repeating the request. Cancel slow calls normally; network
 deadlines start after consent and exclude later consent waits.
 
