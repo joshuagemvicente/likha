@@ -141,6 +141,27 @@ Grants reset on switching/resuming sessions or app exit/config changes. Inspect
 old results without repeating the request. Cancel slow calls normally; network
 deadlines start after consent and exclude later consent waits.
 
+## Phase 4: your own agent profiles
+
+The task tool now advertises more than the built-in explore agent. Author a
+profile as `agents/<name>/AGENT.md` in the private state directory — frontmatter
+carries `name`, `description`, and optionally `model` and `tools`; the body is
+the profile's instructions. See `specs/user-agents/user-guide.md` for the
+copy-paste example and the full ceiling table.
+
+- The built-in `review` profile reads and searches the repository and reports
+  findings; `explore` is unchanged; `implement` stays unavailable until
+  isolated worktrees exist.
+- A profile's `tools` list can only narrow the read-only child ceiling
+  (glob, read, grep, task), and dispatch re-intersects it with your live
+  permissions, so a profile can never grant more than you could.
+- `/agents` lists every profile with its exact ceiling, optional model, and
+  over-cap or malformed identities named visibly; task rows and transcripts
+  show which profile ran.
+- Changed-on-disk profiles refuse and request a catalog refresh instead of
+  loading a replacement. Project-local profiles remain deferred until a
+  trust/precedence policy exists.
+
 ## Recovery and evidence
 
 Refusal: inspect the named permission/mode; make a fresh authorized request if
