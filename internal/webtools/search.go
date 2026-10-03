@@ -157,6 +157,10 @@ func Search(ctx context.Context, key string, req SearchRequest) (SearchOutcome, 
 		return finish(fmt.Errorf("brave web search returned an HTTP %d redirect; search redirects are never followed", response.StatusCode))
 	case response.StatusCode == http.StatusUnauthorized:
 		return finish(errors.New("brave web search returned HTTP 401 unauthorized; the configured " + SearchKeyEnv + " credential was rejected"))
+	case response.StatusCode == http.StatusUnprocessableEntity && braveTokenInvalid(response.Body):
+		// Brave reports an invalid subscription token as HTTP 422 with code
+		// SUBSCRIPTION_TOKEN_INVALID (live-probed 2026-10-04), not as 401.
+		return finish(errors.New("brave web search returned HTTP 422 SUBSCRIPTION_TOKEN_INVALID; the configured " + SearchKeyEnv + " credential was rejected"))
 	case response.StatusCode == http.StatusTooManyRequests:
 		note := "Brave rate-limited this search (HTTP 429)"
 		if after := sanitizeText(response.Header.Get("Retry-After")); after != "" {
@@ -254,4 +258,12 @@ func truncateText(text string, limit int) string {
 		limit--
 	}
 	return text[:limit]
+}
+
+// braveTokenInvalid reports whether a bounded prefix of a Brave error body
+// carries the invalid-subscription-token code. The body is untrusted; only
+// the presence of the fixed code is checked, never echoed.
+func braveTokenInvalid(body io.Reader) bool {
+	prefix, _ := io.ReadAll(io.LimitReader(body, 4096))
+	return bytes.Contains(prefix, []byte("SUBSCRIPTION_TOKEN_INVALID"))
 }

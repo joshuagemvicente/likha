@@ -47,7 +47,7 @@ type exaContentsRequest struct {
 }
 
 // SearchExa runs one Exa web search with the given API key. The key is sent
-// only in the x-api-1 header of the single, non-redirected POST request and
+// only in the x-api-key header of the single, non-redirected POST request and
 // never appears in an error or log. Query is trimmed and bounded to
 // MaxQueryBytes; limit is 1..MaxSearchLimit, defaulting to DefaultSearchLimit.
 // Backend order is preserved, snippets come from Exa's text or summary fields
@@ -97,7 +97,7 @@ func SearchExa(ctx context.Context, key string, req SearchRequest) (SearchOutcom
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("x-api-1", key)
+	request.Header.Set("x-api-key", key)
 	request.Header.Set("User-Agent", "likha")
 	// Enforce the per-request cap even when the caller's context would allow
 	// longer; an existing earlier deadline keeps precedence.
