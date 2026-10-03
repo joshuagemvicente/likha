@@ -8,11 +8,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"testing"
 
 	"likha/internal/model"
 	"likha/internal/repository"
+	"likha/internal/tools"
 )
 
 func TestRunTurnEmitsFreshEstimatedAndMeasuredContextPerRequest(t *testing.T) {
@@ -27,6 +29,18 @@ func TestRunTurnEmitsFreshEstimatedAndMeasuredContextPerRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	harness, warnings := HarnessMessages(repo, root)
+	if len(warnings) != 0 || len(harness) != 1 || harness[0].Role != "system" {
+		t.Fatalf("unexpected harness snapshot: %+v, warnings=%v", harness, warnings)
+	}
+	registry, warnings := newToolRegistry(repo, repo.Root(), nil, RunOptions{}, func(TurnEvent) {})
+	if len(warnings) != 0 {
+		t.Fatalf("registry registration warnings: %v", warnings)
+	}
+	definitions := registry.Definitions(tools.Scope{Agent: "main"})
+	requestMessages := func(history []model.Message) []model.Message {
+		return append(append([]model.Message(nil), harness...), history...)
+	}
 	steer := make(chan string, 1)
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +54,10 @@ func TestRunTurnEmitsFreshEstimatedAndMeasuredContextPerRequest(t *testing.T) {
 		}
 		request := requests.Add(1)
 		var body struct {
+			Tools []struct {
+				Type     string               `json:"type"`
+				Function model.ToolDefinition `json:"function"`
+			} `json:"tools"`
 			Messages []struct {
 				Role       string `json:"role"`
 				Content    string `json:"content"`
@@ -58,6 +76,31 @@ func TestRunTurnEmitsFreshEstimatedAndMeasuredContextPerRequest(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		if len(body.Messages) < len(harness) {
+			t.Errorf("request %d is missing the frozen harness", request)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		for i, message := range harness {
+			if body.Messages[i].Role != message.Role || body.Messages[i].Content != message.Content || body.Messages[i].ToolCallID != "" || len(body.Messages[i].ToolCalls) != 0 {
+				t.Errorf("request %d changed frozen harness message %d: %+v", request, i, body.Messages[i])
+			}
+		}
+		if len(body.Tools) != len(definitions) {
+			t.Errorf("request %d tool count = %d, want %d", request, len(body.Tools), len(definitions))
+		}
+		for i := 0; i < min(len(body.Tools), len(definitions)); i++ {
+			actual, expected := body.Tools[i], definitions[i]
+			var actualSchema, expectedSchema any
+			actualErr := json.Unmarshal(actual.Function.Parameters, &actualSchema)
+			expectedErr := json.Unmarshal(expected.Parameters, &expectedSchema)
+			if actual.Type != "function" || actual.Function.Name != expected.Name || actual.Function.Description != expected.Description || actualErr != nil || expectedErr != nil || !reflect.DeepEqual(actualSchema, expectedSchema) {
+				t.Errorf("request %d registry tool %d differs from frozen catalog: %+v", request, i, actual)
+			}
+		}
+		// Validate request-only instructions/catalog above, then retain the
+		// original exact conversation/steering/tool-result assertions below.
+		body.Messages = body.Messages[len(harness):]
 		w.Header().Set("Content-Type", "text/event-stream")
 		switch request {
 		case 1:
@@ -113,9 +156,9 @@ func TestRunTurnEmitsFreshEstimatedAndMeasuredContextPerRequest(t *testing.T) {
 		model.Message{Role: "assistant", ToolCalls: []model.ToolCall{{ID: "read_call_2", Name: "read", Arguments: `{"path":"next.txt"}`}}},
 		model.Message{Role: "tool", ToolCallID: "read_call_2", Content: "next tool result"},
 	)
-	wantFirstTokens, wantFirstKnown := model.EstimateInputTokens("", firstHistory, agentTools)
-	wantSecondTokens, wantSecondKnown := model.EstimateInputTokens("", secondHistory, agentTools)
-	wantThirdTokens, wantThirdKnown := model.EstimateInputTokens("", thirdHistory, agentTools)
+	wantFirstTokens, wantFirstKnown := model.EstimateInputTokens("", requestMessages(firstHistory), definitions)
+	wantSecondTokens, wantSecondKnown := model.EstimateInputTokens("", requestMessages(secondHistory), definitions)
+	wantThirdTokens, wantThirdKnown := model.EstimateInputTokens("", requestMessages(thirdHistory), definitions)
 	var contextEvents []TurnEvent
 	RunTurn(context.Background(), client, repo, root, nil, "Find the answer", nil, steer, func(ev TurnEvent) {
 		if ev.Kind == "context" {

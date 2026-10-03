@@ -732,8 +732,9 @@ func ListModels(ctx context.Context, endpoint, apiKey string) ([]string, error) 
 // ModelDetails describes a model reported by an endpoint. ContextWindow is
 // zero when the model list has no supported positive context-window metadata.
 type ModelDetails struct {
-	ID            string
-	ContextWindow int64
+	ID                  string
+	ContextWindow       int64
+	ContextWindowSource string // response field that supplied ContextWindow; empty when unknown
 }
 
 // ListModelsWithDetails returns model IDs and any positive context-window
@@ -799,16 +800,26 @@ func decodeModelDetails(raw []byte) ([]ModelDetails, error) {
 		if entry.ID == "" {
 			continue
 		}
-		window := positiveWindow(entry.ContextWindow, entry.ContextLength, entry.ContextWindowCamel)
+		window, source := positiveWindow(entry.ContextWindow), ""
+		if window > 0 {
+			source = "context_window"
+		} else if window = positiveWindow(entry.ContextLength); window > 0 {
+			source = "context_length"
+		} else if window = positiveWindow(entry.ContextWindowCamel); window > 0 {
+			source = "contextWindow"
+		}
 		if window == 0 && len(entry.Limit) > 0 {
 			var limit struct {
 				Context json.RawMessage `json:"context"`
 			}
 			if json.Unmarshal(entry.Limit, &limit) == nil {
 				window = positiveWindow(limit.Context)
+				if window > 0 {
+					source = "limit.context"
+				}
 			}
 		}
-		details = append(details, ModelDetails{ID: entry.ID, ContextWindow: window})
+		details = append(details, ModelDetails{ID: entry.ID, ContextWindow: window, ContextWindowSource: source})
 	}
 	return details, nil
 }

@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sys/unix"
 	_ "modernc.org/sqlite"
 
+	"likha/internal/explore"
 	"likha/internal/model"
 )
 
@@ -38,6 +39,20 @@ type Snapshot struct {
 	History       []model.Message
 	Entries       []Entry
 	PromptHistory []string `json:"prompt_history,omitempty"`
+
+	// ToolRecords retain displayable result metadata alongside Entries. They
+	// are not replayed into model history or restored as authorization grants.
+	ToolRecords []ToolRecord `json:"tool_records,omitempty"`
+
+	// Tasks retain private child transcripts, never live execution or permissions.
+	Tasks []explore.Record `json:"tasks,omitempty"`
+
+	// Plan is the persisted /todo checklist pointer (specs/plan-todo). It is
+	// task data only: nil means "no plan ever" (legacy snapshots), while a
+	// pointer to empty Steps records an intentional clear. The authoritative
+	// row lives in the plans table and commits in the same transaction; resume
+	// restores the list but starts no work and restores no permissions.
+	Plan *Plan `json:"plan,omitempty"`
 
 	// NamedTitle is the model-generated session name (spec tui-layout phase
 	// 1c). It is set only by the auto-naming flow after the first completed
@@ -185,6 +200,21 @@ func configure(db *sql.DB) error {
 	default:
 		return fmt.Errorf("unsupported session schema version %d (expected %d)", version, schemaVersion)
 	}
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS edit_journal (
+		id TEXT PRIMARY KEY NOT NULL,
+		session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+		repository TEXT NOT NULL,
+		updated_ns INTEGER NOT NULL,
+		progress BLOB NOT NULL
+	)`); err != nil {
+		return fmt.Errorf("initialize private edit journal: %w", err)
+	}
+	if err := configureTaskRecords(tx); err != nil {
+		return err
+	}
+	if err := configurePlans(tx); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit session schema setup: %w", err)
 	}
@@ -314,7 +344,11 @@ func (s *Store) Load(id string) (Snapshot, error) {
 
 // Save atomically replaces an existing session only if it has not changed
 // since this snapshot was loaded. Rejected updates leave its prior snapshot,
-// title and timestamp unchanged.
+// title and timestamp unchanged. The snapshot update and the private
+// task_records rewrite commit together, so a crash leaves both at the prior
+// revision; a nil snapshot.Tasks (the legacy shape) rewrites no task rows.
+// The plans row commits the same way: a nil snapshot.Plan deletes it, a
+// pointer rewrites it from snapshot.Plan (see plans doc on replacePlan).
 func (s *Store) Save(snapshot Snapshot) error {
 	if !validID(snapshot.ID) || snapshot.Root != s.root {
 		return errors.New("session ID or repository does not match store")
@@ -339,16 +373,23 @@ func (s *Store) Save(snapshot Snapshot) error {
 	if expected != revision {
 		return fmt.Errorf("save session %s: %w", snapshot.ID, ErrConflict)
 	}
+	// The snapshot update and the task_records rewrite commit together so a
+	// crash cannot leave the rows disagreeing with the saved snapshot.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("save session: %w", err)
+	}
+	defer tx.Rollback()
 	var result sql.Result
 	if sameConversation(previousSnapshot, snapshot) {
 		// Prompt recall metadata is not conversational activity and should not
 		// reorder sessions in /sessions. It still advances the revision and is
 		// written atomically with the optimistic snapshot check.
-		result, err = s.db.Exec(`UPDATE sessions SET snapshot = ?, revision = revision + 1
+		result, err = tx.Exec(`UPDATE sessions SET snapshot = ?, revision = revision + 1
 			WHERE id = ? AND repository = ? AND revision = ? AND snapshot = ?`,
 			data, snapshot.ID, s.root, expected, previous)
 	} else {
-		result, err = s.db.Exec(`UPDATE sessions SET snapshot = ?, title = ?, updated_ns = ?, revision = revision + 1
+		result, err = tx.Exec(`UPDATE sessions SET snapshot = ?, title = ?, updated_ns = ?, revision = revision + 1
 			WHERE id = ? AND repository = ? AND revision = ? AND snapshot = ?`,
 			data, title(snapshot), time.Now().UTC().UnixNano(), snapshot.ID, s.root, expected, previous)
 	}
@@ -362,6 +403,15 @@ func (s *Store) Save(snapshot Snapshot) error {
 	if affected != 1 {
 		return fmt.Errorf("save session %s: %w", snapshot.ID, ErrConflict)
 	}
+	if err := replaceTaskRecords(tx, snapshot); err != nil {
+		return err
+	}
+	if err := replacePlan(tx, snapshot); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit session save: %w", err)
+	}
 	*snapshot.revision = expected + 1
 	return nil
 }
@@ -369,8 +419,13 @@ func (s *Store) Save(snapshot Snapshot) error {
 // sameConversation treats nil and empty slices as equivalent while comparing
 // the fields that represent durable conversation activity. PromptHistory is
 // intentionally excluded so recalling prompts does not reorder /sessions.
+// ToolRecords and Tasks participate (nil and empty equivalent): saved result
+// metadata and task progress are conversation activity, unlike prompt recall.
+// Plan also participates: a nil *Plan is "no plan ever" while a pointer to
+// empty Steps is a cleared plan, so samePlan keeps the two distinct; checklist
+// updates are session activity, comparable with task progress.
 func sameConversation(a, b Snapshot) bool {
-	if a.NamedTitle != b.NamedTitle || len(a.History) != len(b.History) || len(a.Entries) != len(b.Entries) {
+	if a.NamedTitle != b.NamedTitle || len(a.History) != len(b.History) || len(a.Entries) != len(b.Entries) || !sameToolRecords(a.ToolRecords, b.ToolRecords) || !sameTaskRecords(a.Tasks, b.Tasks) || !samePlan(a.Plan, b.Plan) {
 		return false
 	}
 	for i := range a.Entries {

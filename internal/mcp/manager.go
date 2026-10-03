@@ -49,88 +49,60 @@ func NewMcpManagerForTest(servers map[string]ServerConfig, clients map[string]*C
 	return &McpManager{servers: servers, clients: clients, trusted: trusted, failed: failed}
 }
 
-// toolSource maps a model-facing tool name to its owning server.
+// lookup resolves a legacy raw name only when it has one owner and cannot
+// shadow a built-in or a qualified catalog name.
 func (m *McpManager) lookup(name string) (server string, client *Client, tool Tool, ok bool) {
+	if m == nil || reservedToolName(name) || name == "" {
+		return "", nil, Tool{}, false
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for serverName, client := range m.clients {
-		for _, tool := range client.Tools {
-			if tool.Name == name {
-				return serverName, client, tool, true
+		if client == nil {
+			continue
+		}
+		for _, candidate := range client.Tools {
+			if qualifiedToolName(serverName, candidate.Name) == name {
+				return "", nil, Tool{}, false
+			}
+			if candidate.Name == name {
+				if ok {
+					return "", nil, Tool{}, false
+				}
+				server, tool, ok = serverName, candidate, true
 			}
 		}
 	}
-	return "", nil, Tool{}, false
+	return server, m.clients[server], tool, ok
 }
 
-// Tools returns every MCP tool as model definitions, starting servers lazily
-// on first use. Servers that fail to start are recorded and skipped.
+// Tools preserves the legacy raw-name model surface for existing callers.
+// Ambiguous names and built-in collisions are omitted rather than dispatched
+// arbitrarily. New registry callers use CatalogTools for qualified identities.
 func (m *McpManager) Tools(userAgent string) []model.ToolDefinition {
-	if m == nil {
-		return nil
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	var tools []model.ToolDefinition
-	for name, cfg := range m.servers {
-		client, running := m.clients[name]
-		if !running {
-			if reason, crashed := m.failed[name]; crashed {
-				_ = reason // stays dead for the session (relaunch-only restart)
-				continue
-			}
-			started, err := Start(name, cfg, userAgent)
-			if err != nil {
-				m.failed[name] = err.Error()
-				continue
-			}
-			m.clients[name] = started
-			client = started
+	for _, tool := range m.CatalogTools(userAgent) {
+		if len(tool.Aliases) == 0 {
+			continue
 		}
-		for _, tool := range client.Tools {
-			tools = append(tools, model.ToolDefinition{
-				Name:        tool.Name,
-				Description: fmt.Sprintf("MCP tool from server %q. %s", name, tool.Description),
-				Parameters:  tool.InputSchema,
-			})
-		}
+		definition := tool.Definition
+		definition.Name = tool.Aliases[0]
+		tools = append(tools, definition)
 	}
 	return tools
 }
 
-// Call executes one MCP tool with a 60 s deadline. trusted reports whether
-// the server was already approved this session; approve is the callback the
-// TUI uses to surface the trust-on-first-use prompt.
+// Call preserves legacy raw-name dispatch through the common server trust
+// adapter. The bool is MCP's tool-level isError flag, not the trust state.
 func (m *McpManager) Call(ctx context.Context, name string, arguments json.RawMessage, approve func(server, tool string, arguments string) bool) (string, bool, error) {
-	if m == nil {
-		return "", false, fmt.Errorf("unsupported tool %q", name)
-	}
-	server, client, tool, ok := m.lookup(name)
+	server, _, tool, ok := m.lookup(name)
 	if !ok {
 		return "", false, fmt.Errorf("unsupported tool %q", name)
 	}
-	m.mu.Lock()
-	trusted := m.trusted[server]
-	m.mu.Unlock()
-	if !trusted {
-		args := strings.TrimSpace(string(arguments))
-		if args == "" {
-			args = "{}"
-		}
-		if !approve(server, tool.Name, args) {
-			return "", false, fmt.Errorf("MCP tool %q from server %q rejected by user", tool.Name, server)
-		}
-		m.mu.Lock()
-		m.trusted[server] = true
-		m.mu.Unlock()
-	}
-	callCtx, cancel := context.WithTimeout(ctx, CallTimeout)
-	defer cancel()
-	text, isError, err := client.Call(callCtx, tool.Name, arguments)
-	if err != nil {
+	if err := m.AuthorizeTool(ctx, server, tool.Name, string(arguments), approve); err != nil {
 		return "", false, err
 	}
-	return text, isError, nil
+	return m.CallTool(ctx, server, tool.Name, arguments)
 }
 
 // Status renders the /mcp view: each server, its state, and its tools, plus
