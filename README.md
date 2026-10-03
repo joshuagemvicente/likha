@@ -1,26 +1,33 @@
 # Lisa
 
-Lisa is a terminal coding agent for one repository at a time. It streams responses from a hosted model provider on the predefined accepted list, using your own API key (BYOK) — Lisa hosts no models and bundles no local inference server. It reads repository files and asks permission before editing a file or running a shell command. Conversations are stored in local SQLite so you can resume them. The full-screen interface scrolls its transcript continuously, like a browser, rather than using terminal scrollback or fixed pages.
+Lisa is a terminal coding agent for one repository at a time. It streams responses from a hosted model provider on the predefined list, using your own API key (BYOK) — Lisa hosts no models and bundles no local inference server. It reads repository files and asks permission before editing a file or running a shell command. Conversations are stored in local SQLite so you can resume them. The full-screen interface scrolls its transcript continuously, like a browser, rather than using terminal scrollback or fixed pages.
 
-**Release status:** Local scripts build macOS and Linux archives; no release has been published. A local macOS ARM64 archive passed the documented checksum/install checks and an interactive workflow against a protocol server. `opencode-go` is **live-verified** (user session on 2026-09-29: setup flow, connection check, streaming, and agent tool usage with a real key). `opencode-zen` shares the same verified surface and session header but awaits a live-key turn; the other hosted providers (OpenAI, OpenRouter, Amazon Bedrock, Dialagram) and the new ChatGPT sign-in remain wired but unprobed — a live probe with a real ChatGPT Plus account has not run yet. See the [v1 specification](specs/v1-spec.md), [feature test plan](specs/feature-test-plan.md), [setup plan](specs/setup-plan.md), and [unreleased changes](CHANGELOG.md).
+**Release status:** Local scripts build macOS and Linux archives; no release has been published. A local macOS ARM64 archive passed the documented checksum/install checks and an interactive workflow against a protocol server. `opencode-go` is **live-verified** (user session on 2026-09-29: setup flow, connection check, streaming, and agent tool usage with a real key); repeat the full probe before release after provider-facing request changes. `opencode-zen` and every provider marked pending-probe below await live verification, including ChatGPT (no live probe with a real Plus/Pro account has run). See the [v1 specification](specs/v1-spec.md), [feature test plan](specs/feature-test-plan.md), [setup plan](specs/setup-plan.md), and [unreleased changes](CHANGELOG.md).
 
 ## Requirements and model providers
 
 - Go 1.24 or later to build from source or produce local release archives; macOS or Linux. A downloaded, prebuilt archive does not require Go.
 - An interactive terminal (Lisa does not run its TUI through a pipe).
-- A hosted provider from the predefined accepted list and your API key. The model must support SSE streaming **and structured tool calls**. Lisa hosts no models and bundles no local inference server.
+- A hosted provider from the predefined list and your API key. The model must support SSE streaming **and structured tool calls**. Providers marked pending-probe have not yet passed Lisa's full compatibility check. Lisa hosts no models and bundles no local inference server.
 
-### Predefined accepted providers
+### Predefined providers
 
-| Provider | `--provider` name | API key | Base URL (default) | Default model |
-| --- | --- | --- | --- | --- |
-| OpenAI | `openai` | `LISA_OPENAI_API_KEY` | `https://api.openai.com/v1` | `gpt-4o-mini` |
-| OpenRouter | `openrouter` | `LISA_OPENROUTER_API_KEY` | `https://openrouter.ai/api/v1` | `openai/gpt-4o-mini` |
-| Amazon Bedrock | `bedrock` | `LISA_BEDROCK_API_KEY` | `https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1` (other regions via `--endpoint`) | `anthropic.claude-3-5-haiku-20241022-v1:0` |
-| Dialagram | `dialagram` | `LISA_DIALAGRAM_API_KEY` | `https://dialagram.me/router/v1` | none — pass `--model` |
-| Opencode Zen | `opencode-zen` | `LISA_OPENCODE_ZEN_API_KEY` | `https://opencode.ai/zen/v1` | `gpt-5.3-codex` |
-| Opencode Go | `opencode-go` | `LISA_OPENCODEGO_API_KEY` | `https://opencode.ai/zen/go/v1` | `glm-5.3-flash` |
-| ChatGPT (Plus/Pro) | `chatgpt` | none — ChatGPT browser sign-in | `https://chatgpt.com/backend-api/codex` | `gpt-5.5` |
+| Provider | `--provider` name | API key | Base URL (default) | Default model | Probe status |
+| --- | --- | --- | --- | --- | --- |
+| OpenAI | `openai` | `LISA_OPENAI_API_KEY` | `https://api.openai.com/v1` | `gpt-4o-mini` | pending-probe |
+| OpenRouter | `openrouter` | `LISA_OPENROUTER_API_KEY` | `https://openrouter.ai/api/v1` | `openai/gpt-4o-mini` | pending-probe |
+| Amazon Bedrock | `bedrock` | `LISA_BEDROCK_API_KEY` | `https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1` (other regions via `--endpoint`) | `anthropic.claude-3-5-haiku-20241022-v1:0` | pending-probe |
+| Dialagram | `dialagram` | `LISA_DIALAGRAM_API_KEY` | `https://dialagram.me/router/v1` | none — pass `--model` | pending-probe |
+| Opencode Zen | `opencode-zen` | `LISA_OPENCODE_ZEN_API_KEY` | `https://opencode.ai/zen/v1` | `gpt-5.3-codex` | pending-probe |
+| Opencode Go | `opencode-go` | `LISA_OPENCODEGO_API_KEY` | `https://opencode.ai/zen/go/v1` | `glm-5.3-flash` | live-verified* |
+| ChatGPT (Plus/Pro) | `chatgpt` | none — ChatGPT browser sign-in | `https://chatgpt.com/backend-api/codex` | `gpt-5.5` | pending-probe |
+| Groq | `groq` | `LISA_GROQ_API_KEY` | `https://api.groq.com/openai/v1` | none — pass `--model` | pending-probe |
+| xAI | `xai` | `LISA_XAI_API_KEY` | `https://api.x.ai/v1` | none — pass `--model` | pending-probe |
+| Together AI | `together` | `LISA_TOGETHER_API_KEY` | `https://api.together.ai/v1` | none — pass `--model` | pending-probe |
+| Mistral AI | `mistral` | `LISA_MISTRAL_API_KEY` | `https://api.mistral.ai/v1` | none — pass `--model` | pending-probe |
+| Cerebras | `cerebras` | `LISA_CEREBRAS_API_KEY` | `https://api.cerebras.ai/v1` | none — pass `--model` | pending-probe |
+
+`live-verified*` means a user-run probe passed on 2026-09-29; repeat the full probe after provider-facing request changes before release. Pending-probe means endpoint docs or route compatibility are not a substitute for Lisa's full live checks (streamed text, structured tool calls, cancellation, and revoked-key handling).
 
 Key resolution order: `--api-key`, then `LISA_API_KEY`, then the provider's own `LISA_<NAME>_API_KEY`, then the private state directory (`providers.json`, mode 0600). Passing `--api-key` once stores the key for later runs. Keys are never read from the selected repository and never stored in the session database. `chatgpt` is the exception: it has no API key and signs in through your browser instead — see [Sign in with ChatGPT (Plus/Pro)](#sign-in-with-chatgpt-pluspro). Endpoint URLs may not contain credentials, query strings, or fragments; plain HTTP is accepted only for loopback hosts.
 
@@ -28,7 +35,7 @@ Lisa checks the connection when it starts and again before each agent run; a dea
 
 Lisa identifies itself to providers with `User-Agent: lisa/<version>`. The Opencode providers additionally receive your stable conversation ID in `x-opencode-session`, which they require for routing and prompt caching. ChatGPT requests go to the OpenAI Responses wire at `<base>/responses` with a `ChatGPT-Account-Id` header and the same stable conversation ID in `session-id`.
 
-Run without a model name: Lisa uses the provider's documented default (listed above), or — for an endpoint outside the list — the first model that endpoint reports. Override with `LISA_MODEL` or `--model`. `lisa --help` prints every option, provider, environment variable, and example.
+Run without a model name: Lisa uses the provider's documented default (listed above); a listed provider with `none — pass --model` requires `LISA_MODEL` or `--model`. For an endpoint outside the list, Lisa uses the first model that endpoint reports. `lisa --help` prints every option, provider, environment variable, and example.
 
 ### First-run setup (no flags needed)
 
@@ -87,7 +94,7 @@ The alternate-screen UI shows the repository, model, status, and scroll position
 
 Conversation text wraps to a **content width**: the viewport minus two padding columns, at every terminal size — no capped measure, so lines reach the right edge instead of stopping short of it. No horizontal scrolling is ever needed — every rendered path (transcript, reviews, dialogs, composer, popups) is pinned by tests to stay within the viewport, and resizing re-wraps the transcript immediately. The status bar, composer, and popups still use the full terminal width.
 
-The composer defaults to `minimal` (a rule above the input). While idle, press **Ctrl+G** to choose `bordered` (a rounded box), `borderless` (just the input), or `chatter` (an inline `You ›` prefix). **↑/↓** navigate, typing filters, **Enter** applies, and **Esc** cancels. The choice is stored as `composer.style` in the private `config.json` and restored on launch. At 40 columns, `bordered` and `chatter` render as `minimal` without changing the stored choice. Review decisions and page navigation stay in the status line beneath the composer.
+The composer defaults to `minimal` (a rule above the input). While idle, press **Ctrl+G** to choose `bordered` (a rounded box), `borderless` (just the input), or `chatter` (an inline `You ›` prefix). **↑/↓** navigate, typing filters, **Enter** applies, and **Esc** cancels. The choice is stored as `composer.style` in the private `config.json` and restored on launch. At 40 columns, `bordered` and `chatter` render as `minimal` without changing the stored choice. Page navigation stays in the status line beneath the composer; a pending review replaces the composer with its Approve/Decline decision bar.
 
 ### Editing keys
 
@@ -100,7 +107,7 @@ The draft is a readline-style editor with a visible block caret. Word keys treat
 - **Alt+Return** (or **Ctrl+Return / Shift+Return** where the terminal sends them; **Ctrl+J** always works) inserts a newline into the draft. Bare **Enter** still sends, flattening the newlines to spaces; pasted text (bracketed paste) inserts at the caret with newlines flattened too.
 - **Esc** clears an idle draft as always — but a Return arriving right after Esc (within ~50 ms) is the Alt+Return encoding and inserts a newline instead.
 
-Editing is inert while a turn streams or a review is pending, and the transcript styles render tool activity and model reasoning in the theme's muted role.
+While a run streams, the input stays live: type a draft and press **Enter** to queue it as a steering prompt. The queued row appears in the conversation muted, the status line names the count (`2 queued`, or `2Q` on the narrow layout), and each queued message is delivered to the model inside the same run as soon as the current tool calls settle — or, if the run ends with messages still queued (cancellation, error, or a finished compaction), they are held — rows stay queued and nothing auto-starts. `/` commands stay inactive while a run is active and are refused with a visible message; `//` still queues literal text. **Esc** cancels the run; with messages held, **Enter** on an empty draft sends the whole batch and a bare **Esc** clears it. **Ctrl+D** exits without sending. While an approval is pending, editing is inert, the caret is hidden, and a pinned decision bar replaces the composer with **Approve** and **Decline** buttons — **←/→** or **Tab**/**Shift+Tab** move focus, **Enter** confirms, and **Esc**/Ctrl+C still cancel the run. Approve is available only after the review has been scrolled to its end; Decline rejects without executing and lets the model continue. The transcript styles render tool activity and model reasoning in the theme's muted role.
 
 ### Status line
 
@@ -122,7 +129,7 @@ A prompt starting with `/` is a command, acting on the application and **never s
 | --- | --- |
 | `/sessions` | List saved sessions for the repository (newest first). |
 | `/sessions <n>` | Resume that session in place — no relaunch needed. |
-| `/models` | Open a dialog of the provider's models; ↑/↓ navigate, Enter applies. |
+| `/models` | Open a dialog of every configured provider's models, grouped under one section header per provider (active provider first); ↑/↓ navigate, type to filter, Enter applies. Enter on another provider's model moves the session to that provider+model and stores the pair. |
 | `/providers` | Open a dialog to switch the provider for this session (not-configured rows prompt for the API key inline; stored config untouched). The keyless `chatgpt` row cannot be switched to mid-session — sign in through first-run setup or `--device-login` instead. |
 | `/compact [focus]` | Summarize the conversation so far into one compact brief and continue from it — the summarized turns are replaced, the session stays resumable. |
 | `/quit` | Exit, same as Ctrl+D. |
@@ -146,26 +153,27 @@ The listing and the popup **never include** paths excluded by the repository's `
 
 ### Themes
 
-Lisa ships a small set of named color themes that map onto its style roles (headings, cursor, hints, warnings, errors) and adapt to your terminal's light or dark background automatically:
+Lisa ships a small set of named color themes that map onto its style roles (headings, cursor, hints, warnings, errors) plus full-surface conversation bands, and adapt to your terminal's light or dark background at render time:
 
 `default` · `catppuccin` · `habamax` · `gruvbox` · `tokyonight` · `nord` · `dracula` · `solarized` · `rose-pine` · `kanagawa` · `everforest` · `one-dark` · `ayu` · `flexoki` · `oxocarbon` · `night-owl` · `github` · `monokai` · `material` · `nightfox` · `iceberg` · `horizon`
 
 Pick one four ways:
 
-- **First-run setup** offers a theme stage right after model selection.
-- **`/themes`** opens a selection dialog: **↑/↓** move the highlight, **Enter** applies the highlighted theme and stores it in `config.json`, **Esc** closes without changing anything. The dialog opens on the currently applied theme.
+- **First-run setup** offers a theme stage right after model selection; **↑/↓** previews each family immediately.
+- **`/themes`** opens a selection dialog: **↑/↓** (and PgUp/PgDn) preview the highlighted family at once — dialog chrome plus the dimmed conversation behind it — **Enter** commits the highlight and stores it in `config.json` (appending a "Theme set to …" entry), **Esc** restores the committed theme with no write and no entry. The `(current)` marker always names the Esc target. The dialog opens on the currently applied theme.
 - **`/themes <n-or-name>`** applies directly without the dialog.
 - **`--theme <name>` or `LISA_THEME`** pre-selects it at launch (explicit settings beat stored config).
 
-Conversation prose stays uncolored except error entries — the visual-restraint rule holds in every theme.
+Conversation bands show authorship in the background, not prose hue: your lines read `Normal` on the user band, assistant lines `Normal` on the model band, tool activity and results share the `Muted`-on-tool band, reasoning stays `Muted` flat with no band, and errors signal by foreground on the base canvas. The status bar, composer, scrollbar, and dialogs sit on the base canvas (typed input `Normal`, placeholder `Muted`). The `default` family keeps today's plain terminal look — no bands. Under limited color profiles (ANSI, no-color) bands collapse to legible plain text: labels and content stay intact, backgrounds never carry meaning alone.
+
+Color literals preview inline: `#4493f8`, `#abc`, `rgb(68, 147, 248)`, and `hsl(210, 80%, 60%)` (alpha ignored) render on their own color background with a contrast-picked foreground, so the model can show a color, not just name it. Text, widths, and copy are untouched — decoration only.
 
 ### Nerd Font markers (opt-in)
-
 If your terminal uses a patched **Nerd Font**, run Lisa with `--nerd-fonts` or `LISA_NERD=1` and the status/review markers become icon glyphs (clock while waiting, check when done, cross on errors, pencil during reviews). Lisa cannot detect a patched font reliably, so this is strictly opt-in: without it, output stays plain ASCII and always legible. Conversation prose and the logo are never replaced by icons.
 
 ### Repository tools and reviews
 
-Lisa offers `glob`, `read`, and `grep` for repository text: `glob` matches file paths by pattern (`*`, `?`, `[...]` within a segment, a bare `**` spanning directories; files only), `read` returns a file's UTF-8 text (up to 1 MiB), and `grep` searches files with a regular expression (Go regexp syntax, per line, case-sensitive unless the pattern uses `(?i)`). These tools reject traversal and symlink escapes; size and result limits can return errors. To request a change, try: “Use edit_file to change notes.txt from old to new.” The model must actually request the tool. `edit_file` proposes replacement content or a new file and shows the affected path and a diff **before** writing. Review every page with PgDn/Ctrl+N (and PgUp/Ctrl+P to revisit); **Y** approves that proposal only after every page has been viewed, while **N** rejects immediately. If the file changes after review starts, the stale edit is refused rather than overwriting it.
+Lisa offers `glob`, `read`, and `grep` for repository text: `glob` matches file paths by pattern (`*`, `?`, `[...]` within a segment, a bare `**` spanning directories; files only), `read` returns a file's UTF-8 text (up to 1 MiB), and `grep` searches files with a regular expression (Go regexp syntax, per line, case-sensitive unless the pattern uses `(?i)`). These tools reject traversal and symlink escapes; size and result limits can return errors. To request a change, try: “Use edit_file to change notes.txt from old to new.” The model must actually request the tool. `edit_file` proposes replacement content or a new file and shows the affected path and a diff **before** writing. Review to the end with PgDn/Ctrl+N (and PgUp/Ctrl+P to revisit); the decision bar's **Approve** becomes available once the whole proposal has been seen, and **Decline** rejects immediately. If the file changes after review starts, the stale edit is refused rather than overwriting it.
 
 ### MCP servers
 
@@ -189,7 +197,7 @@ Lisa can use tools from **MCP servers** (Model Context Protocol) you configure �
 - **`/mcp`** lists configured servers, their state, and their tools.
 - Invalid `mcp.json` fails loudly at startup; the file is 0600 in private state, never in the repository.
 
-To check work, try: “Use run_command to run `git status --short`.” The review shows the **exact shell command** and canonical repository working directory. Commands containing invisible or control characters, including tabs and line breaks, are rejected before review; control characters in other review text are escaped visibly. Again, **Y** approves only after all review pages have been viewed; **N** rejects without execution. An approved command runs via `sh -c` in that directory; its output and exit status appear in the conversation (long output is paged, and output above the command limit is marked truncated). **The working directory is not a sandbox. An approved command can read or change files outside the repository, access the network, and spawn detached processes that outlive cancellation.** Cancellation stops later agent actions, but it cannot guarantee that every process spawned by an approved command has terminated. Inspect the whole command before approving. Esc/Ctrl+C cancels a pending review without approving it. There is no blanket permission for edits or commands.
+To check work, try: “Use run_command to run `git status --short`.” The review shows the **exact shell command** and canonical repository working directory. Commands containing invisible or control characters, including tabs and line breaks, are rejected before review; control characters in other review text are escaped visibly. Again, **Approve** is available only after the whole review has been seen; **Decline** rejects without execution. An approved command runs via `sh -c` in that directory; its output and exit status appear in the conversation (long output is paged, and output above the command limit is marked truncated). **The working directory is not a sandbox. An approved command can read or change files outside the repository, access the network, and spawn detached processes that outlive cancellation.** Cancellation stops later agent actions, but it cannot guarantee that every process spawned by an approved command has terminated. Inspect the whole command before approving. Esc/Ctrl+C cancels a pending review without approving it. There is no blanket permission for edits or commands.
 
 ### Session names
 
@@ -272,8 +280,8 @@ Ensure `$HOME/.local/bin` is on your `PATH`, or invoke the binary by its full pa
 This is a **procedure to perform**, not a claim that it passed on any published archive or provider:
 
 1. On each supported host/architecture, verify the checksum, install its local archive, check `--version` and `--help`, and run `"$HOME/.local/bin/lisa" /path/to/test-repository` in an interactive terminal. Complete the first-run setup with a hosted provider (`--provider opencode-go` with a key skips setup) and confirm the connection check reports **Connected** before prompting.
-2. Ask Lisa to use `read` or `grep`; check the returned repository content. Ask it to use `edit_file` on a disposable file. Inspect all diff pages, press **N**, and confirm the file did not change. Ask again, review every page, press **Y**, and confirm the displayed change was applied. Try a multi-page diff and a narrow viewport.
-3. Ask it to use `run_command` for a harmless check such as `git status --short`. Inspect the exact command and working directory; reject once with **N**, then request it again, review all pages, approve with **Y**, and inspect the actual output and exit status. Test cancellation without granting permission.
+2. Ask Lisa to use `read` or `grep`; check the returned repository content. Ask it to use `edit_file` on a disposable file. Inspect the diff, choose **Decline**, and confirm the file did not change. Ask again, review to the end, choose **Approve**, and confirm the displayed change was applied. Try a multi-page diff and a narrow viewport.
+3. Ask it to use `run_command` for a harmless check such as `git status --short`. Inspect the exact command and working directory; decline once, then request it again, review to the end, approve, and inspect the actual output and exit status. Test cancellation without granting permission.
 4. Exit with Ctrl+D, run `"$HOME/.local/bin/lisa" --sessions /path/to/test-repository`, and resume its ID with `--resume SESSION_ID`. Confirm completed conversation and tool results return, but an interrupted pending review never executes after relaunch. Check that another repository cannot list or resume that session.
 
 Release publication and provider compatibility remain unverified until this walkthrough succeeds on the intended targets with a live-verified provider. For source checks, run `go test ./...` from the Lisa project root.

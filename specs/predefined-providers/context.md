@@ -38,6 +38,28 @@ Code and docs this feature touches.
   returns an OpenAI-shaped list (minimax-m3, kimi-k3, glm-5.3-flash, …).
   Both `/models` routes answer publicly (no auth) with `{"object":"list","data":[{"id":…}]}`;
   chat completions and tool calls still need a live-key probe.
+- Groq: first-party docs specify `https://api.groq.com/openai/v1`, Bearer API-key auth,
+  `POST /chat/completions`, and `GET /models` with `data[].id`.
+  https://console.groq.com/docs/openai
+  https://console.groq.com/docs/models
+- xAI: first-party docs specify `https://api.x.ai/v1`, Bearer API-key auth,
+  `POST /chat/completions`, and `GET /models` with `data[].id`; Chat Completions is
+  documented as legacy. https://docs.x.ai/developers/rest-api-reference/inference
+- Together AI: first-party docs use `https://api.together.ai/v1` (not the older `.xyz`
+  candidate URL) and document Bearer auth plus both routes. The compatibility page and
+  model API response examples disagree on whether the list is `data[]` or a bare array;
+  the shared parser accepts either, but the live shape remains pending-probe.
+  https://docs.together.ai/docs/inference/openai-compatibility
+  https://docs.together.ai/reference/models
+- Mistral AI: first-party docs specify `https://api.mistral.ai/v1`, Bearer auth,
+  `POST /chat/completions`, and `GET /models`; the schema says `data[]`, while the
+  published example is a bare array. The shared parser accepts either; live shape and
+  full behavior remain pending-probe. https://docs.mistral.ai/api/endpoint/models
+- Cerebras: first-party docs specify `https://api.cerebras.ai/v1`, Bearer auth,
+  `POST /chat/completions`, and `GET /models` with `data[].id`. The documented
+  developer-role limitation means compaction behavior needs a suitable-model probe.
+  https://inference-docs.cerebras.ai/resources/openai
+  https://inference-docs.cerebras.ai/api-reference/models/list-models
 - OpenCode Go requires a stable per-conversation session ID in `x-opencode-session`
   (observed live: chat completions return HTTP 400 `MissingSessionID` without it) and an
   identifying User-Agent rather than a generic HTTP-library name.
@@ -49,6 +71,9 @@ Code and docs this feature touches.
   streamed responses, and agent tool usage all worked after the session-header fix.
   `opencode-go` is **accepted**. `opencode-zen` uses the same surface and session header
   but its `/zen/v1` route has not had a live-key turn yet (still pending).
+- Groq, xAI, Together AI, Mistral AI, and Cerebras are wired as pending-probe providers;
+  no credentialed compatibility probes have been run for them. Documentation evidence
+  establishes route intent only, not acceptance.
 - Top agent TUIs defer failures to prompt time and validate on first use rather than
   preflight; Lisa's startup + pre-run checks are deliberately stricter.
   https://opencode.ai/docs/troubleshooting/

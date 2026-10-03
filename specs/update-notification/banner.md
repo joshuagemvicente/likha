@@ -204,7 +204,7 @@ linear, high-contrast, and non-transient.
   position cannot be reset by the banner's arrival.
 - **Keyboard:** zero new keys, zero key capture. The bubbletea key model
   and the pending-review flow are untouched; the banner cannot trap focus
-  or intercept Y/N/Esc.
+  or intercept ←/→, Tab, Enter, Esc, or Ctrl+C.
 - **Copy-paste:** the command token is one contiguous ASCII string with
   straight quotes, no smart typography, full-width spaces, or zero-width
   characters, so terminals that let the user select and shell-paste can
@@ -244,8 +244,9 @@ linear, high-contrast, and non-transient.
       including a 20-column case).
 - [ ] Version-less conditions (equal/older/error/offline/`dev`/opt-out)
       render nothing.
-- [ ] Pending-review Y/N/Esc keys behave identically with the banner
-      visible; no test regression on the existing review flow.
+- [ ] Pending-review decision keys (←/→, Tab, Enter, Esc) behave
+      identically with the banner visible; no test regression on the
+      existing review flow.
 - [ ] `--version` output stays exactly `Lisa <VERSION>` (install.sh asserts
       it); `--sessions` / `--resume` / non-TTY paths print no banner.
 - [ ] `lisa update` works end-to-end against the loopback release server:

@@ -56,11 +56,17 @@ specs/
 | Custom commands / skills | [custom-commands/](custom-commands/spec.md) | draft |
 | Text transforms (/transform, Wispr-Flow style) | [text-transforms/](text-transforms/spec.md) | draft |
 | TUI layout (status bar enrichment, header declutter, scrollbar fix, role backgrounds) | [tui-layout/](tui-layout/spec.md) | implemented (local) — phases 1–3 done (phase 1: header declutter + mini logo, status-bar enrichment incl. git/env/spend/ctx, auto session names, folder/branch default-on; phase 2: content-width breakpoints + per-path no-overflow invariant tests; phase 3: role backgrounds via adaptive-themes); real-terminal walkthroughs pending |
+| Model context tracker (measured usage + estimates) | [context-tracker/](context-tracker/spec.md) | in progress — implementation and automated tests complete; real-terminal walkthrough pending |
 | Muted tool rendering + terminal-native composer keys | [tool-rendering-terminal-keys/](tool-rendering-terminal-keys/spec.md) | in progress — M1 (muted tools) and M2 (composer keys) implemented (local); Ctrl+Delete chord unbindable on bubbletea v1.3.10, carried by Alt+D |
 | Repository structure refactor (phased package split) | [structure-refactor/](structure-refactor/spec.md) | implemented (local) — Phase 1 + Phase 1.5 landed 2026-10-01; Phase 2 parked |
 | Agent tool loop (read-only search steering + round-cap auto-continue; first slice of agent-harness) | [agent-loop/](agent-loop/spec.md) | planned |
+| Tool and agent platform (alpha → beta roadmap) | [tooling-platform/](tooling-platform/spec.md) | proposed — registry, tool UX, web/skills, subagents, user agents, code intelligence, and memory |
+| Steering prompts (type, queue, and interrupt while a run is active) | [steering-prompts/](steering-prompts/spec.md) | implemented (local) — M1 automated suite green, real-TUI walkthrough outstanding; M2 pending probe |
+| Approve/Decline buttons for permission reviews | [permission-ui/](permission-ui/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
 | Adaptive themes (live preview + full-surface color) | [adaptive-themes/](adaptive-themes/spec.md) | implemented (local) — M1 preview, M2 adaptive helpers, M3 bands landed 2026-10-01; live Ghostty/terminal walkthrough outstanding |
 | All-provider models in `/models` | [all-models/](all-models/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
 | Fast `/models` open (cache + progressive render) | [models-perf/](models-perf/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
-| Additional predefined providers (Groq, xAI, Together, DeepSeek, Gemini) | [additional-providers/](additional-providers/spec.md) | planned |
+| Additional predefined providers (Groq, xAI, Together, Mistral, Cerebras) | [additional-providers/](additional-providers/spec.md) | partially implemented; provider probes pending |
 | Providers as connection manager (auth only, no activation) | [providers-connect/](providers-connect/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
+| Web UI served from a local server (`lisa --serve`) | [web-ui/](web-ui/spec.md) | draft — awaiting review; research record in [web-ui/research.md](web-ui/research.md) |
+| Working indicator (ephemeral activity row with subtle motion) | [working-indicator/](working-indicator/spec.md) | in progress — feature tests pass; unrelated full-suite session/prompt-history failures and real-terminal walkthrough pending |

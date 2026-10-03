@@ -66,6 +66,9 @@ Compiled-in harness prompt + project instructions file, both in one feature:
    `runTurn` before `prior`.
 3. Amend FR-03 or add FR-17: "Lisa sends a structured harness prompt with
    every request; repository instructions files are included when present."
+   *(Update: FR-19 added 2026-10-01; its tool-contract steering slice is
+   specified narrowly in [agent-loop/](../agent-loop/spec.md) — the full
+   harness prompt and `AGENTS.md` loader below remain this spec's scope.)*
 4. Tests: prompt present as first message, order fixed, project file
    precedence and size cap, no prompt duplicated on session replay.
 

@@ -5,28 +5,47 @@ is ticked until the automated suite (or a named walkthrough) covers it.
 
 ## Live preview (M1)
 
-- [ ] `↑/↓` in `/themes` visibly re-tints dialog chrome AND the dimmed
-      conversation behind it before Enter.
-- [ ] Enter persists the highlighted theme to `config.json` with the
+- [x] `↑/↓` in `/themes` visibly re-tints dialog chrome AND the dimmed
+      conversation behind it before Enter. (`TestThemesPreviewKeepsCommittedNameAndConfig`,
+      `TestThemesDialogPreviewRenderDiffers`; human eyeball pending the
+      walkthrough below.)
+- [x] Enter persists the highlighted theme to `config.json` with the
       existing transcript note; Esc restores the committed theme with no
-      config write and no transcript entry.
-- [ ] The `(current)` marker always names the Esc target (committed theme),
-      distinct from the highlighted row.
+      config write and no transcript entry. (`TestThemesEnterCommitsPreview`,
+      `TestThemesEscRestoresCommitted`, `TestThemesTwoStageEscRestores`,
+      `TestThemesDirectArgStillCommits`.)
+- [x] The `(current)` marker always names the Esc target (committed theme),
+      distinct from the highlighted row. (`TestThemesCurrentMarkerNamesEscTarget`.)
 
 ## Full-surface color (M2–M3)
 
-- [ ] Nord→Habamax (any pair) visibly changes borders, selection, prose
+- [x] Nord→Habamax (any pair) visibly changes borders, selection, prose
       surfaces, status bar, and canvas background — not just accents.
-- [ ] Every family × both variants passes the contrast gate; expected
+      (`TestThemeBackgroundFollowsPalette`, `TestBandRolesAcrossThemes`,
+      `TestLogoOnCanvasAcrossThemes`, `TestDefaultBandsAreNoOps`; human
+      eyeball pending the walkthrough below.)
+- [x] Every family × both variants passes the contrast gate; expected
       per-family overrides: zero (any override recorded in `tasks.md`).
-- [ ] Limited-profile renders (ANSI / no-color) stay legible with content
-      intact; backgrounds never carry meaning alone.
+      (`TestContrastMatrix`, `TestMixEndpoints`, `TestLegibleAccentsOnBase`,
+      `TestLegibleRejects`, `TestRolesCarryBothVariants`,
+      `TestResolveVariantArgAdvisory`; overrides: zero.)
+- [x] Limited-profile renders (ANSI / no-color) stay legible with content
+  intact; backgrounds never carry meaning alone.
+  (`TestDegradationAcrossProfiles`, `TestDegradedBandsKeepWidths`.)
+
+## Inline swatches (M4)
+
+- [x] `#4493f8` (and `#rgb`, `rgb()`/`hsl()` forms) previews its own color
+  inline: swatch background with contrast foreground, text/widths/copy
+  unchanged, theme switches keep it. (`TestFindSwatchesHex/Func`,
+  `TestSwatchStyleContrast`,
+  `TestSwatchPaintsHexBackground/HSLAndRGB/KeepsBandAndRestoresOnTheme/SkipsLogoAndWrapsClean`.)
 
 ## Gates
 
-- [ ] `go test ./...` passes with this feature's tests included, including
+- [x] `go test ./...` passes with this feature's tests included, including
       the phase-2 overflow suite unchanged.
-- [ ] No skipped or mock-only tests claimed as coverage.
+- [x] No skipped or mock-only tests claimed as coverage.
 - [ ] Live terminal walkthrough (Ghostty): preview sweep across families,
       band legibility, degradation eyeball — same gate as the tui-layout
       walkthrough items.

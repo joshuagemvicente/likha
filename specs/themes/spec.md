@@ -27,20 +27,30 @@ style roles; this feature completes it and wires it into the TUI.
    cannot detect a patched font reliably; without the opt-in, output stays
    pure ASCII (spec: plain-text identity always legible, zero tofu risk).
 4. **Selection UX:** a theme stage inside the first-run setup flow, plus a
-   `/themes` **selection dialog** (2026-09-29 polish): the dialog is a
-   centered bordered modal listing every theme with the highlighted row; the
-   cursor is the selected state (starts on the applied theme); **↑/↓** move it
-   (setter), **Enter** applies the highlighted theme and stores it, **Esc**
-   closes without changing anything. While the modal is open, prompt input is
-   routed to it — keys cannot leak into the draft. `/themes <n-or-name>`
-   applies directly without the dialog. `LISA_THEME` env pre-selects and
-   skips the stage.
+   `/themes` **selection dialog** (2026-09-29 polish; live preview 2026-10-01):
+   the dialog is a centered bordered modal listing every theme with the
+   highlighted row; the cursor is the selected state (starts on the applied
+   theme); **↑/↓** (and PgUp/PgDn, query-reset) **preview** the highlighted
+   family immediately — dialog chrome and the dimmed conversation behind it
+   re-render in the candidate palette — while the committed name stays put,
+   so the `(current)` marker always names the Esc target; **Enter** commits
+   the highlight (stores it, appends the `"Theme set to …"` entry),
+   **Esc** restores the committed theme with no write and no entry. While
+   the modal is open, prompt input is routed to it — keys cannot leak into
+   the draft. `/themes <n-or-name>` applies directly without the dialog.
+   `LISA_THEME` env pre-selects and skips the stage. The setup theme stage
+   previews on ↑/↓ the same way.
 5. **Icon surface:** status and review markers only (waiting/done/error/tool
    prefixes) — never the logo or conversation prose (spec: decoration must not
    compete with essential state).
-6. **Style roles:** themes map onto seven roles — Title, Selected, Normal,
-   Help, Border, Warning, Error. Conversation prose stays uncolored except
-   Error entries; no gradients or color floods (visual-restraint rule).
+6. **Style roles:** themes map onto seven foreground roles — Title, Selected,
+   Normal, Help, Border, Warning, Error — plus the canvas/band backgrounds
+   owned by `specs/adaptive-themes/` (BgBase canvas; BgUser/BgTool/BgModel
+   authorship bands). Conversation prose adopts the single `Normal` fg while
+   authorship shows in the background bands (You Normal-on-BgUser, Assistant
+   Normal-on-BgModel, Tool Muted-on-BgTool, Reasoning Muted flat, Error fg on
+   base); no gradients or color floods (visual-restraint rule). The `default`
+   family keeps the plain terminal look.
 
 ## Functional changes (v1-spec.md)
 

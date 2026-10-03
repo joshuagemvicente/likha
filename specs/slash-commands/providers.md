@@ -201,8 +201,8 @@ cross-command memory.
 - [ ] `/models` dialog Enter still switches the live model (behavior
       unchanged); its hint text no longer mentions `/model`.
 - [ ] During an active run or pending approval, `/providers` is inert and
-      the dialog cannot open; Esc/Y/N in a review behave identically with
-      the dialog closed.
+      the dialog cannot open; Esc/Approve/Decline in a review behave
+      identically with the dialog closed.
 - [ ] Custom-endpoint internals compile and are covered by a build-time
       test, but no user-visible surface references them.
 

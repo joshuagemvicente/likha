@@ -15,11 +15,13 @@ Code, tests, and docs this feature touches.
   `families`, `fromPalette` (resolve-time `lipgloss.Color` → per-render
   `AdaptiveColor`), `Named`/`Resolve` (signatures stable).
 - `ui/adaptive.go` (new) — `mix`, `legible`, band-ratio constants.
-- `internal/app/composer.go` — composer input fg (`:88-116`), border/chrome
-  roles on `BgBase`.
-- `internal/app/status_line.go` — status segments on `BgBase`
-  (`renderStatusRow`, `statusLineRows`).
-
+- `internal/ui/swatch.go` (new, M4) — `FindSwatches` (hex 3/4/6/8 longest
+  match, `rgb()`/`hsl()` comma/space/`/`-alpha), `SwatchStyle` (contrast fg
+  via the shared `luminance` gate), span contract (rune offsets, never
+  overlapping, per-line).
+- `internal/tui/view.go` (M4) — `rebuild` stores parallel `lineSpans` (nil
+  for logo/review/header/separators), `mainView` paints via `renderSwatches`
+  (band render, then per-span repaint over fit-safe offsets).
 ## Tests
 
 - `internal/app/themes_modal_test.go` — extend `TestThemesModalSelection`
@@ -31,7 +33,8 @@ Code, tests, and docs this feature touches.
   for degradation tests.
 - `internal/app/tui_test.go` + `composer_overflow_test.go` — phase-2
   no-overflow invariant suite; must stay green untouched.
-- `ui/adaptive_test.go` (new) — mix/gate tables + full-matrix contrast test.
+- `internal/ui/swatch_test.go` (new, M4) — detector tables (lengths, alpha-drop, clamp/wrap, glued-plain) + contrast-fg check.
+- `internal/tui/swatch_test.go` (new, M4) — render proofs (hex/hsl/rgb paint, text+widths intact, theme-switch + default keep the swatch, wrapped swatches keep widths).
 
 ## Docs
 

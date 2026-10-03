@@ -1,6 +1,10 @@
 # Feature: Adaptive themes — live preview + full-surface color
 
-**Status:** planned.
+**Status:** implemented (local). M1 live preview, M2 adaptive helpers, and M3
+full-surface bands landed 2026-10-01 (`internal/tui/{tui,dialog,setup,view}.go`,
+`internal/ui/adaptive.go` + band roles in `internal/ui/theme.go`); the suite
+(`go test ./...`) is green. The only unverified aspect is the live
+Ghostty/terminal walkthrough (open item 3).
 
 Amends `specs/themes/spec.md` (selection UX, prose rule) and absorbs
 `specs/tui-layout/spec.md` phase 3 (role backgrounds, whose three open
@@ -81,8 +85,6 @@ restores.
 ### M3 — Full-surface roles
 
 - New `Theme` roles: `BgBase` (app canvas — near-black for dark variants,
-  paper for light; this is the "pure black background" ask), `BgUser`,
-  `BgTool`, `BgModel`. Foreground roles unchanged.
 - Wiring (`rebuild()` + `mainView()`): `You` lines → `Normal` fg on `BgUser`;
   `Assistant` → `Normal` fg on `BgModel`; `Tool` → `Muted` fg on `BgTool`
   (activity and result share the band — distinction stays in prefix text);
@@ -101,8 +103,20 @@ restores.
   to legible plain text — backgrounds never carry meaning alone; role labels
   (`You:`/`Tool:`/…) and fg roles remain.
 
-## Resolved decisions (tui-layout phase 3 open items, closed here)
+### M4 — Inline color swatches (2026-10-01)
 
+Color literals in transcript prose preview their own color: `#4493f8` (plus
+`#rgb`, `#rrggbb`, `#rrggbbaa`, `rgb()`/`rgba()`, `hsl()`/`hsla()` in comma
+or space form; alpha ignored, hues wrap, channels clamp) renders on its own
+color background with a contrast-picked foreground, so the model shows a
+color, not just names it. Detection runs per wrapped line inside transcript
+prose only (logo art and review proposal bodies skip it); invalid, glued
+(`myrgb(…)`, `#frag`), or over-long literals stay plain. Text, widths, and
+copy are untouched — SGR spans wrap existing cells only — and limited
+profiles degrade through lipgloss (no-color drops the swatch, text remains).
+FR-03 already covers transcript distinction; no FR change.
+
+## Resolved decisions (tui-layout phase 3 open items, closed here)
 1. **Palette tints:** derived via `mix()` + override-only-on-failure (M2).
 2. **Tool activity vs result:** one shared `BgTool` band.
 3. **Reasoning background:** none — foreground-muted only, quietest layer.
@@ -131,21 +145,39 @@ gap, v1-spec is amended first and the checklist mirrors it.
 
 ## Open items
 
-1. Exact `mix` ratios per band (8–12% starting point; tuned against the
-   contrast gate in M2, recorded in `tasks.md`).
-2. Per-family overrides: expected zero; any added override names the failing
-   pair and its measured ratio.
+1. ~~Exact `mix` ratios per band~~ — resolved 2026-10-01: user 10%, tool 10%,
+   model 8% (`bandUserRatio`/`bandToolRatio`/`bandModelRatio` in
+   `internal/ui/adaptive.go`); assistant prose fills the most rows, so the
+   model band takes the quietest tint.
+2. ~~Per-family overrides~~ — resolved 2026-10-01: zero. Every family ×
+   variant × band tint passes the contrast gate, so `bandOverrides` stays
+   empty; any future failing pair must add a named override (pair + measured
+   ratio) or the matrix test fails the build.
 3. Live Ghostty/terminal walkthrough of preview + bands (same gate as the
-   tui-layout walkthrough items).
+   tui-layout walkthrough items) — still open.
 
 ## Acceptance criteria
 
-- [ ] `↑/↓` in `/themes` visibly re-tints dialog chrome AND the dimmed
-      conversation behind it before Enter.
-- [ ] Enter persists + notes; Esc restores the committed theme with no config
-      write and no transcript entry.
-- [ ] Nord→Habamax (any pair) visibly changes borders, selection, prose
+- [x] `↑/↓` in `/themes` visibly re-tints dialog chrome AND the dimmed
+      conversation behind it before Enter. (`TestThemesPreviewKeepsCommittedNameAndConfig`,
+      `TestThemesDialogPreviewRenderDiffers` — candidate accent escape present,
+      render differs from the committed-theme render; human eyeball pending
+      the walkthrough.)
+- [x] Enter persists + notes; Esc restores the committed theme with no config
+      write and no transcript entry. (`TestThemesEnterCommitsPreview`,
+      `TestThemesEscRestoresCommitted`, `TestThemesTwoStageEscRestores`,
+      `TestThemesDirectArgStillCommits`, `TestThemesCurrentMarkerNamesEscTarget`,
+      `TestSetupThemePreviewChangesLiveTheme`.)
+- [x] Nord→Habamax (any pair) visibly changes borders, selection, prose
       surfaces, status bar, and canvas background — not just accents.
-- [ ] Every family × both variants passes the contrast gate; limited-profile
-      renders stay legible with content intact.
-- [ ] `go test ./...` green, including the phase-2 overflow suite untouched.
+      (`TestThemeBackgroundFollowsPalette`, `TestBandRolesAcrossThemes`,
+      `TestLogoOnCanvasAcrossThemes`; human eyeball pending the walkthrough.)
+- [x] Every family × both variants passes the contrast gate; limited-profile
+  renders stay legible with content intact. (`TestContrastMatrix`,
+  `TestDegradationAcrossProfiles`, `TestDegradedBandsKeepWidths`;
+  overrides: zero.)
+- [x] `#4493f8` (and `rgb()`/`hsl()` forms) previews its own color inline:
+  swatch background with contrast foreground, text/widths unchanged.
+  (`TestFindSwatchesHex/Func`, `TestSwatchStyleContrast`,
+  `TestSwatchPaintsHexBackground/HSLAndRGB/KeepsBandAndRestoresOnTheme/SkipsLogoAndWrapsClean`.)
+- [x] `go test ./...` green, including the phase-2 overflow suite untouched.

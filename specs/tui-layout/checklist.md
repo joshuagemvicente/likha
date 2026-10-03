@@ -68,15 +68,21 @@ gate for phase 3. Phase 2's string-viewport invariant suite is green as of
       `TestMentionPopupRowsNeverOverflow`,
       `TestCommandPopupRowsNeverOverflow`).
 
-## Phase 3 — role backgrounds (owned by adaptive-themes)
-- [ ] User input, tool output, and model output have distinguishable
-      backgrounds; reasoning keeps its muted foreground. (Criterion lives in
-      `specs/adaptive-themes/spec.md` M3 — band map, contrast gate, overflow
-      regression.)
-- [ ] Backgrounds degrade to fully legible plain text on limited terminals.
-      (adaptive-themes limited-profile criterion.)
+## Phase 3 — role backgrounds (owned by adaptive-themes; landed 2026-10-01)
+- [x] User input, tool output, and model output have distinguishable
+      backgrounds; reasoning keeps its muted foreground. (`TestBandRolesAcrossThemes`,
+      `TestLogoOnCanvasAcrossThemes`, `TestDefaultBandsAreNoOps`,
+      `TestThemeBackgroundFollowsPalette`; human eyeball pending the
+      walkthrough below.)
+- [x] Backgrounds degrade to fully legible plain text on limited terminals.
+      (`TestDegradationAcrossProfiles`, `TestDegradedBandsKeepWidths`.)
 - [ ] No animation or flash is introduced (FR-15). (Both specs; no new
-      keybindings or chords in either.)
+      keybindings or chords in either — no suite test covers this by name,
+      so the box waits for the walkthrough.)
+
+Walkthrough still open: live Ghostty/terminal eyeball of the preview sweep,
+band legibility, and degradation (adaptive-themes open item 3), plus the
+phase-2 scrollbar-absence eyeball above.
 
 ## Gates
 - [x] `go test ./...` passes; no skipped or mock-only tests claimed as
@@ -84,4 +90,4 @@ gate for phase 3. Phase 2's string-viewport invariant suite is green as of
       is absent from PATH, and say so).
 - [x] Status of this feature is only ever: planned, in progress,
       implemented (local), or verified (release). *Currently
-      implemented (local), phase 3 pending.*
+      implemented (local), phases 1–3 done, walkthroughs pending.*

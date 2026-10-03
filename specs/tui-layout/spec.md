@@ -1,10 +1,10 @@
 # Feature: TUI layout adjustment (status bar enrichment, header declutter, overflow fix, role backgrounds)
 
-**Status:** implemented (local) — phases 1–2 done, phase 3 pending. The whole
+**Status:** implemented (local) — phases 1–3 done. The whole
 automated suite (`go test ./...`) is green; the only unverified aspect is how
-phases 1–2 render in a real terminal (see checklist.md).
+phases 1–3 render in a real terminal (see checklist.md).
 
-## Context (implemented for phases 1–2)
+## Context (implemented for phases 1–3; phase 3 via adaptive-themes, walkthrough pending)
 
 - `internal/app/tui.go` `header()` returns zero lines at ≥56 cols; below 56
   it renders one compact line, `Lisa · <repo basename>` (the logo block is
@@ -33,8 +33,9 @@ phases 1–2 render in a real terminal (see checklist.md).
   viewport minus two padding columns at every width (the phase-2 120-column
   cap was removed: lines reach the right edge); resize re-flows via
   `layoutWidth = 0`.
-- Themes (`ui/theme.go`) use foreground-only roles; reasoning/tools differ
-  by muted foreground only (phase 3 territory).
+- Themes (`internal/ui/theme.go` + `internal/ui/adaptive.go`) carry foreground
+  roles plus the phase-3 canvas/band backgrounds (`BgBase`, `BgUser`,
+  `BgTool`, `BgModel`); reasoning stays muted-flat, tools muted-on-band.
 
 ## Phase 1a — Header declutter + mini logo (bottom-right)
 
@@ -203,12 +204,13 @@ Unchanged from the approved plan, now verified by the suite:
 The real-terminal scrollbar-absence walkthrough stays pending (checklist).
 
 ## Phase 3 — Differentiated backgrounds for user / tool / model content
-+
-Status: **absorbed by `specs/adaptive-themes/spec.md`** (read that spec as
-the buildable contract for this phase). This section stays as the
+
+Status: **landed 2026-10-01 via `specs/adaptive-themes/`** (read that spec as
+the buildable contract for this phase — its status is implemented (local),
+walkthrough pending). This section stays as the
 requirements record; the adaptive-themes spec owns the design that closed
 the three open decisions:
-+
+
 - Tints: derived via `mix()` (accent toward base canvas, ~8–12%) with a
   per-family override map only where a derived tint fails the contrast
   gate — no hand-picked 88-cell table.
@@ -216,7 +218,7 @@ the three open decisions:
   prefix text.
 - Reasoning background: none — `Muted` foreground only; the quietest layer
   stays flat.
-+
+
 Required behavior (unchanged): `BgUser`/`BgTool`/`BgModel` (+ `BgBase`
 canvas) roles with light/dark variants via `lipgloss.AdaptiveColor`;
 full-width bands (padding paints for free in `mainView`'s
@@ -225,13 +227,12 @@ fails by foreground; `Lisa`/system + logo sit on `BgBase`; status bar,
 composer, scrollbar, and dialogs render on `BgBase`; composer input uses
 `Normal` fg; degradation under limited profiles collapses bands to legible
 plain text with `You:`/`Tool:`/… labels and fg roles intact (FR-15).
-+
+
 ## Post-refactor path map (verified 2026-09-30)
-+
+
 The system-architecture and Phase 1.5 changes (see
 `specs/structure-refactor/`) moved the files this spec named. Phase 3
 touch points, current locations:
-+
 | Old path (this spec's history) | Current path |
 | --- | --- |
 | `ui/theme.go` (`Named`/`Resolve`/`fromPalette`, `Theme` roles, families) | `internal/ui/theme.go` — new roles land here; new file `internal/ui/adaptive.go` (`mix`, `legible`, AdaptiveColor constructors) per adaptive-themes M2 |
@@ -240,7 +241,7 @@ touch points, current locations:
 | `internal/app/tui.go` `updateDialog`/`confirmDialog`/`applyTheme` (preview per adaptive-themes M1) | Same file post-1.5 UNLESS Phase 1.5 landed meanwhile — then `setup.go`/`dialog.go`/`view.go` per `specs/structure-refactor/architecture-phase-1.md` §11; resolve by symbol name, not line number |
 | Entry roles consumed by the band map | `"You"` (tui.go:309), `"Assistant"` (tui.go:776), `"Tool"` (tui.go:795,839), `"Reasoning"` (tui.go:768), `"Error"`, `"Lisa"`, `"Logo"` — role strings unchanged by phase 3 |
 
-## Acceptance criteria (phases 1–2 verified locally via `go test ./...`)
+## Acceptance criteria (phases 1–3 verified locally via `go test ./...`)
 
 Automated coverage truthfully disclosed per box. Anything requiring a real
 terminal render is left unchecked pending the TUI walkthrough.
@@ -316,10 +317,12 @@ terminal render is left unchecked pending the TUI walkthrough.
       by `TestResizeReflowsToNewWidth`. *(All measured in display cells on
       ANSI-stripped render output; scrollbar absence on a real terminal is
       still the walkthrough item.)*
-- [ ] Phase 3: role backgrounds distinguishable and degrading to plain text.
-  (Owned by `specs/adaptive-themes/spec.md` acceptance criteria — M3 band map,
-  contrast gate, limited-profile legibility, and the phase-2 overflow-suite
-  regression. This box closes when adaptive-themes lands.)
+- [x] Phase 3: role backgrounds distinguishable and degrading to plain text.
+  (Landed via adaptive-themes M3: `TestBandRolesAcrossThemes`,
+  `TestLogoOnCanvasAcrossThemes`, `TestDefaultBandsAreNoOps`,
+  `TestContrastMatrix`, `TestDegradationAcrossProfiles`,
+  `TestDegradedBandsKeepWidths`, plus the phase-2 overflow-suite regression.
+  Human eyeball pending the walkthrough.)
 - [x] `go test ./...` passes for every phase before it is described as done
       (green as of the phase 2 implementation).
 
@@ -349,9 +352,7 @@ spec keeps the requirements record only.
 - The real-terminal walkthrough that retires the walkthrough items noted in
   the acceptance criteria and checklist — for phase 2 it covers the absence
   of a horizontal scrollbar at the tested widths (the invariant is pinned
-  against rendered string output only).
-- Phase 3 implementation itself: `BgBase`/`BgUser`/`BgTool`/`BgModel` roles,
-  palettes via `internal/ui/adaptive.go`, band wiring in `rebuild()` +
-  `mainView()`, plain-text degradation, and the M1 live preview — all owned
-  by `specs/adaptive-themes/spec.md` (acceptance criteria and open items
-  there). This spec's phase-3 box closes when adaptive-themes lands.
+  against rendered string output only); for phase 3 the preview sweep, band
+  legibility, and degradation eyeball (adaptive-themes open item 3).
+- Phase 3 implementation is landed (see the boxes above); only the
+  walkthrough stays open.

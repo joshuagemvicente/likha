@@ -37,8 +37,10 @@ from the project root. Order stays M1 → M2 → M3 → M4; M1 can ship alone.
 4. **`ui/adaptive.go`: `mix` + `legible`.** Hex-space `mix(fg, bg string,
    ratio float64) string` (tint derivation) and `legible(fg, bg string)
    bool` contrast gate, pure functions, no lipgloss dependency at the unit
-   level. Start ratios 8–12% accent-into-base per band; record final ratios
-   here when tuned.
+   level. Tuned 2026-10-01 (landed): user 10%, tool 10%, model 8%
+   accent-into-base (`bandUserRatio`/`bandToolRatio`/`bandModelRatio` in
+   `internal/ui/adaptive.go`; the model band takes the quietest tint since
+   assistant prose fills the most rows).
    Verify: table test (`ui/adaptive_test.go`) — mix endpoints (0 → bg,
    1 → fg), gate rejects near-identical pairs, accepts accent-on-base for
    all twenty-two families × both variants.
@@ -54,9 +56,8 @@ from the project root. Order stays M1 → M2 → M3 → M4; M1 can ship alone.
    defines two variants; existing theme-resolution tests green.
 6. **Contrast gate over the matrix.** Run `legible` over every family ×
    light/dark × role-fg-on-its-bg. Any failure gets a named per-family
-   override recorded here (failing pair + measured ratio); expected count
-   is zero.
-   Verify: matrix test fails the build on any illegible pair.
+   override recorded here (failing pair + measured ratio); landed 2026-10-01
+   with zero failures, so `bandOverrides` stays empty.
 
 ## M3 — Full-surface roles
 
@@ -85,14 +86,32 @@ from the project root. Order stays M1 → M2 → M3 → M4; M1 can ship alone.
    Verify: degradation test renders each role under `termenv.ANSI` and
    asserts visible content + distinct-or-plain styles.
 
-## M4 — Docs and spec bookkeeping
+## M4 — Inline color swatches (2026-10-01)
+
+11. **`internal/ui/swatch.go`: `FindSwatches` + `SwatchStyle`.** Pure
+    detector (hex 3/4/6/8, `rgb()`/`rgba()`, `hsl()`/`hsla()`, comma/space/`/`
+    alpha; longest-match, identifier-glued stays plain) plus the contrast-fg
+    swatch style (WCAG 0.179 gate, same `luminance` as the M2 gate).
+    Verify: `internal/ui/swatch_test.go` tables (lengths, alpha-drop, clamp,
+    wrap, glued-plain, contrast black/white).
+12. **Render in `internal/tui/view.go`.** `rebuild` stores parallel
+    `lineSpans` (nil for logo/review/header/separators); `mainView` paints
+    via `renderSwatches` (band render, then per-span repaint; fit-safe
+    offsets, stale-proof indices). Existing `lineStyles` assertions hold:
+    styles stay the band role (spans ride alongside, never inside).
+    Verify: `internal/tui/swatch_test.go` (hex/hsl/rgb paint, text+widths
+    intact, theme-switch + default keep the swatch, wrapped swatches keep
+    widths) + full `go test ./...` incl. the overflow suite.
+13. **Docs.** README themes paragraph, CHANGELOG Unreleased entry, this
+    spec's M4 section + criterion, checklist M4 box.
+    Verify: suite green; boxes ticked only where covered.
+
+## M5 — Docs and spec bookkeeping (was M4)
 
 10. **Docs.** README themes section (preview behavior, bands, degradation
-    note), `--help` theme line if wording drifts, CHANGELOG Unreleased
-    entries. Amend `specs/themes/spec.md` (selection-UX paragraph → preview
-    semantics; decision 6 → Normal-fg + bands) and close
-    `specs/tui-layout/spec.md` phase 3 (point at this folder; tick checklist
-    boxes the suite covers). Add this feature's row to `specs/README.md`
-    index.
-    Verify: `go test ./...` green; checklist boxes ticked only where the
-    suite covers them, walkthrough items left open by name.
+   note), `--help` theme line if wording drifts, CHANGELOG Unreleased
+   entries. Amend `specs/themes/spec.md` (selection-UX paragraph → preview
+   semantics; decision 6 → Normal-fg + bands) and close
+   `specs/tui-layout/spec.md` phase 3 (point at this folder; tick checklist
+   boxes the suite covers). Add this feature's row to `specs/README.md`
+   index.
