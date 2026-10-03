@@ -35,6 +35,15 @@ type dialogState struct {
 	query   string // case-insensitive substring filter over the row text
 	loadErr string // models dialog: connection/list error surfaced inside the dialog
 	loading bool   // models dialog: the list is still being fetched
+
+	// Sessions dialog delete confirmation (session_delete.go). The dialog
+	// only requests deletion; tui.go performs it and reports back.
+	deleteConfirm bool   // the confirmation view replaces the session list
+	deleteFocus   bool   // true: Delete is focused; Cancel is the default
+	deleteBusy    bool   // request in flight; keys are inert until it resolves
+	deleteID      string // session the confirmation names
+	deleteLabel   string // listing row of that session, shown in the body
+	deleteErr     string // last delete failure, shown inside the confirmation
 }
 
 func (m *ui) dialogMatches() []int {
@@ -117,23 +126,7 @@ func (m *ui) openDialog(kind dialogKind) tea.Cmd {
 		return m.startModelsFetch()
 	case dialogSessions:
 		// Sessions are already local; listing is synchronous.
-		summaries, err := m.store.List()
-		if err != nil {
-			m.entries = append(m.entries, entry{role: "Error", content: "List sessions: " + err.Error()})
-			m.dialog = dialogState{}
-			return nil
-		}
-		if len(summaries) == 0 {
-			m.entries = append(m.entries, entry{role: "Likha", content: "No saved sessions for this repository yet."})
-			m.dialog = dialogState{}
-			return nil
-		}
-		m.sessionIDs = make([]string, len(summaries))
-		m.dialogItems = make([]string, len(summaries))
-		for i, item := range summaries {
-			m.sessionIDs[i] = item.ID
-			m.dialogItems[i] = item.Title + "  " + item.Updated.Local().Format("2006-01-02 15:04")
-		}
+		m.listSessionsDialog()
 		return nil
 	case dialogProviders:
 		// Providers are predefined; the configured state comes from the
@@ -147,6 +140,28 @@ func (m *ui) openDialog(kind dialogKind) tea.Cmd {
 		return nil
 	}
 	return nil
+}
+
+// listSessionsDialog fills the sessions dialog rows from the store. A list
+// error or an empty store closes the dialog with a visible entry instead.
+func (m *ui) listSessionsDialog() {
+	summaries, err := m.store.List()
+	if err != nil {
+		m.entries = append(m.entries, entry{role: "Error", content: "List sessions: " + err.Error()})
+		m.dialog = dialogState{}
+		return
+	}
+	if len(summaries) == 0 {
+		m.entries = append(m.entries, entry{role: "Likha", content: "No saved sessions for this repository yet."})
+		m.dialog = dialogState{}
+		return
+	}
+	m.sessionIDs = make([]string, len(summaries))
+	m.dialogItems = make([]string, len(summaries))
+	for i, item := range summaries {
+		m.sessionIDs[i] = item.ID
+		m.dialogItems[i] = item.Title + "  " + item.Updated.Local().Format("2006-01-02 15:04")
+	}
 }
 
 // commandHelp is the text /help prints and unknown-command errors point to.
@@ -357,6 +372,10 @@ func (m *ui) resumeSession(id string) tea.Cmd {
 // query and Backspace deletes (spec: the query applies to every dialog
 // kind); Enter applies, Esc clears the query first and then discards.
 func (m *ui) updateDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.dialog.kind == dialogSessions && m.dialog.deleteConfirm {
+		// The confirmation owns every key: nothing reaches the query.
+		return m, m.updateSessionDelete(msg)
+	}
 	switch msg.Type {
 	case tea.KeyRunes, tea.KeySpace:
 		r := msg.Runes
@@ -417,6 +436,12 @@ func (m *ui) updateDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.confirmDialog(matches)
+	case "ctrl+d":
+		// Letters extend the query, so delete rides on a control chord.
+		if m.dialog.kind == dialogSessions {
+			m.openSessionDelete(matches)
+		}
+		return m, nil
 	case "esc":
 		if m.dialog.query != "" {
 			// Esc clears the query first, then closes on a second Esc.
@@ -557,7 +582,10 @@ func (m *ui) dialogView() string {
 	case dialogModels:
 		title, hint = "Model selection", "↑/↓ navigate  PgUp/PgDn page  Enter switch  Esc cancel"
 	case dialogSessions:
-		title, hint = "Session selection", "↑/↓ navigate  PgUp/PgDn page  Enter resume  Esc cancel"
+		if m.dialog.deleteConfirm {
+			return m.sessionDeleteView(base)
+		}
+		title, hint = "Session selection", "↑/↓ navigate  PgUp/PgDn page  Enter resume  Ctrl+D delete  Esc cancel"
 	case dialogProviders:
 		title, hint = "Provider selection", "↑/↓ navigate  PgUp/PgDn page  Enter auth  Esc cancel"
 	}
@@ -701,8 +729,22 @@ func (m *ui) dialogView() string {
 		}
 	}
 	content = append(content, m.theme.Base.Render(fit("", inner)))
-	content = append(content, withBase(m.theme.Help, m.theme.Base).Render(fit(hint, inner)))
+	if m.dialog.kind == dialogSessions {
+		// The sessions hint carries the delete chord; wrap it at narrow
+		// widths so no control is clipped out of view.
+		for _, line := range wrapHint(hint, inner) {
+			content = append(content, withBase(m.theme.Help, m.theme.Base).Render(fit(line, inner)))
+		}
+	} else {
+		content = append(content, withBase(m.theme.Help, m.theme.Base).Render(fit(hint, inner)))
+	}
+	return m.overlayDialogBox(base, content, boxWidth)
+}
 
+// overlayDialogBox draws the bordered box of pre-fitted content rows centered
+// over the dimmed base rows.
+func (m *ui) overlayDialogBox(base, content []string, boxWidth int) string {
+	width, height := m.width, m.height
 	top := max(0, (height-len(content)-2)/2)
 	left := max(2, (width-boxWidth)/2)
 	// Compose each overlaid row from the dimmed base text left of the box,

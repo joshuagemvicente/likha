@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -701,6 +702,40 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentDetailOutputMsg:
 		m.handleAgentDetailOutput(v)
 		return m, nil
+	case sessionDeleteRequestedMsg:
+		// Deletion never races a run or a pending review; the dialog shows
+		// the same reason, this re-check covers a run that started since.
+		if reason := m.sessionDeleteBlocked(); reason != "" {
+			return m, m.finishSessionDelete(v, errors.New(reason))
+		}
+		if m.store == nil {
+			return m, m.finishSessionDelete(v, errors.New("no session store available"))
+		}
+		if v.Current {
+			// Detach the live output store before its files are removed.
+			m.outputs = nil
+			m.setToolOutputStore(nil)
+		}
+		if err := m.store.Delete(v.ID); err != nil {
+			if v.Current {
+				m.openOutputStore()
+			}
+			return m, m.finishSessionDelete(v, err)
+		}
+		// The row is gone, so the delete completes (a current session still
+		// moves to a fresh one); leftover private output is reported, never
+		// hidden.
+		var rmErr error
+		if m.stateDir != "" {
+			rmErr = tooloutput.RemoveSession(m.stateDir, v.ID)
+		}
+		cmd := m.finishSessionDelete(v, nil)
+		if rmErr != nil {
+			m.entries = append(m.entries, entry{role: "Error", content: "Session deleted, but its private tool output could not be removed: " + rmErr.Error()})
+			m.status = "Session output cleanup failed"
+		}
+		m.layoutWidth = 0
+		return m, cmd
 	case agentBranchCancelledMsg:
 		if v.sessionID != m.snapshot.ID || v.runID != m.runID || !m.working || m.cancelling {
 			return m, nil
