@@ -67,15 +67,16 @@ type Client struct {
 	oauth     *oauthSession // non-nil for OAuth providers (ChatGPT/Codex)
 	oauthSave func(OAuthCredentials) error
 
-	rateMu            sync.Mutex // guards the last-seen Codex rate-limit headers and captured token usage
-	rateUsedPercent   string
-	rateWindowMinutes string
-	rateResetAt       string
-	tokenPrompt       int64
-	tokenCompletion   int64
-	tokenSeen         bool
-	tokenPromptSeen   bool
-	tokenRequest      uint64
+	rateMu              sync.Mutex // guards the last-seen Codex rate-limit headers and captured token usage
+	rateUsedPercent     string
+	rateWindowMinutes   string
+	rateResetAt         string
+	tokenPrompt         int64
+	tokenCompletion     int64
+	tokenSeen           bool
+	tokenPromptSeen     bool
+	tokenCompletionSeen bool
+	tokenRequest        uint64
 }
 
 // New accepts a local loopback HTTP /v1 base URL or an HTTPS endpoint from the
@@ -456,9 +457,9 @@ func (c *Client) Stream(ctx context.Context, messages []Message, tools []ToolDef
 	if err != nil || mediaType != "text/event-stream" {
 		return result, fmt.Errorf("model returned incompatible content type %q (expected SSE)", resp.Header.Get("Content-Type"))
 	}
-	message, usage, seenUsage, err := consumeStream(ctx, io.LimitReader(resp.Body, maxResponseBytes+1), onText, onReasoning)
+	message, report, err := consumeStream(ctx, io.LimitReader(resp.Body, maxResponseBytes+1), onText, onReasoning)
 	if err == nil {
-		c.setTokenUsage(requestID, usage, seenUsage)
+		c.setTokenUsage(requestID, report)
 		c.markConnected()
 	}
 	return message, err
@@ -477,12 +478,20 @@ func streamUsageOptionRejected(status int, detail []byte) bool {
 // completion_tokens) and the input/output aliases are accepted. ok is false
 // when usage is absent or not an object; zero totals are valid usage.
 func parseFinalUsage(raw json.RawMessage) (TokenUsage, bool) {
+	report := parseFinalUsageDetailed(raw)
+	return report.usage, report.ok
+}
+
+// parseFinalUsageDetailed is parseFinalUsage plus which of the two counts the
+// usage object actually named, so a prompt-only report is not mistaken for a
+// completion total of zero.
+func parseFinalUsageDetailed(raw json.RawMessage) usageReport {
 	if len(raw) == 0 {
-		return TokenUsage{}, false
+		return usageReport{}
 	}
 	var usage map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &usage); err != nil || usage == nil {
-		return TokenUsage{}, false
+		return usageReport{}
 	}
 	readCount := func(key string) (int64, bool) {
 		value, ok := usage[key]
@@ -507,7 +516,7 @@ func parseFinalUsage(raw json.RawMessage) (TokenUsage, bool) {
 	result.Prompt, result.Completion = prompt, completion
 	result.PromptSeen = hasPrompt
 	if hasPrompt || hasCompletion {
-		return result, true
+		return usageReport{usage: result, seen: usageSeen{prompt: hasPrompt, completion: hasCompletion}, ok: true}
 	}
 	// Preserve the historical signal for a valid usage object with no known
 	// token fields; malformed recognized fields, by contrast, are ignored.
@@ -516,9 +525,9 @@ func parseFinalUsage(raw json.RawMessage) (TokenUsage, bool) {
 	_, completionRecognized := usage["completion_tokens"]
 	_, outputRecognized := usage["output_tokens"]
 	if promptRecognized || inputRecognized || completionRecognized || outputRecognized {
-		return TokenUsage{}, false
+		return usageReport{}
 	}
-	return result, true
+	return usageReport{usage: result, ok: true}
 }
 
 // streamCodex runs the ChatGPT/Codex (OpenAI Responses wire) turn: it
@@ -576,10 +585,10 @@ func (c *Client) streamCodex(ctx context.Context, messages []Message, tools []To
 			resp.Body.Close()
 			return result, fmt.Errorf("model returned incompatible content type %q (expected SSE)", resp.Header.Get("Content-Type"))
 		}
-		message, usage, seenUsage, err := ConsumeCodexStream(ctx, io.LimitReader(resp.Body, maxResponseBytes+1), onText, onReasoning)
+		message, report, err := consumeCodexStreamDetailed(ctx, io.LimitReader(resp.Body, maxResponseBytes+1), onText, onReasoning)
 		resp.Body.Close()
 		if err == nil {
-			c.setTokenUsage(requestID, usage, seenUsage)
+			c.setTokenUsage(requestID, report)
 			c.markConnected()
 		}
 		return message, err
@@ -637,21 +646,22 @@ func (c *Client) beginTokenUsage() uint64 {
 	c.rateMu.Lock()
 	defer c.rateMu.Unlock()
 	c.tokenRequest++
-	c.tokenPrompt, c.tokenCompletion, c.tokenSeen, c.tokenPromptSeen = 0, 0, false, false
+	c.tokenPrompt, c.tokenCompletion, c.tokenSeen, c.tokenPromptSeen, c.tokenCompletionSeen = 0, 0, false, false, false
 	return c.tokenRequest
 }
 
 // setTokenUsage records the token usage of the last completed response:
-// seen=true with the reported totals, or seen=false when the response
-// carried no usage (the last response alone is reported, never a running
-// total). Zero totals are valid usage (seen = true).
-func (c *Client) setTokenUsage(requestID uint64, usage TokenUsage, seen bool) {
+// report.ok=true with the reported totals, or report.ok=false when the
+// response carried no usage (the last response alone is reported, never a
+// running total). Zero totals are valid usage (ok = true).
+func (c *Client) setTokenUsage(requestID uint64, report usageReport) {
 	c.rateMu.Lock()
 	if requestID != c.tokenRequest {
 		c.rateMu.Unlock()
 		return
 	}
-	c.tokenPrompt, c.tokenCompletion, c.tokenSeen, c.tokenPromptSeen = usage.Prompt, usage.Completion, seen, usage.PromptSeen
+	c.tokenPrompt, c.tokenCompletion, c.tokenSeen = report.usage.Prompt, report.usage.Completion, report.ok
+	c.tokenPromptSeen, c.tokenCompletionSeen = report.usage.PromptSeen, report.ok && report.seen.completion
 	c.rateMu.Unlock()
 }
 
@@ -964,10 +974,9 @@ type streamedToolCall struct {
 	id, name, arguments strings.Builder
 }
 
-func consumeStream(ctx context.Context, reader io.Reader, onText func(string), onReasoning func(string)) (Message, TokenUsage, bool, error) {
+func consumeStream(ctx context.Context, reader io.Reader, onText func(string), onReasoning func(string)) (Message, usageReport, error) {
 	result := Message{Role: "assistant"}
-	var lastUsage TokenUsage
-	var seenUsage bool
+	var lastUsage usageReport
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), maxEventLineBytes)
 	calls := make(map[int]*streamedToolCall)
@@ -990,8 +999,8 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 		if len(chunk.Error) > 0 && string(chunk.Error) != "null" {
 			return fmt.Errorf("model stream error: %s", chunk.Error)
 		}
-		if usage, ok := parseFinalUsage(chunk.Usage); ok {
-			lastUsage, seenUsage = usage, true
+		if report := parseFinalUsageDetailed(chunk.Usage); report.ok {
+			lastUsage = report
 		}
 		if len(chunk.Choices) == 0 {
 			// OpenAI-compatible servers may send a final usage-only event. Usage
@@ -1046,12 +1055,12 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 	}
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
-			return Message{}, TokenUsage{}, false, err
+			return Message{}, usageReport{}, err
 		}
 		line := scanner.Text()
 		if line == "" {
 			if err := process(); err != nil {
-				return Message{}, TokenUsage{}, false, err
+				return Message{}, usageReport{}, err
 			}
 			if done {
 				break
@@ -1068,26 +1077,26 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 		} else if strings.HasPrefix(line, "event: error") {
 			// Errors with a data payload are surfaced by process; otherwise fail below.
 			if data.Len() == 0 {
-				return Message{}, TokenUsage{}, false, errors.New("model stream reported an error")
+				return Message{}, usageReport{}, errors.New("model stream reported an error")
 			}
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return Message{}, TokenUsage{}, false, err
+		return Message{}, usageReport{}, err
 	}
 	if err := scanner.Err(); err != nil {
-		return Message{}, TokenUsage{}, false, fmt.Errorf("reading model stream (limit %d bytes, line limit %d bytes): %w", maxResponseBytes, maxEventLineBytes, err)
+		return Message{}, usageReport{}, fmt.Errorf("reading model stream (limit %d bytes, line limit %d bytes): %w", maxResponseBytes, maxEventLineBytes, err)
 	}
 	if !done && data.Len() > 0 {
 		if err := process(); err != nil {
-			return Message{}, TokenUsage{}, false, err
+			return Message{}, usageReport{}, err
 		}
 	}
 	if !done {
-		return Message{}, TokenUsage{}, false, errors.New("model stream ended before [DONE] or exceeded response limit")
+		return Message{}, usageReport{}, errors.New("model stream ended before [DONE] or exceeded response limit")
 	}
 	if !seenChoice {
-		return Message{}, TokenUsage{}, false, errors.New("model stream contained no assistant response")
+		return Message{}, usageReport{}, errors.New("model stream contained no assistant response")
 	}
 	indexes := make([]int, 0, len(calls))
 	for index := range calls {
@@ -1098,11 +1107,11 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 		fragment := calls[index]
 		call := ToolCall{ID: fragment.id.String(), Name: fragment.name.String(), Arguments: fragment.arguments.String()}
 		if call.ID == "" || call.Name == "" || !json.Valid([]byte(call.Arguments)) {
-			return Message{}, TokenUsage{}, false, fmt.Errorf("incomplete structured tool call at index %d", index)
+			return Message{}, usageReport{}, fmt.Errorf("incomplete structured tool call at index %d", index)
 		}
 		result.ToolCalls = append(result.ToolCalls, call)
 	}
 	result.Content = text.String()
 	result.Reasoning = reasoning.String()
-	return result, lastUsage, seenUsage, nil
+	return result, lastUsage, nil
 }

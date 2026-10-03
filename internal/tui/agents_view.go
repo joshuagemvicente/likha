@@ -650,7 +650,7 @@ func (m *ui) agentTreeLines() (lines []toolInspectionLine, selectedStart, select
 		add(fmt.Sprintf("  Task: %s · parent: %s · depth: %d · run: %s", record.ID, parent, record.Depth, agentRecordedText(record.RunID)), m.theme.Muted)
 		add("  Provider: "+agentRecordedText(record.Provider)+" · model: "+agentRecordedText(record.Model), m.theme.Muted)
 		add(fmt.Sprintf("  Model requests: %d/%d · shared accepted children: %d/%d", record.Rounds, explore.MaxRequests, m.agentSpawnUsed(record.RunID), explore.MaxChildren), m.theme.Muted)
-		add("  "+agentTaskTimeSummary(record, now), m.theme.Muted)
+		add("  "+agentTaskTimeSummary(record, now, contentWidth(m.width)-2), m.theme.Muted)
 		if record.ID == state.taskID {
 			add("  Child usage: "+AgentUsageSummary(record), m.theme.Muted)
 			if m.agentBranchCancellable(record) {
@@ -665,21 +665,13 @@ func (m *ui) agentTreeLines() (lines []toolInspectionLine, selectedStart, select
 	return lines, selectedStart, selectedEnd
 }
 
-func agentTaskTimeSummary(record explore.Record, now time.Time) string {
-	end := record.FinishedAt
-	if end.IsZero() && agentRecordActive(record) {
-		end = now
-	}
-	elapsed := "unknown (timestamps not recorded)"
-	if !record.AcceptedAt.IsZero() && !end.IsZero() {
-		elapsed = agentInspectionDuration(end.Sub(record.AcceptedAt))
-	}
-	text := "Elapsed: " + elapsed + " (includes queue/child wait)"
+func agentTaskTimeSummary(record explore.Record, now time.Time, width int) string {
+	text := agentWaitActiveText(record, now, width)
 	if !record.AcceptedAt.IsZero() {
 		if !record.StartedAt.IsZero() {
 			text += " · initial queue: " + agentInspectionDuration(record.StartedAt.Sub(record.AcceptedAt))
 		} else if record.Status == explore.Queued {
-			text += " · queued: " + elapsed
+			text += " · queued since acceptance"
 		}
 	}
 	if record.Status == explore.Waiting {
@@ -697,6 +689,48 @@ func agentTaskTimeSummary(record explore.Record, now time.Time) string {
 		}
 	}
 	return text
+}
+
+// agentWaitActiveText replaces a single elapsed figure with the record's
+// cumulative wait (no execution permit: queue and nested child wait) and
+// active (holding a permit) totals, as of the record's latest version. When
+// both segments do not fit width, the wait segment is dropped first so the
+// active figure survives instead of being clipped. Records saved before the
+// split was recorded fall back to elapsed time since acceptance.
+func agentWaitActiveText(record explore.Record, now time.Time, width int) string {
+	if !agentWaitActiveRecorded(record) {
+		end := record.FinishedAt
+		if end.IsZero() && agentRecordActive(record) {
+			end = now
+		}
+		if record.AcceptedAt.IsZero() || end.IsZero() {
+			return "wait/active: unknown (timestamps not recorded)"
+		}
+		return "wait/active: not recorded · elapsed " + agentInspectionDuration(end.Sub(record.AcceptedAt))
+	}
+	wait := "wait " + agentInspectionDuration(agentMillis(record.WaitMs))
+	active := "active " + agentInspectionDuration(agentMillis(record.ActiveMs))
+	if full := wait + " · " + active; width <= 0 || lipgloss.Width(full) <= width {
+		return full
+	}
+	return active
+}
+
+// agentWaitActiveRecorded is false only for a record whose timestamps span
+// time the totals do not: older records persisted before wait/active
+// accounting decode both totals as zero.
+func agentWaitActiveRecorded(record explore.Record) bool {
+	if record.WaitMs > 0 || record.ActiveMs > 0 {
+		return true
+	}
+	if record.AcceptedAt.IsZero() {
+		return false
+	}
+	return record.FinishedAt.IsZero() || record.FinishedAt.Sub(record.AcceptedAt) < time.Second
+}
+
+func agentMillis(ms int64) time.Duration {
+	return time.Duration(max(0, ms)) * time.Millisecond
 }
 
 func agentInspectionDuration(duration time.Duration) string {

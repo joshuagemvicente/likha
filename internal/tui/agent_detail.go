@@ -271,7 +271,12 @@ func (m *ui) agentDetailLines(record explore.Record) []toolInspectionLine {
 		label = "Explore task"
 	}
 	add(label, m.theme.Title)
-	add("Task: "+record.ID+" · status: "+string(record.Status), m.theme.Normal)
+	header := "Task: " + record.ID + " · status: " + string(record.Status)
+	timing := agentWaitActiveText(record, time.Now(), 0)
+	if width := contentWidth(m.width); lipgloss.Width(header+" · "+timing) > width {
+		timing = agentWaitActiveText(record, time.Now(), max(1, width-lipgloss.Width(header+" · ")))
+	}
+	add(header+" · "+timing, m.theme.Normal)
 	add("Local inspection only; no request, rerun, permission grant, or parent-context injection.", m.theme.Muted)
 	artifacts := agentDetailArtifacts(record)
 	if len(artifacts) > 0 {
@@ -507,10 +512,18 @@ func agentDetailTiming(record explore.Record, now time.Time) []string {
 	if end.IsZero() && !agentDetailTerminal(record.Status) {
 		end = now
 	}
-	if !record.AcceptedAt.IsZero() && !end.IsZero() {
-		lines = append(lines, "Elapsed since acceptance: "+max(time.Duration(0), end.Sub(record.AcceptedAt)).Round(time.Second).String()+" (includes queue and nested wait)")
+	if agentWaitActiveRecorded(record) {
+		wait := agentInspectionDuration(agentMillis(record.WaitMs))
+		active := agentInspectionDuration(agentMillis(record.ActiveMs))
+		text := "Wait: " + wait + " (queued or awaiting nested children, no execution permit) · active: " + active + " (holding an execution permit)"
+		if !agentDetailTerminal(record.Status) {
+			text += " · as of the latest record update"
+		}
+		lines = append(lines, text)
+	} else if !record.AcceptedAt.IsZero() && !end.IsZero() {
+		lines = append(lines, "Wait/active: not recorded for this task · elapsed since acceptance: "+agentInspectionDuration(end.Sub(record.AcceptedAt))+" (includes queue and nested wait)")
 	} else {
-		lines = append(lines, "Elapsed since acceptance: unknown (timestamps not recorded)")
+		lines = append(lines, "Wait/active: unknown (timestamps not recorded)")
 	}
 	if !record.AcceptedAt.IsZero() {
 		queueEnd := record.StartedAt
@@ -518,13 +531,13 @@ func agentDetailTiming(record explore.Record, now time.Time) []string {
 			queueEnd = end
 		}
 		if !queueEnd.IsZero() {
-			lines = append(lines, "Initial queue time: "+max(time.Duration(0), queueEnd.Sub(record.AcceptedAt)).Round(time.Second).String())
+			lines = append(lines, "Initial queue time: "+agentInspectionDuration(queueEnd.Sub(record.AcceptedAt)))
 		}
 	}
 	if !record.Deadline.IsZero() && !agentDetailTerminal(record.Status) {
-		lines = append(lines, "Deadline remaining: "+max(time.Duration(0), record.Deadline.Sub(now)).Round(time.Second).String())
+		lines = append(lines, "Deadline remaining: "+agentInspectionDuration(record.Deadline.Sub(now)))
 	}
-	lines = append(lines, "Deadlines include queue and child-wait time and keep running during inspection; cumulative child-wait time is not separately recorded.")
+	lines = append(lines, "Deadlines include wait time and keep running during inspection.")
 	return lines
 }
 
@@ -574,7 +587,7 @@ func AgentUsageSummary(record explore.Record) string {
 			if value > 0 {
 				return fmt.Sprintf("%d reported tokens (total unknown)", value)
 			}
-			return "unknown"
+			return "unknown (not reported)"
 		}
 		return fmt.Sprintf("%d tokens", value)
 	}

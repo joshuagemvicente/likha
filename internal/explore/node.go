@@ -28,12 +28,19 @@ type Node struct {
 	// durable record exposes the shared run-wide budget for inspection; the
 	// model-facing outcome reports this per-task count instead.
 	spawned int
+	// phaseSince starts the open timing segment, which accountLocked charges
+	// to active time while hasPermit is set and to wait time otherwise.
+	phaseSince   time.Time
+	waitTime     time.Duration
+	activeTime   time.Duration
+	timingClosed bool
 }
 
 type requestUsage struct {
-	accounted bool
-	reported  bool
-	usage     model.TokenUsage
+	accounted      bool
+	reported       bool
+	completionSeen bool
+	usage          model.TokenUsage
 }
 
 // Record returns a detached versioned snapshot. SpawnUsed is the shared budget
@@ -95,11 +102,13 @@ func (n *Node) Acquire(ctx context.Context) (func(), error) {
 		}
 		return nil, err
 	}
+	n.accountLocked(time.Now())
 	n.hasPermit = true
 	var once sync.Once
 	wrappedRelease := func() {
 		once.Do(func() {
 			m.mu.Lock()
+			n.accountLocked(time.Now())
 			n.hasPermit = false
 			n.release = nil
 			m.mu.Unlock()
@@ -114,6 +123,32 @@ func (n *Node) Acquire(ctx context.Context) (func(), error) {
 	m.updateLocked(n, nil)
 	m.mu.Unlock()
 	return wrappedRelease, nil
+}
+
+// accountLocked folds the open timing segment into wait or active time and
+// starts a new one at now. Terminal records close at FinishedAt so a permit
+// released after settlement does not extend either total.
+func (n *Node) accountLocked(now time.Time) {
+	if n.timingClosed {
+		return
+	}
+	if n.phaseSince.IsZero() {
+		n.phaseSince = n.record.AcceptedAt
+	}
+	if terminal(n.record.Status) && !n.record.FinishedAt.IsZero() {
+		now = n.record.FinishedAt
+		n.timingClosed = true
+	}
+	if elapsed := now.Sub(n.phaseSince); elapsed > 0 {
+		if n.hasPermit {
+			n.activeTime += elapsed
+		} else {
+			n.waitTime += elapsed
+		}
+		n.phaseSince = now
+	}
+	n.record.WaitMs = n.waitTime.Milliseconds()
+	n.record.ActiveMs = n.activeTime.Milliseconds()
 }
 
 func (n *Node) releasePermit() {
@@ -168,9 +203,21 @@ func (n *Node) BeginRequest() error {
 	return nil
 }
 
-// RecordUsage consumes the independent child client's report once for the
-// current request. Missing or partial dimensions remain explicitly unknown.
+// RecordRequestUsage consumes the independent child client's per-request
+// report once for the current request. Its parameters mirror
+// model.Client.LastRequestUsage, so a prompt-only report leaves completion
+// unknown instead of known zero.
+func (n *Node) RecordRequestUsage(prompt, completion int64, promptSeen, completionSeen, reported bool) {
+	n.recordUsage(model.TokenUsage{Prompt: prompt, Completion: completion, PromptSeen: promptSeen}, completionSeen, reported)
+}
+
+// RecordUsage consumes a report that carries a prompt-seen flag only; such a
+// report is taken as complete. Prefer RecordRequestUsage.
 func (n *Node) RecordUsage(usage model.TokenUsage, reported bool) {
+	n.recordUsage(usage, usage.PromptSeen, reported)
+}
+
+func (n *Node) recordUsage(usage model.TokenUsage, completionSeen, reported bool) {
 	m := n.manager
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -183,6 +230,7 @@ func (n *Node) RecordUsage(usage model.TokenUsage, reported bool) {
 	}
 	request.accounted = true
 	request.reported = reported
+	request.completionSeen = completionSeen
 	request.usage = usage
 	n.summarizeUsageLocked()
 	m.updateLocked(n, nil)
@@ -196,13 +244,7 @@ func (n *Node) summarizeUsageLocked() {
 	}
 	for _, request := range n.requests {
 		promptKnown := request.reported && request.usage.PromptSeen && request.usage.Prompt >= 0
-		// The shared telemetry type exposes a prompt-seen flag only: a usage
-		// event that named prompt tokens is treated as one full report. A
-		// prompt-only report is indistinguishable from a complete one here, so
-		// its completion total is recorded as known zero; this limitation is
-		// documented in the phase evidence rather than widened into the shared
-		// client contract.
-		completionKnown := request.reported && request.usage.PromptSeen
+		completionKnown := request.reported && request.completionSeen && request.usage.Completion >= 0
 		if promptKnown {
 			usage.PromptTokens += request.usage.Prompt
 		}

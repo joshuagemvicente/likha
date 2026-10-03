@@ -250,8 +250,16 @@ func codexErrorMapMessage(e map[string]any) string {
 // (prompt_tokens / completion_tokens) are accepted. ok is false when usage
 // is absent or not an object; zero totals are valid usage.
 func parseCodexUsage(raw json.RawMessage) (TokenUsage, bool) {
+	report := parseCodexUsageDetailed(raw)
+	return report.usage, report.ok
+}
+
+// parseCodexUsageDetailed is parseCodexUsage plus which of the two counts the
+// usage object actually named, so a prompt-only report is not mistaken for a
+// completion total of zero.
+func parseCodexUsageDetailed(raw json.RawMessage) usageReport {
 	if len(raw) == 0 || string(raw) == "null" {
-		return TokenUsage{}, false
+		return usageReport{}
 	}
 	var usage struct {
 		Prompt     *int64 `json:"prompt_tokens"`
@@ -260,9 +268,10 @@ func parseCodexUsage(raw json.RawMessage) (TokenUsage, bool) {
 		Output     *int64 `json:"output_tokens"`
 	}
 	if err := json.Unmarshal(raw, &usage); err != nil {
-		return TokenUsage{}, false
+		return usageReport{}
 	}
 	var result TokenUsage
+	var seen usageSeen
 	switch {
 	case usage.Prompt != nil && *usage.Prompt >= 0:
 		result.Prompt = *usage.Prompt
@@ -274,10 +283,13 @@ func parseCodexUsage(raw json.RawMessage) (TokenUsage, bool) {
 	switch {
 	case usage.Completion != nil && *usage.Completion >= 0:
 		result.Completion = *usage.Completion
+		seen.completion = true
 	case usage.Output != nil && *usage.Output >= 0:
 		result.Completion = *usage.Output
+		seen.completion = true
 	}
-	return result, true
+	seen.prompt = result.PromptSeen
+	return usageReport{usage: result, seen: seen, ok: true}
 }
 
 // ConsumeCodexStream parses the Codex backend's server-sent-events Responses
@@ -292,9 +304,18 @@ func parseCodexUsage(raw json.RawMessage) (TokenUsage, bool) {
 // only on a terminal event; a connection that ends without one is an error,
 // and a partial turn is never returned as success.
 func ConsumeCodexStream(ctx context.Context, r io.Reader, onText func(string), onReasoning func(string)) (Message, TokenUsage, bool, error) {
+	message, report, err := consumeCodexStreamDetailed(ctx, r, onText, onReasoning)
+	if err != nil {
+		return Message{}, TokenUsage{}, false, err
+	}
+	return message, report.usage, report.ok, nil
+}
+
+// consumeCodexStreamDetailed is ConsumeCodexStream reporting the terminal
+// event's usage with the per-count seen flags LastRequestUsage needs.
+func consumeCodexStreamDetailed(ctx context.Context, r io.Reader, onText func(string), onReasoning func(string)) (Message, usageReport, error) {
 	result := Message{Role: "assistant"}
-	var lastUsage TokenUsage
-	var seenUsage bool
+	var lastUsage usageReport
 	var text, reasoning strings.Builder
 	calls := &codexCallTracker{}
 
@@ -419,8 +440,8 @@ func ConsumeCodexStream(ctx context.Context, r io.Reader, onText func(string), o
 			if len(rawUsage) == 0 || string(rawUsage) == "null" {
 				rawUsage = d.Response.Usage
 			}
-			if usage, ok := parseCodexUsage(rawUsage); ok {
-				lastUsage, seenUsage = usage, true
+			if report := parseCodexUsageDetailed(rawUsage); report.ok {
+				lastUsage = report
 			}
 			var stream []ToolCall // function calls taken from the terminal output, in order
 			for _, item := range d.Response.Output {
@@ -452,7 +473,7 @@ loop:
 	for {
 		select {
 		case <-ctx.Done():
-			return Message{}, TokenUsage{}, false, ctx.Err()
+			return Message{}, usageReport{}, ctx.Err()
 		case l, ok := <-lines:
 			if !ok {
 				break loop
@@ -468,7 +489,7 @@ loop:
 					terminal, err := flush(eventType, data.String())
 					eventType, data = "", strings.Builder{}
 					if err != nil {
-						return Message{}, TokenUsage{}, false, err
+						return Message{}, usageReport{}, err
 					}
 					if terminal {
 						terminated = true
@@ -486,7 +507,7 @@ loop:
 				if data.Len() > 0 || eventType != "" {
 					terminal, err := flush(eventType, data.String())
 					if err != nil {
-						return Message{}, TokenUsage{}, false, err
+						return Message{}, usageReport{}, err
 					}
 					if terminal {
 						terminated = true
@@ -501,27 +522,27 @@ loop:
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return Message{}, TokenUsage{}, false, err
+		return Message{}, usageReport{}, err
 	}
 	if stopped != nil {
-		return Message{}, TokenUsage{}, false, stopped
+		return Message{}, usageReport{}, stopped
 	}
 	if data.Len() > 0 || eventType != "" {
 		terminal, err := flush(eventType, data.String())
 		if err != nil {
-			return Message{}, TokenUsage{}, false, err
+			return Message{}, usageReport{}, err
 		}
 		terminated = terminal
 	}
 	if !terminated {
-		return Message{}, TokenUsage{}, false, errors.New("codex stream ended without a terminal event")
+		return Message{}, usageReport{}, errors.New("codex stream ended without a terminal event")
 	}
 	toolCalls, err := calls.assemble()
 	if err != nil {
-		return Message{}, TokenUsage{}, false, err
+		return Message{}, usageReport{}, err
 	}
 	result.ToolCalls = toolCalls
 	result.Content = text.String()
 	result.Reasoning = reasoning.String()
-	return result, lastUsage, seenUsage, nil
+	return result, lastUsage, nil
 }

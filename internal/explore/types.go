@@ -83,6 +83,12 @@ type Record struct {
 	Warnings     []string        `json:"warnings,omitempty"`
 	Reason       string          `json:"reason,omitempty"`
 	Usage        Usage           `json:"usage"`
+	// WaitMs is cumulative live time without an execution permit: queued in
+	// the scheduler, awaiting nested children, or between phases. ActiveMs is
+	// cumulative time holding a permit. Both cover AcceptedAt through
+	// FinishedAt and are refreshed whenever the record version advances.
+	WaitMs   int64 `json:"wait_ms,omitempty"`
+	ActiveMs int64 `json:"active_ms,omitempty"`
 }
 
 type Outcome struct {

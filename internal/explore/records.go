@@ -3,6 +3,7 @@ package explore
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 	"unicode/utf8"
 
 	"likha/internal/model"
@@ -30,6 +31,7 @@ func (m *Manager) Snapshot() []Record {
 // updateLocked captures each version before releasing the manager lock. One
 // publisher drains these snapshots in order and invokes external code unlocked.
 func (m *Manager) updateLocked(n *Node, done chan<- error) {
+	n.accountLocked(time.Now())
 	n.record.Version++
 	n.record.SpawnUsed = m.accepted
 	if m.config.OnUpdate == nil {
