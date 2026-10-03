@@ -21,11 +21,11 @@
 - **Interruption/send-now:** the TUI binds Escape to interruption and shows “again to interrupt”; its handler aborts on the second press. The official keybind docs make `Ctrl+Enter` a newline, not send-now. I found no send-now action in the inspected TUI submit path [2][3].
 - **Mode selector:** no delivery selector is documented. V2 exposes a programmatic/API field, but the current TUI's `session.prompt` call does not set it [2][3][4].
 
-## Recommendation for Lisa *(judgment, not source fact)*
+## Recommendation for Likha *(judgment, not source fact)*
 
 Keep **one default mode**: Enter queues for the next safe provider-request boundary. The comparison supports a clear default queue with explicit pending state; it does not establish that users benefit from choosing a delivery mode on every submission. A separate send-now action can be added later without turning delivery into a persistent mode toggle.
 
-Make timing and end-state explicit in the composer/status copy, not just the count: e.g. **“Enter queues · sent after current tool work, before the next model request”** while running, and **“N queued · run ended; Enter sends next turn · Esc clears”** for a held batch. Keep queued rows visibly distinct until the agent actually accepts them into history; change the label to “Sent” (or equivalent) at that point. This addresses the discoverability gap without changing Lisa's safe-point contract. If M2 send-now ships, explain that it interrupts the current response but waits for active tool work to settle; do not imply it kills a tool.
+Make timing and end-state explicit in the composer/status copy, not just the count: e.g. **“Enter queues · sent after current tool work, before the next model request”** while running, and **“N queued · run ended; Enter sends next turn · Esc clears”** for a held batch. Keep queued rows visibly distinct until the agent actually accepts them into history; change the label to “Sent” (or equivalent) at that point. This addresses the discoverability gap without changing Likha's safe-point contract. If M2 send-now ships, explain that it interrupts the current response but waits for active tool work to settle; do not imply it kills a tool.
 
 ## Sources
 

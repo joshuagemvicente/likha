@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"lisa/internal/model"
+	"likha/internal/model"
 )
 
 // Credentials live only in the private state directory, never in the

@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode"
 
-	"lisa/internal/session"
+	"likha/internal/session"
 )
 
 // statusFolder displays the selected root relative to the user's home when

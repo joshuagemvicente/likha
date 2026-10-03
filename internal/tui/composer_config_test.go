@@ -2,7 +2,7 @@ package tui
 
 import (
 	"encoding/json"
-	"lisa/internal/providers"
+	"likha/internal/providers"
 	"os"
 	"reflect"
 	"testing"

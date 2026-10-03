@@ -10,7 +10,7 @@ decisions live in [spec.md](spec.md).
 | `internal/model/provider.go` | `Providers` table; row shape (`Name`, `DisplayName`, `BaseURL`, `KeyEnv`, `DefaultModel`, `Hosted`, `SessionHeader`, `Auth`). Groq, xAI, Together, Mistral, and Cerebras rows are appended after `chatgpt`, with empty defaults and pending-probe status. |
 | `internal/model/client.go` | `parseEndpoint` (empty-path HTTPS bases rejected — the DeepSeek gate), `fetchModelList` (`base + "/models"`), and `decodeModelIDs` (OpenAI `data[]` envelope or bare array). No provider-specific route fork for the added rows. |
 | `internal/providers/provider.go` | `ResolveProvider`: `KeyEnv` env read, stored-key fallback, and the error naming `KeyEnv` when no key exists. |
-| `internal/app/run.go` | `--help` provider list (iterates the table) and `resolveModel` (empty `DefaultModel` requires `--model`/`LISA_MODEL` — the dialagram precedent Wave 1 follows). |
+| `internal/app/run.go` | `--help` provider list (iterates the table) and `resolveModel` (empty `DefaultModel` requires `--model`/`LIKHA_MODEL` — the dialagram precedent Wave 1 follows). |
 | `internal/tui/setup.go`, `internal/tui/providers.go`, `internal/tui/models_all.go` | Setup picker, `/providers` dialog, `/models` fan-out — all iterate `model.Providers`, so new rows surface with zero UI changes. Each stored key widens the `/models` fan-out by one fetch (expected, not a bug). |
 | `internal/providers/provider_test.go` | `TestResolveProviderSelectsEndpointsAndKeys` loops every non-OAuth row — new Wave 1 rows are covered without a new test. |
 

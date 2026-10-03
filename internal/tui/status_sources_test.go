@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/model"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 func TestStoredStatusLineConfigRoundTripAndLegacy(t *testing.T) {
@@ -69,8 +69,8 @@ func TestStatusFolderHomeBoundary(t *testing.T) {
 	if got := statusFolder(home); got != "~" {
 		t.Fatalf("home = %q", got)
 	}
-	child := filepath.Join(home, "projects", "lisa")
-	if got := statusFolder(child); got != filepath.Join("~", "projects", "lisa") {
+	child := filepath.Join(home, "projects", "likha")
+	if got := statusFolder(child); got != filepath.Join("~", "projects", "likha") {
 		t.Fatalf("child = %q", got)
 	}
 	other := home + "-other"
@@ -142,7 +142,7 @@ func TestGitStatusWorktreeBranchAndDetachedSHA(t *testing.T) {
 	}
 	runGit(repo, "init", "-q")
 	runGit(repo, "symbolic-ref", "HEAD", "refs/heads/main")
-	runGit(repo, "-c", "user.name=Lisa Test", "-c", "user.email=lisa@example.test", "commit", "-qm", "initial", "--allow-empty")
+	runGit(repo, "-c", "user.name=Likha Test", "-c", "user.email=likha@example.test", "commit", "-qm", "initial", "--allow-empty")
 	if state, ok := gitStatus(repo); !ok || state.Branch != "main" || state.Detached {
 		t.Fatalf("regular repository branch = %+v, ok=%v", state, ok)
 	}
@@ -237,7 +237,7 @@ func TestGitStatusRepositoryStates(t *testing.T) {
 	runGit := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command(git, append([]string{"-C", repo}, args...)...)
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Lisa Test", "GIT_AUTHOR_EMAIL=lisa@example.test", "GIT_COMMITTER_NAME=Lisa Test", "GIT_COMMITTER_EMAIL=lisa@example.test")
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Likha Test", "GIT_AUTHOR_EMAIL=likha@example.test", "GIT_COMMITTER_NAME=Likha Test", "GIT_COMMITTER_EMAIL=likha@example.test")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
@@ -319,7 +319,7 @@ func TestGitStatusBranchUpstreamAndDetachedSHA(t *testing.T) {
 	if err != nil {
 		t.Skip("git is unavailable")
 	}
-	env := append(os.Environ(), "GIT_AUTHOR_NAME=Lisa Test", "GIT_AUTHOR_EMAIL=lisa@example.test", "GIT_COMMITTER_NAME=Lisa Test", "GIT_COMMITTER_EMAIL=lisa@example.test")
+	env := append(os.Environ(), "GIT_AUTHOR_NAME=Likha Test", "GIT_AUTHOR_EMAIL=likha@example.test", "GIT_COMMITTER_NAME=Likha Test", "GIT_COMMITTER_EMAIL=likha@example.test")
 	runGit := func(dir string, args ...string) {
 		t.Helper()
 		cmd := exec.Command(git, append([]string{"-C", dir}, args...)...)

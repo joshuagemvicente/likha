@@ -1,6 +1,6 @@
-# Lisa Product Context
+# Likha Product Context
 
-This glossary defines product terms used across Lisa's specs. Feature behavior and delivery plans live in `specs/`.
+This glossary defines product terms used across Likha's specs. Feature behavior and delivery plans live in `specs/`.
 
 ## Language
 
@@ -14,7 +14,7 @@ The tokens in the input sent for the active conversation's most recent model req
 Input-token usage reported by the provider for a completed request. When a provider reports cache-read input separately, it remains part of input usage and is not added twice.
 
 **Estimated usage**:
-A local approximation of the input tokens Lisa is about to send. It is always marked approximate and is not provider telemetry.
+A local approximation of the input tokens Likha is about to send. It is always marked approximate and is not provider telemetry.
 
 **Context tracker**:
 The status-bar display of input-context usage against the model context window, when that limit is known.

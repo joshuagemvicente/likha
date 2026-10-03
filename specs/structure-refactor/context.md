@@ -6,7 +6,7 @@ the ground truth the implementer verifies against before moving a line.
 
 ## Repo topology (verified 2026-09-30)
 
-Module `lisa`. Go source lives in: `cmd/lisa/main.go` (11 lines, calls only
+Module `likha`. Go source lives in: `cmd/likha/main.go` (11 lines, calls only
 `app.Run`), `internal/` (8 packages), and root `ui/`. Leaf packages are
 stable and out of scope: `actions`, `mcp`, `model`, `repository`, `session`,
 `update` (all real code with colocated tests). `tests/integration/cli_test.go`
@@ -14,12 +14,12 @@ pins CLI behavior. `dist/` and `.cache/` are gitignored build artifacts; 158
 tracked files. `go list ./...` packages:
 
 ```
-lisa/cmd/lisa, lisa/internal/{actions,app,mcp,model,repository,session,skills,update},
-lisa/tests/integration, lisa/ui
+likha/cmd/likha, likha/internal/{actions,app,mcp,model,repository,session,skills,update},
+likha/tests/integration, likha/ui
 ```
 
-Dependency direction verified: nothing imports `lisa/internal/app` except
-`cmd/lisa`; `app` imports everything below it. No cycles exist, so the
+Dependency direction verified: nothing imports `likha/internal/app` except
+`cmd/likha`; `app` imports everything below it. No cycles exist, so the
 refactor is re-homing, never re-wiring.
 
 ## Phase 1 — exact file inventory
@@ -28,23 +28,23 @@ refactor is re-homing, never re-wiring.
 `ui/glyphs.go` (32 lines, `Glyphs` + theme-adjacent markers), `ui/theme.go`
 (147 lines, seven style roles, doc comment lives on line 1 of this file —
 keep it; it is the package doc). Zero test files. Consumers found by grep
-(four, all `lisaui "lisa/ui"` aliased — the alias tells the story):
+(four, all `likhaui "likha/ui"` aliased — the alias tells the story):
 
-- `internal/app/run.go:21` — `lisaui.Named(themeName, true)` at line 222
-- `internal/app/tui.go:23` — fields `theme lisaui.Theme`, `glyphs
-  lisaui.Glyphs` (lines 76-77); call sites: `lisaui.ThemeNames()`
-  (184, 412, 914, 1845), `lisaui.Resolve` (249, 558, 898),
-  `lisaui.HasDarkBackground()` (248, 558, 898), `lisaui.AsciiGlyphs()` (250),
-  `lisaui.NerdGlyphs()` (252)
-- `internal/app/status_markers_test.go:10` — `lisaui.NerdGlyphs().Waiting/
-  Review` (34-35), `lisaui.ThemeNames/Resolve` (63-64)
-- `internal/app/tui_muted_tools_test.go:10` — `lisaui.ThemeNames/Resolve`
+- `internal/app/run.go:21` — `likhaui.Named(themeName, true)` at line 222
+- `internal/app/tui.go:23` — fields `theme likhaui.Theme`, `glyphs
+  likhaui.Glyphs` (lines 76-77); call sites: `likhaui.ThemeNames()`
+  (184, 412, 914, 1845), `likhaui.Resolve` (249, 558, 898),
+  `likhaui.HasDarkBackground()` (248, 558, 898), `likhaui.AsciiGlyphs()` (250),
+  `likhaui.NerdGlyphs()` (252)
+- `internal/app/status_markers_test.go:10` — `likhaui.NerdGlyphs().Waiting/
+  Review` (34-35), `likhaui.ThemeNames/Resolve` (63-64)
+- `internal/app/tui_muted_tools_test.go:10` — `likhaui.ThemeNames/Resolve`
   (89-90)
 
 Because the alias exists at every call site, the mechanical change is
-`git mv ui internal/ui` + `s|lisa/ui|internal/ui|g` on exactly these four
+`git mv ui internal/ui` + `s|likha/ui|internal/ui|g` on exactly these four
 files, with the alias deletable (no other `ui.` symbol in scope collides —
-verified: `grep ui\.` shows only `lisaui.` uses plus prose).
+verified: `grep ui\.` shows only `likhaui.` uses plus prose).
 
 **B. Delete `internal/skills`.** Single file `internal/skills/skills.go`
 (4 lines, `package skills`, placeholder comment pointing at
@@ -74,7 +74,7 @@ today:
   `m.spendSegment`/`m.contextSegment`, `m.startTurn`, `m.cancel`,
   `m.abandon` (17× `m.Update`, `m.View`, `m.entries`). Examples:
   `TestHeaderCollapsesToFiftySixColumns` (41), `TestLogoEntryIsPureLogo`
-  (70), `TestLisaMarkPlacementAndRetirement` (84),
+  (70), `TestLikhaMarkPlacementAndRetirement` (84),
   `TestContextSegmentFormats` (113).
 - `status_markers_test.go` (88 lines) — 3 tests, `ui` rendering via
   `m.Update`/`m.View`/`m.theme`: `TestStatusIdentityShowsUnverifiedWarning`
@@ -89,7 +89,7 @@ risks collision review. Decision: rename to `status_view_test.go` with zero
 function-name changes (all 14 names are unique project-wide; only
 `package`-line untouched). Likewise `status_markers_test.go` →
 `status_markers_test.go` keeps its name (it tests marker/theme contract —
-name is accurate; its `lisaui` import changes per item A). Net: one file
+name is accurate; its `likhaui` import changes per item A). Net: one file
 rename, zero function churn, and afterward every `status_*_test.go` name
 describes its subject.
 
@@ -98,7 +98,7 @@ describes its subject.
 `internal/app` non-test sources (17) and their Bubbletea coupling, measured
 by non-test `github.com/charmbracelet` imports plus `*ui` receiver presence:
 
-Pure (no `tea`/`lipgloss`, import only stdlib + `lisa/internal/{model,…}`):
+Pure (no `tea`/`lipgloss`, import only stdlib + `likha/internal/{model,…}`):
 
 - `agent.go` (227 lines): `approvalRequest`, `turnEvent{kind,text,runID,
   history,approval}`, `runTurn` (42), `dispatchTool` (122),
@@ -120,7 +120,7 @@ Pure (no `tea`/`lipgloss`, import only stdlib + `lisa/internal/{model,…}`):
   belongs with config ownership. → **`internal/providers`**.
 - `keyfile.go`: `keyFilePath`, `storedCredential` (schema v2),
   `read/writeCredentials`, `storedKey/OAuth`, `storeKey/OAuth`. Imports
-  `lisa/internal/model` only for `OAuthCredentials`. → **`internal/providers`**
+  `likha/internal/model` only for `OAuthCredentials`. → **`internal/providers`**
   + any keyfile tests.
 - `provider.go`: `connection` struct (display/verified/err/setup/**theme/
   composerStyle/statusLine/nerd/mcp** — note the struct already aggregates
@@ -169,7 +169,7 @@ UI (stays together, becomes `internal/tui`):
   three new packages meet, and that place remains `app`. `run.go`'s helpers
   (`usageText`, `Run`, `resolveModel`, `resolveRoot`, `deviceLoginFlow`)
   keep their signatures; `Run(args, stdout, stderr) int` is the unchanged
-  contract `cmd/lisa/main.go` calls.
+  contract `cmd/likha/main.go` calls.
 
 ## Phase-2 tests land with their subjects
 
@@ -202,7 +202,7 @@ with that spec's checklist as the authority that nothing regressed).
    is the oracle.
 4. MCP manager moves to `internal/mcp` (not `agent`): it is server lifecycle,
    and two callers (`dispatchTool`, `/mcp` UI path) keep the seam real.
-5. `cmd/lisa/main.go` is untouched in both phases.
+5. `cmd/likha/main.go` is untouched in both phases.
 6. Status-line test inventory post-Phase-1: exactly `status_line_test.go`
    (footer/view behavior), `status_sources_test.go` (pure funcs),
    `status_view_test.go` (14 tests, ex-`statusbar_test.go`),
@@ -283,7 +283,7 @@ type changes so `app` never names the private `ui` struct; the
 
 Holds only `run.go` (`Run`, `resolveModel`, `resolveRoot`,
 `deviceLoginFlow`, `usageText`) + slimmed `run_test.go`. Imports `tui`,
-`providers`, `model`, `session`, `repository`, `mcp`. `cmd/lisa/main.go`
+`providers`, `model`, `session`, `repository`, `mcp`. `cmd/likha/main.go`
 byte-identical.
 
 ### Test dispositions (tests move with majority subject, never rewritten)

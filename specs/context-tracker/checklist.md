@@ -10,7 +10,7 @@ checked; the real-terminal walkthrough remains pending.
 - [x] Provider usage is parsed from supported stream event shapes without
       making optional telemetry a request requirement.
 - [x] Estimates are marked `~`, use a tokenizer when supported and a local
-      fallback otherwise, and cover the input Lisa actually sends.
+      fallback otherwise, and cover the input Likha actually sends.
 - [x] Window limits follow private `config.json` override → provider metadata →
       documented catalog; unknown limits show `?` and never a guessed
       percentage.

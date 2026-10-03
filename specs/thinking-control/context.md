@@ -35,7 +35,7 @@ decisions hidden in prose — all open decisions live in
   `saveStoredConfig`: the exact shape to extend if the persistence decision
   lands in `config.json` (field pattern: optional, `omitempty`, 0600 file,
   corrupt file is an error not a silent reset).
-- `internal/app/run.go` — flag/env precedent (`--theme`/`LISA_THEME`) if
+- `internal/app/run.go` — flag/env precedent (`--theme`/`LIKHA_THEME`) if
   the spec's persistence decision ever grows an env override (not required
   by the spec; listed as the house pattern only).
 - `internal/app/tui_test.go` — `TestReasoningStreamsMutedAndClosesOnContent`
@@ -77,6 +77,6 @@ decisions hidden in prose — all open decisions live in
   `reasoning.effort` in the Responses API
   (https://platform.openai.com/docs/api-reference/responses) — the two wire
   shapes named in the capability matrix.
-- Lisa's own status convention: the footer status row's plain-text state
+- Likha's own status convention: the footer status row's plain-text state
   strings (`Connected`, `Waiting for model`, `Reading repository`) — the
   badge must read as a sibling of those, not as a new class of UI.

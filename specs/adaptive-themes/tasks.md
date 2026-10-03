@@ -7,7 +7,7 @@ from the project root. Order stays M1 → M2 → M3 → M4; M1 can ship alone.
 ## M1 — Live preview (the hover effect)
 
 1. **Split `applyTheme` into preview vs commit.** In `internal/app/tui.go`:
-   `previewTheme(name)` sets `m.theme = lisaui.Resolve(name, …)` plus a new
+   `previewTheme(name)` sets `m.theme = likhaui.Resolve(name, …)` plus a new
    ephemeral `previewName` field, `layoutWidth = 0`, no config write, no
    transcript entry; `commitTheme(name)` keeps the existing `applyTheme`
    body verbatim (resolve, `themeName`, `saveStoredConfig`, `"Theme set
@@ -66,7 +66,7 @@ from the project root. Order stays M1 → M2 → M3 → M4; M1 can ship alone.
    family: `BgBase` pure terminal default — today's look is the fallback,
    not a casualty). `rebuild()`: `You` → Normal-on-BgUser, `Assistant` →
    Normal-on-BgModel, `Tool` → Muted-on-BgTool, `Reasoning` → Muted flat,
-   `Error` → Error-on-base, `Lisa`/system/logo → existing styles on BgBase.
+   `Error` → Error-on-base, `Likha`/system/logo → existing styles on BgBase.
    Keep `default`'s `Normal` fg uncolored (today's plain) to minimize
    breakage to style-equality tests.
    Verify: `lineStyles` assertions per role across all families (mirror

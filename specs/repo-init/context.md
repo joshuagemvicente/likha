@@ -17,7 +17,7 @@ this spec yet (status: draft).
 
 - Claude Code `/init`: survey the repository, generate `CLAUDE.md` at the root
   (build/test commands, code layout, conventions), leave the file for later
-  sessions' system context. Lisa's generation step mirrors this with the
+  sessions' system context. Likha's generation step mirrors this with the
   neutral `AGENTS.md` filename; injection is an open decision.
 
 ## Related specs / requirements

@@ -1,7 +1,7 @@
 # Callable tools and delegation — focused landscape
 
-**Date:** 2026-10-03 · **Status:** focused research note for Lisa’s tool UX.
-**See also:** [feature-comparison.md](feature-comparison.md) — product-level Lisa vs OpenCode V2 vs OMP feature surface.
+**Date:** 2026-10-03 · **Status:** focused research note for Likha’s tool UX.
+**See also:** [feature-comparison.md](feature-comparison.md) — product-level Likha vs OpenCode V2 vs OMP feature surface.
 **Method:** first-party documentation and pinned upstream source only. Products
 change quickly; version and source caveats are called out below. For prompt,
 context, and broader harness comparisons, see
@@ -50,7 +50,7 @@ user-configuration-dependent.
 | **OpenCode V2** | Workspace: `read`, `glob`, `grep`, `edit`, `write`, `patch`; execution: `shell`; web: `webfetch`, `websearch`; interaction: `question`; extensions: `skill`; orchestration: `subagent`, `execute` (Code Mode). `patch` is exposed for supported GPT models; other models use `edit`/`write`. The desktop app additionally exposes a browser namespace through Code Mode. [6] | MCP servers and plugin-defined custom tools add tools; browser is app-hosted, not part of the fixed CLI catalog. Skills add instructions rather than executable tools. `/commands` expand prompt templates; a command template can run an explicit shell block outside the agent permission flow, so that path is distinct and deserves care. [6][7][8] |
 | **Oh My Pi (`omp`)** | Core source declares `read`, `bash`, `edit`, `write`, `glob`, `grep`, `find`, `ast_grep`, `ast_edit`, `lsp`, `task`, `wait`, `todo`, `ask`, `eval`, `web_search`, `security_scan`, `checkpoint`, `rewind`, `context_notes`, `new_context`, `debug`, `github`, `ida`, `learn`, `manage_skill`, and memory tools (`memory_edit`, `retain`, `recall`, `reflect`). Hidden/internal tools include `think`, `yield`, and `goal`. These are a **registry**, not a guarantee that all are enabled: several are settings-, backend-, provider-, or host-gated. [9][10] | User/project MCP, extension/custom tools, and plugin roots can add tools. Some additional integrations need configuration or a local capability (e.g. GitHub, IDA, LSP, memory backend). The model-facing `task` tool dispatches agents; slash commands and the `/agents` hub are UI surfaces, not agents themselves. [10][11][12][29] |
 | **Pi coding agent (`pi`)** | The default active tools are `read`, `bash`, `edit`, `write`. Built-in but not in that default set: `powershell` (Windows), `grep`, `find`, `ls`; users can select them with `--tools`/`defaultTools`. Built-in extension tools `codemode` and `tool_search` are off by default; configured MCP can activate them. [13][14][17] | Extensions/packages can register model-callable tools, slash commands, hooks, and providers. MCP is built-in/configurable (stdio or streamable HTTP); server tools may be direct, deferred, Code Mode-only, or hidden. Pi deliberately ships without a built-in subagent tool or plan mode. Slash commands and `!` shell entry are user interaction surfaces, not ordinary model tool calls. [13][15][16][17][30] |
-| **Lisa (current repo)** | Exactly five built-ins are declared to the model: `glob`, `read`, `grep`, `edit_file`, `run_command`. Repo reads are path-confined; edit is a full-file proposal shown as a diff; the exact shell command requires approval. [19][21][31] | User-configured MCP server tools are appended to the model tool list; they are not Lisa-authored built-ins. `/mcp` reports server/tool status. Lisa has no agent/subagent/team tool or plugin runtime in the current implementation; skills remain a placeholder. [20][22][28] |
+| **Likha (current repo)** | Exactly five built-ins are declared to the model: `glob`, `read`, `grep`, `edit_file`, `run_command`. Repo reads are path-confined; edit is a full-file proposal shown as a diff; the exact shell command requires approval. [19][21][31] | User-configured MCP server tools are appended to the model tool list; they are not Likha-authored built-ins. `/mcp` reports server/tool status. Likha has no agent/subagent/team tool or plugin runtime in the current implementation; skills remain a placeholder. [20][22][28] |
 
 ### Commands, MCP, and other integrations
 
@@ -64,7 +64,7 @@ templates are a separate execution path. Pi extensions explicitly distinguish
 model-callable server tools, subject to each harness’s exposure and permission
 policy. [5][7][8][15][16][17][29][30]
 
-Lisa already reflects this separation in its drafts: `/init` starts an ordinary
+Likha already reflects this separation in its drafts: `/init` starts an ordinary
 agent turn whose file proposal still uses the standard diff approval, and
 custom markdown commands are prompt text only—not code, tools, or a permission
 shortcut. [23][24]
@@ -77,7 +77,7 @@ shortcut. [23][24]
 | **OpenCode V2** | A primary agent invokes configured `mode: subagent` roles with the `subagent` tool; built-ins include `general` and read-only `explore`, while primary `build` and `plan` are not children. Child context is fresh. Default nesting depth is one; built-in `general` cannot launch another child. There is no V2 team/shared-mailbox primitive in the documented core. Commands may opt into running in a background child session, but that remains command dispatch. [6][7] | Parent `subagent` permission controls which agent IDs can launch; child uses its own configured permissions. Global/agent permission rules are ordered, last match wins. No match resolves to ask, though shipped policy starts permissively with `* allow` plus targeted asks. [7][8] |
 | **Oh My Pi** | Model-callable `task` launches a named role (default `task`). A parent’s `spawns` field can allow any (`*`/unset), allow a list, or disable spawning; defaults allow any. Nested spawning is possible up to `task.maxRecursionDepth` (default 2), and children at the limit lose `task`. Batched task calls can launch one child per item; with async enabled they run independently in the background. Eval-backed `agent()`/`workpool()` are other configured orchestration routes. The Agent Hub monitors/steers task agents; this is task/subagent orchestration, not Claude-style peer teams. [11][12] | Parent spawn policy, disabled-agent settings, depth, and plan-mode restrictions are checked before child startup. Plan-mode children are restricted to read/search/web-search tools and cannot spawn further. [11] |
 | **Pi coding agent** | No built-in spawn capability, subagent definitions, or plan mode. A trusted extension/package can implement an agent tool or nested model calls; that is opt-in extension behavior, not a Pi default. [13][15] | No built-in spawn permission model because there is no built-in spawn tool. Extension code runs in-process with the Pi process’s OS permissions. [15][16] |
-| **Lisa** | None in the current tool definitions or turn loop. No parent/child agent capability or team runtime is implemented; subagents and other advanced surfaces are explicitly deferred in the harness draft. [19][23] | Do not imply that “agent roles” exist just because a future project instruction or slash command names a role. Any future spawn permission needs its own spec; it is not part of current edit/shell approval. [23] |
+| **Likha** | None in the current tool definitions or turn loop. No parent/child agent capability or team runtime is implemented; subagents and other advanced surfaces are explicitly deferred in the harness draft. [19][23] | Do not imply that “agent roles” exist just because a future project instruction or slash command names a role. Any future spawn permission needs its own spec; it is not part of current edit/shell approval. [23] |
 
 ## Permission and approval differences that affect UX
 
@@ -87,9 +87,9 @@ shortcut. [23][24]
 | **OpenCode V2** | Permission rules use `allow`/`ask`/`deny`, ordered last-match-wins; no matching rule means ask. Shipped defaults allow most actions but ask on external-directory access and `.env` reads. An approval can be once, saved always (tool-proposed pattern, project-scoped), or rejected; rejection also rejects other pending requests in that session. Child agents have their own configured rules. [8] | Shell runs with host filesystem, process, and network authority. The shell scanner’s directory inference is best-effort, not a sandbox. [8] |
 | **Oh My Pi** | Tools declare `read`/`write`/`exec`; unknown tools default to `exec`, and MCP tools declare `write` regardless of MCP annotations. Modes are `always-ask`, `write`, and `yolo` (the documented default); per-tool user policy can allow/deny/prompt. Tool-level deny/prompt and critical safety overrides can still apply. Headless subagents run with yolo for ordinary tier prompts; parent `task` approval is the authorization boundary. [12] | Approval policy is not containment. Approved shell/extension work can retain ambient access; the approval docs explicitly make that distinction. [12] |
 | **Pi coding agent** | No per-tool approval prompt by default. The normal security boundary is the Pi process’s operating-system identity and any external sandbox/container. Extensions can add confirmation policies, but those are custom extension behavior. Project trust gates loading project configuration/extensions/resources; it does **not** constrain tool access after launch. [15][16] | Seeing a tool call in the transcript, trusting a project, or reviewing a diff is not a security boundary. [15] |
-| **Lisa** | Read/search: no approval. `edit_file`: user approves the reviewed diff; stale proposals are refused. `run_command`: explicit approval for the exact command and working directory; the dialog warns that it can access outside the repo and use the network. MCP: currently a **server-level, session-scoped trust-on-first-use** gate, not an approval for every individual call. [19][20][21][22] | Lisa’s shell runs from the repository as cwd but is not sandboxed. An approval grants the requested action; it does not limit that action’s OS/network reach. [21] |
+| **Likha** | Read/search: no approval. `edit_file`: user approves the reviewed diff; stale proposals are refused. `run_command`: explicit approval for the exact command and working directory; the dialog warns that it can access outside the repo and use the network. MCP: currently a **server-level, session-scoped trust-on-first-use** gate, not an approval for every individual call. [19][20][21][22] | Likha’s shell runs from the repository as cwd but is not sandboxed. An approval grants the requested action; it does not limit that action’s OS/network reach. [21] |
 
-## Lisa-focused findings and recommendations
+## Likha-focused findings and recommendations
 
 These are UX recommendations, not new requirements. They preserve the existing
 draft scope and approval semantics.
@@ -118,7 +118,7 @@ draft scope and approval semantics.
 4. **Show configured MCP as a separate capability source.** Keep `/mcp` as the
    management/status surface, label server-provided tools as such in tool
    activity, and explain that approving the first call trusts that server for
-   this session. This avoids presenting configured integrations as Lisa core
+   this session. This avoids presenting configured integrations as Likha core
    tools, and makes the actual trust scope visible. [20][22]
 5. **Keep user commands distinct from capabilities.** `/init` and future
    markdown custom commands should remain ordinary prompts; the custom-command
@@ -127,13 +127,13 @@ draft scope and approval semantics.
    trust-on-first-use rule as a reason that “approved” does not imply
    read-only. Its recommended safe behavior is to block all MCP calls in plan
    mode until that open decision is resolved. [24][27][28]
-6. **Defer subagents/teams rather than implying Lisa already has them.** The
+6. **Defer subagents/teams rather than implying Likha already has them.** The
    current UX should not expose agent-role selection as if it were runnable.
    The harness draft defers subagents and skills; a future design can first
    decide the child tool set, spawn permission, side-effect boundary, and
    cancellation/reporting UX. [23]
 
-### Lisa spec consistency note
+### Likha spec consistency note
 
 The current MCP implementation and the resolved decision in
 [`mcp-support/spec.md`](../mcp-support/spec.md) use server-level trust after the
@@ -192,7 +192,7 @@ Repository snapshot: [`earendil-works/pi` @ `a276dabe57911253350bffb93cb7d7aff6a
 
 [30] [Interactive usage](https://github.com/earendil-works/pi/blob/a276dabe57911253350bffb93cb7d7aff6a73261/packages/coding-agent/docs/usage.md)
 
-### Lisa — local source/specs
+### Likha — local source/specs
 
 [19] [`internal/agent/agent.go`](../../internal/agent/agent.go) ·
 [20] [`internal/mcp/manager.go`](../../internal/mcp/manager.go) ·

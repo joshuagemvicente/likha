@@ -12,13 +12,13 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"lisa/internal/agent"
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	"lisa/internal/repository"
-	"lisa/internal/session"
-	lisaui "lisa/internal/ui"
-	"lisa/internal/update"
+	"likha/internal/agent"
+	"likha/internal/model"
+	"likha/internal/providers"
+	"likha/internal/repository"
+	"likha/internal/session"
+	likhaui "likha/internal/ui"
+	"likha/internal/update"
 )
 
 // Version is set from the release tag when building distribution binaries.
@@ -65,8 +65,8 @@ type ui struct {
 	stateDir           string
 	repo               *repository.Repository
 	client             *model.Client
-	theme              lisaui.Theme
-	glyphs             lisaui.Glyphs
+	theme              likhaui.Theme
+	glyphs             likhaui.Glyphs
 	themeName          string
 	composerStyle      string
 	width, height      int
@@ -80,7 +80,7 @@ type ui struct {
 	escPrefix          bool // armed after ESC: Return inside the decay window inserts a newline
 	lines              []string
 	lineStyles         []lipgloss.Style
-	lineSpans          [][]lisaui.Swatch
+	lineSpans          [][]likhaui.Swatch
 	lineActivity       []bool // marks the ephemeral activity row for render-time sweep styling
 	streamBuf          strings.Builder
 	reasoningBuf       strings.Builder
@@ -163,11 +163,11 @@ type ui struct {
 
 func NewUI(root string, repo *repository.Repository, client *model.Client, name string, conn providers.Connection, stateDir string, store *session.Store, snapshot session.Snapshot) *ui {
 	themeName := conn.Theme
-	dark := lisaui.HasDarkBackground()
-	theme := lisaui.Resolve(themeName, dark)
-	glyphs := lisaui.AsciiGlyphs()
+	dark := likhaui.HasDarkBackground()
+	theme := likhaui.Resolve(themeName, dark)
+	glyphs := likhaui.AsciiGlyphs()
 	if conn.Nerd {
-		glyphs = lisaui.NerdGlyphs()
+		glyphs = likhaui.NerdGlyphs()
 	}
 	m := &ui{root: root, repo: repo, client: client, modelName: name, conn: conn, stateDir: stateDir, store: store, snapshot: snapshot, history: snapshot.History, promptHistory: newPromptHistory(restoredPromptHistory(snapshot)), following: true, caretOn: true, streaming: -1, activity: -1, status: "Connected", mode: modeMain, theme: theme, glyphs: glyphs, themeName: themeName, composerStyle: validComposerStyle(conn.ComposerStyle), statusLineOpts: conn.StatusLine, started: time.Now(), freshSession: len(snapshot.Entries) == 0}
 	m.resolveContextWindow()
@@ -506,7 +506,7 @@ func (m *ui) startCompaction(focus string) tea.Cmd {
 // previewTheme re-resolves the live styles to a candidate family without
 // touching the committed name, config, or transcript: Esc restores.
 func (m *ui) previewTheme(themeName string) {
-	m.theme = lisaui.Resolve(themeName, lisaui.HasDarkBackground())
+	m.theme = likhaui.Resolve(themeName, likhaui.HasDarkBackground())
 	m.layoutWidth = 0
 }
 
@@ -522,7 +522,7 @@ func (m *ui) applyTheme(themeName string) {
 			return
 		}
 	}
-	m.entries = append(m.entries, entry{role: "Lisa", content: "Theme set to " + themeName + "; stored for later runs."})
+	m.entries = append(m.entries, entry{role: "Likha", content: "Theme set to " + themeName + "; stored for later runs."})
 }
 
 // handleThemesCommand lists the predefined themes or applies one by number
@@ -530,7 +530,7 @@ func (m *ui) applyTheme(themeName string) {
 // directly. The applied theme is stored for later runs.
 func (m *ui) handleThemesCommand(arg string) tea.Cmd {
 	m.layoutWidth = 0
-	names := lisaui.ThemeNames()
+	names := likhaui.ThemeNames()
 	if arg == "" {
 		// Open the selection dialog; the cursor starts on the applied theme.
 		return m.openDialog(dialogThemes)
@@ -545,7 +545,7 @@ func (m *ui) handleThemesCommand(arg string) tea.Cmd {
 		}
 		themeName = names[n-1]
 	}
-	if _, ok := lisaui.Named(themeName, true); !ok {
+	if _, ok := likhaui.Named(themeName, true); !ok {
 		m.input = []rune("/themes " + arg)
 		m.edit.endCaret(m.input)
 		m.entries = append(m.entries, entry{role: "Error", content: "Unknown theme " + themeName + "; run /themes for the list."})
@@ -570,7 +570,7 @@ func (m *ui) handleModelsResult(msg modelsListMsg) {
 		return
 	}
 	if len(msg.models) == 0 {
-		m.entries = append(m.entries, entry{role: "Lisa", content: "The provider reports no models."})
+		m.entries = append(m.entries, entry{role: "Likha", content: "The provider reports no models."})
 		return
 	}
 	m.lastModels = msg.models
@@ -579,7 +579,7 @@ func (m *ui) handleModelsResult(msg modelsListMsg) {
 	for i, id := range msg.models {
 		fmt.Fprintf(&b, "\n%d. %s", i+1, id)
 	}
-	m.entries = append(m.entries, entry{role: "Lisa", content: b.String()})
+	m.entries = append(m.entries, entry{role: "Likha", content: b.String()})
 }
 
 // applyModel switches the live client and stores the choice in config.json
@@ -600,7 +600,7 @@ func (m *ui) applyModel(id string) {
 			return
 		}
 	}
-	m.entries = append(m.entries, entry{role: "Lisa", content: "Model switched to " + id + " and stored for later runs."})
+	m.entries = append(m.entries, entry{role: "Likha", content: "Model switched to " + id + " and stored for later runs."})
 }
 
 // resolveContextWindow refreshes the active model's context limit from the
@@ -752,7 +752,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// for the brief and mark the point in the conversation.
 			m.history = v.History
 			m.recalculateContext(m.history)
-			m.entries = append(m.entries, entry{role: "Lisa", content: "Conversation compacted. Summary of earlier turns:\n\n" + v.Text})
+			m.entries = append(m.entries, entry{role: "Likha", content: "Conversation compacted. Summary of earlier turns:\n\n" + v.Text})
 			m.status = "Ready"
 			m.working = false
 			if m.cancel != nil {
@@ -787,7 +787,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.cancelling {
 				m.status = "Cancelled"
-				m.entries = append(m.entries, entry{role: "Lisa", content: "Run cancelled; no further tools will execute. Approved shell commands may leave detached processes running."})
+				m.entries = append(m.entries, entry{role: "Likha", content: "Run cancelled; no further tools will execute. Approved shell commands may leave detached processes running."})
 			} else if v.Kind == "error" {
 				m.status = "Error"
 				m.entries = append(m.entries, entry{role: "Error", content: v.Text})
@@ -929,7 +929,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if n == 1 {
 						note = "Queued message cleared."
 					}
-					m.entries = append(kept, entry{role: "Lisa", content: note})
+					m.entries = append(kept, entry{role: "Likha", content: note})
 					m.layoutWidth = 0
 				}
 			}

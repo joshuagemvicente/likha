@@ -10,7 +10,7 @@ keys ride on) and the [tui-redesign](../tui-redesign/spec.md) visual rules.
 
 ## Context
 
-Lisa renders thinking-model reasoning in the theme's muted role (FR-15) but
+Likha renders thinking-model reasoning in the theme's muted role (FR-15) but
 renders tool transcripts — the `Tool:` entries appended for `tool_start` and
 `tool_result` events in `internal/app/tui.go` — in plain foreground. The user
 wants tools to read as fold-quiet machinery, not as assistant content: **tool
@@ -20,7 +20,7 @@ Second, the composer today handles only backspace/ctrl+h, enter, pgup/pgdn,
 home/end, ctrl+c/esc/ctrl+d/ctrl+g. The user asked for the native terminal
 editing keys their shell provides — Ctrl+W, Ctrl+Delete, and newline-inserting
 Return variants — and, more broadly, for "most of the functionalities from my
-terminal" in the Lisa composer. The cited reference surfaces are OpenCode,
+terminal" in the Likha composer. The cited reference surfaces are OpenCode,
 OMP, and Claude Code; their bindings were gathered while writing this spec
 (§ Research) and the scope was confirmed with the user on 2026-09-30:
 
@@ -41,7 +41,7 @@ distinguishes Return (send) from Ctrl+Enter/Shift+Enter and notes Windows
 Terminal swallows Ctrl+Enter; Claude Code uses Shift+Enter for newline in a
 configured terminal; bash readline separates `unix-word-rubout` (Ctrl+W) from
 `backward-kill-word` (Alt+Backspace) by their whitespace handling, and zsh's
-emacs map shrinks that difference — Lisa adopts the OpenCode
+emacs map shrinks that difference — Likha adopts the OpenCode
 collapse (both are word-back kill) with the readline whitespace-collapse
 boundary rule kept as the underlying word rule.
 
@@ -107,7 +107,7 @@ a native terminal does.
 
 | Key | Action |
 | --- | --- |
-| Ctrl+U | kill to start of draft (whole one-line buffer — Lisa's draft is single-line, so this is `kill-to-buffer-start`) |
+| Ctrl+U | kill to start of draft (whole one-line buffer — Likha's draft is single-line, so this is `kill-to-buffer-start`) |
 | Ctrl+K | kill to end of draft |
 | Ctrl+Y | yank: reinsert the most recent kill (last-kill length known; a small ring of the last 8 kills per prompt-editor) |
 | Ctrl+C | unchanged: cancel/quit, never a kill alias |
@@ -180,19 +180,19 @@ manual (gnu.org Commands for Text).
   `backspace,shift+backspace`
 - `input_undo`: `ctrl+-,super+z`; `input_redo`: `ctrl+.,super+shift+z`
   (undo/redo excluded from this feature's scope per user confirmation)
-- `input_clear`: `ctrl+c` **in OpenCode's input, but Lisa keeps ctrl+c =
+- `input_clear`: `ctrl+c` **in OpenCode's input, but Likha keeps ctrl+c =
   cancel/quit** (FR-04/FR-17 rule; noted deliberately as a divergence)
 
 **OMP (Oh My Pi agent, keybindings.md):**
 
 - `app.message.followUp`: `Ctrl+Q`, `Ctrl+Enter` — i.e., Ctrl+Enter is NOT
-  send; it queues. Lisa's Ctrl+Return inserts a newline instead (never a
+  send; it queues. Likha's Ctrl+Return inserts a newline instead (never a
   queue), matching the user's "to add new spaces" ask.
-- OMP documents Windows Terminal swallowing Ctrl+Enter; the lesson Lisa takes
+- OMP documents Windows Terminal swallowing Ctrl+Enter; the lesson Likha takes
   is aliasing across aliases (never one chord carrying an action alone), not
   a queue feature.
-- `app.editor.external`: `Ctrl+G` — Lisa's ctrl+g is the composer-style
-  dialog today; Lisa does not take OMP's external-editor binding.
+- `app.editor.external`: `Ctrl+G` — Likha's ctrl+g is the composer-style
+  dialog today; Likha does not take OMP's external-editor binding.
 - `app.tools.expand`: `Ctrl+O` (tool-output expansion) — non-goal here, noted
   for the tools panel's future.
 - No Alt+Alt+Return concept exists in OMP; the "Esc then Return" encoding is
@@ -215,11 +215,11 @@ manual (gnu.org Commands for Text).
 - Alt+Backspace (`M-DEL`) = `backward-kill-word`: word-char boundary rules,
   i.e. same action family as Ctrl+W with a different boundary definition. In
   practice both feel like "delete the previous word"; the OpenCode default
-  treats them as one action with three aliases, and Lisa follows OpenCode.
+  treats them as one action with three aliases, and Likha follows OpenCode.
 - Alt+D = `kill-word` (forward), Alt+B = `backward-word`,
   Alt+F = `forward-word`, Ctrl+Y = `yank`, Ctrl+T = `transpose-chars`.
 - Ctrl+Enter has no readline binding; it carries meaning only in TUI apps
-  (OMP's queue, OpenCode's newline), which is exactly where Lisa's own
+  (OMP's queue, OpenCode's newline), which is exactly where Likha's own
   newline-insert decision sits.
 
 ### Answer to the user's question in the brief ("Ctrl+W is a Control+Delete, right?")
@@ -227,7 +227,7 @@ manual (gnu.org Commands for Text).
 Nearly: Ctrl+W and Ctrl+Delete are the same *action family* (delete one word)
 facing opposite directions — Ctrl+W kills the previous word, Ctrl+Delete
 kills the next. In bash they differ slightly in boundary rules (Ctrl+W stops
-at whitespace, Alt+Backspace stops at word chars); Lisa fixes one word rule
+at whitespace, Alt+Backspace stops at word chars); Likha fixes one word rule
 (whitespace-run collapsing) and aliases all five chords to it, because the
 reference surfaces the user cited (OpenCode, Claude Code muscle memory, and
 modern shells) agree on the family and disagree only on boundary edge cases.
@@ -263,7 +263,7 @@ Confirmed with the user 2026-09-30, recorded so implementation cannot drift:
    its own key (the ESC is dropped). Must not break Esc-cancel of an active
    run — a lone ESC press still cancels after the decay expiry.
 3. **Ctrl+U boundary semantics:** readline's Ctrl+U kills the whole line;
-   it differs from "to buffer start" only because Lisa's draft is single-line
+   it differs from "to buffer start" only because Likha's draft is single-line
    (prompt-editor caveat); the single-line rule stands unless the editor
    grows multi-line in prompt-editor, which would amend this spec.
 4. **Muted styling of tool ID lines vs whole entry:** confirmed whole-entry

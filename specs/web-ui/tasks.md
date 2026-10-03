@@ -71,10 +71,10 @@ a rewrite.
       `repository`, `mcp`; never `tui`/`bubbletea`).
       *Verify:* diagram and table match the actual imports.
 
-## M2 — `lisa --serve` MVP: the browser drives a full turn
+## M2 — `likha --serve` MVP: the browser drives a full turn
 
 - [ ] **T2.1** `internal/app`: add `--serve`, `--port`, `--host`, `--token`
-      (env `LISA_SERVE_TOKEN`), slotted before the `!interactive` gate
+      (env `LIKHA_SERVE_TOKEN`), slotted before the `!interactive` gate
       (same composition as the TUI: store, providers, client, repo, MCP).
       Default bind `127.0.0.1`, ephemeral port; print
       `http://127.0.0.1:<port>/#pair=<token>`; refuse non-loopback without
@@ -163,7 +163,7 @@ a rewrite.
 
 ## M4 — Attach mode and polish
 
-- [ ] **T4.1** `lisa --web`: start the in-process server alongside the TUI
+- [ ] **T4.1** `likha --web`: start the in-process server alongside the TUI
       sharing one runtime; browser mirrors and drives the live session
       (steer/cancel/approve from either surface, no store conflict because
       one process owns the run); `--port/--host/--token` reuse.

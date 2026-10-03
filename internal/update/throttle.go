@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// throttleFile is the single opaque file Lisa writes for update checks; it
+// throttleFile is the single opaque file Likha writes for update checks; it
 // holds the Unix-nano timestamp of the last completed check.
 const throttleFile = "update_check.json"
 
@@ -22,9 +22,9 @@ type state struct {
 // Prepared reports whether an update check should run now, and hands back a
 // mark function that persists the completed check. The bool is false when the
 // check was throttled (ran within interval) or opted out via
-// LISA_UPDATE_CHECK=0; both are non-events, not errors.
+// LIKHA_UPDATE_CHECK=0; both are non-events, not errors.
 func Prepared(stateDir string) (shouldCheck bool, mark func() error, err error) {
-	if os.Getenv("LISA_UPDATE_CHECK") == "0" {
+	if os.Getenv("LIKHA_UPDATE_CHECK") == "0" {
 		return false, nil, nil
 	}
 	should, err := throttleAllows(stateDir)

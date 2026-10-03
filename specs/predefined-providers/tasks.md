@@ -10,7 +10,7 @@ module interface. Automated entry point: `go test ./...` from the project root.
    `internal/app/provider.go`
    resolves provider/endpoint/key; `internal/app/keyfile.go` stores keys as
    `<stateDir>/providers.json` mode 0600. `--api-key` (explicitly passed) persists;
-   `LISA_API_KEY` feeds the flag default. `resolveProvider` tests cover resolution order,
+   `LIKHA_API_KEY` feeds the flag default. `resolveProvider` tests cover resolution order,
    storage, and permissions.
 2. **Connection check (startup and pre-run).** **Done.** `model.Client.Check` probes
    `GET /models` read-only; `EnsureConnected` memoizes success, retries failures;
@@ -30,7 +30,7 @@ module interface. Automated entry point: `go test ./...` from the project root.
    provider (needs real API keys) before the README rows may claim accepted status.
 
 Follow-up (same feature, added 2026-09-29): **model name is optional.** Without
-`--model`/`LISA_MODEL`, `resolveModel` (run.go) uses the provider's documented
+`--model`/`LIKHA_MODEL`, `resolveModel` (run.go) uses the provider's documented
 `DefaultModel` (table row; OpenAI `gpt-4o-mini`, OpenRouter `openai/gpt-4o-mini`, Bedrock
 haiku, Opencode Zen `gpt-5.3-codex`, Opencode Go `glm-5.3-flash`), or — for a custom
 `--endpoint` — the first model the endpoint reports. `--help` prints the full option/provider/env

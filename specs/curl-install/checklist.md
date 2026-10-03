@@ -3,7 +3,7 @@
 Observable outcomes, mirrors [spec.md](spec.md). Status words per
 [specs/README.md](../README.md) rules.
 
-- [ ] A developer who has never cloned Lisa can install on macOS or Linux
+- [ ] A developer who has never cloned Likha can install on macOS or Linux
       using only the README one-liner and the running shell.
 - [ ] Downloaded archive is checksum-verified against the release manifest
       before anything is executed or put on `PATH`.

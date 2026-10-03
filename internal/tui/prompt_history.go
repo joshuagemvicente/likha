@@ -1,6 +1,6 @@
 package tui
 
-import "lisa/internal/session"
+import "likha/internal/session"
 
 // restoredPromptHistory prefers the dedicated persisted history. For sessions
 // saved before that field existed, seed recall from the durable transcript so

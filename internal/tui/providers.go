@@ -10,8 +10,8 @@ import (
 	"github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
 
-	"lisa/internal/model"
-	"lisa/internal/providers"
+	"likha/internal/model"
+	"likha/internal/providers"
 )
 
 // /providers implements the connection manager: a selection dialog over the
@@ -187,7 +187,7 @@ func (m *ui) handleKeyCheckMsg(v keyCheckMsg) {
 		// the freshly stored row is visible and Enter-auth takes over.
 		m.openDialog(dialogProviders)
 	}
-	m.entries = append(m.entries, entry{role: "Lisa", content: "Stored the API key for " + p.DisplayName + "."})
+	m.entries = append(m.entries, entry{role: "Likha", content: "Stored the API key for " + p.DisplayName + "."})
 	m.status = "Key stored"
 	m.layoutWidth = 0
 }
@@ -374,7 +374,7 @@ func (m *ui) providerAuthView() string {
 		if m.keyModal.signedIn {
 			body = append(body, "Signed in.")
 		} else {
-			body = append(body, "Not signed in: sign in during first-run setup or run lisa --provider chatgpt --device-login.")
+			body = append(body, "Not signed in: sign in during first-run setup or run likha --provider chatgpt --device-login.")
 		}
 	} else {
 		body = append(body, "✔ Connected — key "+m.keyModal.source+".")
@@ -396,7 +396,7 @@ func (m *ui) providerAuthView() string {
 	content := []string{withBase(m.theme.Title, m.theme.Base).Render(fit(title, inner)), m.theme.Base.Render(fit("", inner))}
 	for _, line := range body {
 		// Long hints wrap instead of truncating: a clipped
-		// "lisa --provider chatgpt --device-login" is useless.
+		// "likha --provider chatgpt --device-login" is useless.
 		for _, chunk := range wrap(line, inner) {
 			content = append(content, m.theme.Base.Render(fit(chunk, inner)))
 		}

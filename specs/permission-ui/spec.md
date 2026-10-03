@@ -5,7 +5,7 @@ walkthrough outstanding.
 
 ## Context
 
-Lisa's approval gate is keyboard-invisible. The review screen renders the
+Likha's approval gate is keyboard-invisible. The review screen renders the
 proposal body (`internal/tui/view.go:78-90`), and the decision is two
 unlabelled letter keys: `y`/`Y` approves only after every review page has
 been seen (`tui.go:719-735`), `n`/`N` rejects (`tui.go:736-747`). The only

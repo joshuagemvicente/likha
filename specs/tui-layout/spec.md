@@ -7,7 +7,7 @@ phases 1–3 render in a real terminal (see checklist.md).
 ## Context (implemented for phases 1–3; phase 3 via adaptive-themes, walkthrough pending)
 
 - `internal/app/tui.go` `header()` returns zero lines at ≥56 cols; below 56
-  it renders one compact line, `Lisa · <repo basename>` (the logo block is
+  it renders one compact line, `Likha · <repo basename>` (the logo block is
   skipped there). Every `len(m.header())` consumer (bodyHeight, composer
   limit, popup budgets, page math) tolerates the zero-line form; a long
   basename re-wraps into the body instead of clipping.
@@ -17,7 +17,7 @@ phases 1–3 render in a real terminal (see checklist.md).
 - The bottom status bar (`internal/app/status_line.go`) renders: provider +
   model (`statusIdentity`, model via the curated display-name map with slug
   fallback), `ctx` (`contextSegment`: `ctx 34% · 68k/200k` wide, `ctx 34%`
-  narrow, `ctx —` when unmeasured or the window is unknown), Lisa mark
+  narrow, `ctx —` when unmeasured or the window is unknown), Likha mark
   bottom-right (≥70 cols), then the gated segments — `Folder` (home-relative),
   git state (`gitState` from `gitStatus` in `status_sources.go`: branch,
   detached short SHA, `↓n↑m`, staged/dirty counts, untracked), `MCP`,
@@ -44,14 +44,14 @@ User-visible behavior:
 1. On terminals ≥56 cols the top header disappears; page 1 opens with the
    ASCII logo block only (its embedded `Repository:` line removed — the
    logo is pure logo; the path lives in the status bar's Folder segment).
-2. A small Lisa mark renders at the bottom-RIGHT of the status bar so the
-   harness identity is always visible: the existing left-side "Lisa"
+2. A small Likha mark renders at the bottom-RIGHT of the status bar so the
+   harness identity is always visible: the existing left-side "Likha"
    wordmark MOVES to the right end (one line, theme Title style, first
    thing dropped on narrow screens). A multi-line ASCII mark is rejected:
    the status bar is height-stable by design (`statusLineHeight`).
 3. Below 56 cols (logo skipped) a single compact header line remains —
-   `Lisa · <repo basename>` — so FR-12 identity exists on the smallest
-   terminals. (Resolved: `Lisa · <basename>`.)
+   `Likha · <repo basename>` — so FR-12 identity exists on the smallest
+   terminals. (Resolved: `Likha · <basename>`.)
 4. `statusLineOpts` defaults change: `Folder` and `Branch` become default-on
    (they now carry what the header dropped); `statusIdentity` stays
    mandatory.
@@ -60,7 +60,7 @@ User-visible behavior:
    correct; every `len(m.header())` subtraction is audited in the change.
 6. Spec impact: FR-12 and §7 header wording were amended in v1-spec.md
    before implementation (FR-12 now states the ≥56-col zero-line header,
-   the pure logo block, and the bottom-right Lisa mark; §7 matches).
+   the pure logo block, and the bottom-right Likha mark; §7 matches).
 
 ## Phase 1b — Status bar content (detailed)
 
@@ -111,7 +111,7 @@ clips; identity never retires entirely):
 
 User-visible behavior:
 
-1. After the FIRST completed turn of a fresh session, Lisa generates the
+1. After the FIRST completed turn of a fresh session, Likha generates the
    session name with ONE plain model call (no subagents, §2) conditioned on
    the user's prompt and the assistant's response — e.g. prompt "I want you
    to create this feature" yields a name like "Feature scaffolding".
@@ -223,7 +223,7 @@ Required behavior (unchanged): `BgUser`/`BgTool`/`BgModel` (+ `BgBase`
 canvas) roles with light/dark variants via `lipgloss.AdaptiveColor`;
 full-width bands (padding paints for free in `mainView`'s
 `style.Render(fit(line, width))`); muted foregrounds preserved; `Error`
-fails by foreground; `Lisa`/system + logo sit on `BgBase`; status bar,
+fails by foreground; `Likha`/system + logo sit on `BgBase`; status bar,
 composer, scrollbar, and dialogs render on `BgBase`; composer input uses
 `Normal` fg; degradation under limited profiles collapses bands to legible
 plain text with `You:`/`Tool:`/… labels and fg roles intact (FR-15).
@@ -239,7 +239,7 @@ touch points, current locations:
 | `internal/app/tui.go:1697-1708` (`rebuild()` entry→style switch: `Reasoning`/`Tool` → Muted, `Error` → Error, rest bare) | `internal/app/tui.go:1415-1430` — the exact switch phase 3 re-maps (`You` → Normal-on-BgUser, `Assistant` → Normal-on-BgModel, `Tool` → Muted-on-BgTool) |
 | `internal/app/tui.go` `mainView` + `lineStyles` | Unchanged mechanism: full-width bands need no new layout math; adding backgrounds cannot alter visible widths (`stripANSI`/`splitAtWidth` at `internal/app/tui.go:1667-1712`), but the phase-2 overflow suite is re-run as the regression gate |
 | `internal/app/tui.go` `updateDialog`/`confirmDialog`/`applyTheme` (preview per adaptive-themes M1) | Same file post-1.5 UNLESS Phase 1.5 landed meanwhile — then `setup.go`/`dialog.go`/`view.go` per `specs/structure-refactor/architecture-phase-1.md` §11; resolve by symbol name, not line number |
-| Entry roles consumed by the band map | `"You"` (tui.go:309), `"Assistant"` (tui.go:776), `"Tool"` (tui.go:795,839), `"Reasoning"` (tui.go:768), `"Error"`, `"Lisa"`, `"Logo"` — role strings unchanged by phase 3 |
+| Entry roles consumed by the band map | `"You"` (tui.go:309), `"Assistant"` (tui.go:776), `"Tool"` (tui.go:795,839), `"Reasoning"` (tui.go:768), `"Error"`, `"Likha"`, `"Logo"` — role strings unchanged by phase 3 |
 
 ## Acceptance criteria (phases 1–3 verified locally via `go test ./...`)
 
@@ -249,9 +249,9 @@ terminal render is left unchecked pending the TUI walkthrough.
 ### Phase 1a
 - [x] No top header at ≥56 cols; page 1 shows the logo block only
       (`TestHeaderCollapsesToFiftySixColumns`).
-- [x] Small Lisa mark visible at the bottom-right of the status bar at
+- [x] Small Likha mark visible at the bottom-right of the status bar at
       wide widths; it retires before any identity information clips
-      (`TestLisaMarkPlacementAndRetirement`). *Mark separation and flush-right
+      (`TestLikhaMarkPlacementAndRetirement`). *Mark separation and flush-right
       rendering checked against string output, not a real terminal cursor
       position.*
 - [x] <56 cols: single compact identity line (FR-12 intact)
@@ -328,7 +328,7 @@ terminal render is left unchecked pending the TUI walkthrough.
 
 ## Resolved decisions (questionnaire, 2026-09-30)
 
-1. Phase 1a narrow fallback: `Lisa · <basename>` below 56 cols.
+1. Phase 1a narrow fallback: `Likha · <basename>` below 56 cols.
 2. Phase 1b ahead/behind rendering: compact arrows (`↓1↑2`).
 3. Phase 1b model display names: curated map beside the window table.
 4. Phase 1b session spend: provider-reported cost + curated price table;

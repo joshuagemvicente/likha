@@ -10,10 +10,10 @@ import (
 
 	"github.com/mattn/go-runewidth"
 
-	"lisa/internal/actions"
-	"lisa/internal/mcp"
-	"lisa/internal/model"
-	"lisa/internal/repository"
+	"likha/internal/actions"
+	"likha/internal/mcp"
+	"likha/internal/model"
+	"likha/internal/repository"
 )
 
 type ApprovalRequest struct {

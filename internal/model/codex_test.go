@@ -670,9 +670,9 @@ func TestConsumeCodexStreamRealWorldTurn(t *testing.T) {
 func TestCodexStreamReadCapturedDump(t *testing.T) {
 	// A captured session dump, when provided via the environment, must parse
 	// end to end. Skipping otherwise keeps the suite hermetic.
-	path := os.Getenv("LISA_CODEX_DUMP")
+	path := os.Getenv("LIKHA_CODEX_DUMP")
 	if path == "" {
-		t.Skip("no LISA_CODEX_DUMP provided")
+		t.Skip("no LIKHA_CODEX_DUMP provided")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

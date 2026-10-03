@@ -6,9 +6,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/agent"
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/agent"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 func TestCaretBlinksSolidWhileTyping(t *testing.T) {

@@ -15,7 +15,7 @@ import (
 )
 
 func withEndpoint(t *testing.T, url string) {
-	t.Setenv("LISA_UPDATE_API", url)
+	t.Setenv("LIKHA_UPDATE_API", url)
 }
 
 func serveTag(t *testing.T, status int, body string) *httptest.Server {
@@ -264,7 +264,7 @@ func TestThrottleRoundTripAfterMark(t *testing.T) {
 func TestPreparedOptOut(t *testing.T) {
 	dir := t.TempDir()
 	// No state at all — only the opt-out env decides this.
-	t.Setenv("LISA_UPDATE_CHECK", "0")
+	t.Setenv("LIKHA_UPDATE_CHECK", "0")
 	ok, mark, err := Prepared(dir)
 	if err != nil {
 		t.Fatalf("Prepared: %v", err)

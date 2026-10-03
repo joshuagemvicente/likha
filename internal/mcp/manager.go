@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"lisa/internal/model"
+	"likha/internal/model"
 )
 
 // McpManager owns the user's configured MCP servers: lazy startup, the merged
@@ -204,7 +204,7 @@ func (m *McpManager) Trusted(name string) bool {
 }
 
 // Stop kills every running server and fails pending calls. Called on exit;
-// servers must not outlive Lisa.
+// servers must not outlive Likha.
 func (m *McpManager) Stop() {
 	if m == nil {
 		return

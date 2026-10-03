@@ -9,7 +9,7 @@ Observable outcomes, mirrors [spec.md](spec.md). Status words per
 - [ ] A `/think`-set level reaches the provider as exactly the one wire
       field the capability matrix row records for that provider — observed
       on the wire, not inferred from code.
-- [ ] `off` produces request bodies identical to Lisa before this feature.
+- [ ] `off` produces request bodies identical to Likha before this feature.
 - [ ] Bare `/think` reports the current level and accepted values and
       starts no model turn.
 - [ ] Invalid input (`unknown`, extra words, punctuation variants) prints a

@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 // benchUI builds a UI with a realistic long transcript: assistant prose,

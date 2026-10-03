@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"lisa/internal/agent"
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/agent"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 func composerTestUI(t *testing.T, style string, width, height int) *ui {

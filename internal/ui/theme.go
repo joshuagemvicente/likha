@@ -1,4 +1,4 @@
-// Package ui holds Lisa's color themes and the optional Nerd Font glyph set.
+// Package ui holds Likha's color themes and the optional Nerd Font glyph set.
 // Themes map onto canvas roles (Base plus the user/tool/model bands), seven
 // foreground roles, and the muted/error signal roles; prose adopts the single
 // Normal fg while authorship shows in the background bands. Nerd Font icons
@@ -28,7 +28,7 @@ type Theme struct {
 	Muted    lipgloss.Style // thinking-model reasoning output
 }
 
-// defaultTheme keeps Lisa's original look: a single calm accent on a plain
+// defaultTheme keeps Likha's original look: a single calm accent on a plain
 // terminal palette.
 func defaultTheme() Theme {
 	return Theme{

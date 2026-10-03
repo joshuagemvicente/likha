@@ -11,10 +11,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	"lisa/internal/session"
-	lisaui "lisa/internal/ui"
+	"likha/internal/model"
+	"likha/internal/providers"
+	"likha/internal/session"
+	likhaui "likha/internal/ui"
 )
 
 func TestThemesModalSelection(t *testing.T) {
@@ -171,7 +171,7 @@ func committedTheme(t *testing.T, stateDir string) string {
 func themeSelectedOpen(t *testing.T, name string) string {
 	t.Helper()
 	forceANSI(t)
-	rendered := lisaui.Resolve(name, lisaui.HasDarkBackground()).Selected.Render("x")
+	rendered := likhaui.Resolve(name, likhaui.HasDarkBackground()).Selected.Render("x")
 	idx := strings.Index(rendered, "m")
 	if idx < 0 {
 		t.Fatalf("theme %s selected style rendered no escape: %q", name, rendered)
@@ -220,7 +220,7 @@ func TestThemesPreviewKeepsCommittedNameAndConfig(t *testing.T) {
 	}
 	forceANSI(t)
 	got := m.theme.Selected.Render("x")
-	want := lisaui.Resolve("everforest", lisaui.HasDarkBackground()).Selected.Render("x")
+	want := likhaui.Resolve("everforest", likhaui.HasDarkBackground()).Selected.Render("x")
 	if got != want {
 		t.Fatal("arrow navigation did not re-resolve m.theme to the everforest candidate")
 	}
@@ -230,7 +230,7 @@ func TestThemesPreviewKeepsCommittedNameAndConfig(t *testing.T) {
 		t.Fatalf("preview wrote themeName after up = %q", m.themeName)
 	}
 	got = m.theme.Selected.Render("x")
-	want = lisaui.Resolve("kanagawa", lisaui.HasDarkBackground()).Selected.Render("x")
+	want = likhaui.Resolve("kanagawa", likhaui.HasDarkBackground()).Selected.Render("x")
 	if got != want {
 		t.Fatal("up navigation did not re-resolve m.theme to the kanagawa candidate")
 	}
@@ -263,7 +263,7 @@ func TestThemesEnterCommitsPreview(t *testing.T) {
 	}
 	found := false
 	for _, e := range m.entries[before:] {
-		if e.role == "Lisa" && strings.Contains(e.content, "Theme set to habamax") {
+		if e.role == "Likha" && strings.Contains(e.content, "Theme set to habamax") {
 			found = true
 		}
 	}
@@ -285,7 +285,7 @@ func TestThemesEscRestoresCommitted(t *testing.T) {
 	cursorOn(t, m, "everforest")
 	forceANSI(t)
 	previewed := m.theme.Selected.Render("x")
-	if previewed == lisaui.Resolve("habamax", lisaui.HasDarkBackground()).Selected.Render("x") {
+	if previewed == likhaui.Resolve("habamax", likhaui.HasDarkBackground()).Selected.Render("x") {
 		t.Fatal("navigation did not preview the candidate")
 	}
 	beforeCfg := configSnapshot(t, stateDir)
@@ -301,7 +301,7 @@ func TestThemesEscRestoresCommitted(t *testing.T) {
 		t.Fatal("Esc did not close the dialog")
 	}
 	restored := m.theme.Selected.Render("x")
-	want := lisaui.Resolve("habamax", lisaui.HasDarkBackground()).Selected.Render("x")
+	want := likhaui.Resolve("habamax", likhaui.HasDarkBackground()).Selected.Render("x")
 	if restored != want {
 		t.Fatal("Esc did not restore the committed theme styles")
 	}
@@ -339,14 +339,14 @@ func TestThemesTwoStageEscRestores(t *testing.T) {
 	}
 	forceANSI(t)
 	previewed := m.theme.Selected.Render("x")
-	if previewed == lisaui.Resolve("habamax", lisaui.HasDarkBackground()).Selected.Render("x") {
+	if previewed == likhaui.Resolve("habamax", likhaui.HasDarkBackground()).Selected.Render("x") {
 		t.Fatal("filtering did not preview the narrowed candidate")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if !m.dialog.open || m.dialog.query != "" {
 		t.Fatalf("first Esc did not clear the query: open=%t q=%q", m.dialog.open, m.dialog.query)
 	}
-	if got, want := m.theme.Selected.Render("x"), lisaui.Resolve("habamax", lisaui.HasDarkBackground()).Selected.Render("x"); got != want {
+	if got, want := m.theme.Selected.Render("x"), likhaui.Resolve("habamax", likhaui.HasDarkBackground()).Selected.Render("x"); got != want {
 		t.Fatal("first Esc did not restore the committed theme")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -377,7 +377,7 @@ func TestThemesDirectArgStillCommits(t *testing.T) {
 		}
 		want := arg
 		if arg == "3" {
-			want = lisaui.ThemeNames()[2]
+			want = likhaui.ThemeNames()[2]
 		}
 		if m.themeName != want {
 			t.Fatalf("/themes %s committed %q, want %q", arg, m.themeName, want)
@@ -387,7 +387,7 @@ func TestThemesDirectArgStillCommits(t *testing.T) {
 		}
 		found := false
 		for _, e := range m.entries {
-			if e.role == "Lisa" && strings.Contains(e.content, "Theme set to "+want) {
+			if e.role == "Likha" && strings.Contains(e.content, "Theme set to "+want) {
 				found = true
 			}
 		}
@@ -461,11 +461,11 @@ func TestSetupThemePreviewChangesLiveTheme(t *testing.T) {
 	m.previewSetupTheme()
 
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	if got, want := m.theme.Selected.Value(), lisaui.Resolve(lisaui.ThemeNames()[1], lisaui.HasDarkBackground()).Selected.Value(); got != want {
+	if got, want := m.theme.Selected.Value(), likhaui.Resolve(likhaui.ThemeNames()[1], likhaui.HasDarkBackground()).Selected.Value(); got != want {
 		t.Fatal("setup down did not preview the next theme")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyUp})
-	if got, want := m.theme.Selected.Value(), lisaui.Resolve(lisaui.ThemeNames()[0], lisaui.HasDarkBackground()).Selected.Value(); got != want {
+	if got, want := m.theme.Selected.Value(), likhaui.Resolve(likhaui.ThemeNames()[0], likhaui.HasDarkBackground()).Selected.Value(); got != want {
 		t.Fatal("setup up did not preview the previous theme")
 	}
 	if m.themeName != "default" {

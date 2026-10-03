@@ -6,11 +6,11 @@ Code and docs this feature touches.
 
 - `scripts/install.sh` — new; the public installer, the only entry point.
 - `scripts/release.sh` — read-only contract source for asset naming:
-  archives `lisa_<VERSION>_<OS>_<ARCH>.tar.gz` and manifest
-  `lisa_<VERSION>_checksums.txt`; version regex
+  archives `likha_<VERSION>_<OS>_<ARCH>.tar.gz` and manifest
+  `likha_<VERSION>_checksums.txt`; version regex
   `^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$`;
-  archives contain exactly `lisa`, `README.md`, `LICENSE`; binary prints
-  `Lisa <VERSION>` for `--version`.
+  archives contain exactly `likha`, `README.md`, `LICENSE`; binary prints
+  `Likha <VERSION>` for `--version`.
 - `scripts/smoke-release.sh` — reference for OS/arch detection mapping
   (`Darwin`→`darwin`, `Linux`→`linux`; `x86_64`/`amd64`→`amd64`,
   `arm64`/`aarch64`→`arm64`) and for the archive-listing strictness the
@@ -31,9 +31,9 @@ Code and docs this feature touches.
 
 ## Hosting assumption (decided)
 
-Releases and the manifest are GitHub Release assets of `gem/lisa`; the
+Releases and the manifest are GitHub Release assets of `gem/likha`; the
 installer itself is served to `curl` from
-`https://raw.githubusercontent.com/gem/lisa/main/scripts/install.sh`. The
+`https://raw.githubusercontent.com/gem/likha/main/scripts/install.sh`. The
 owner/repo constants live in the installer header (`DEFAULT_BASE`,
 `DEFAULT_API`) and must change in exactly one place if the repository moves.
 No public web server is operated by the project.

@@ -1,5 +1,5 @@
 // Context-window catalog: statically documented context-window sizes for
-// models Lisa may connect to. Only PUBLICLY DOCUMENTED numbers appear here,
+// models Likha may connect to. Only PUBLICLY DOCUMENTED numbers appear here,
 // each with a comment naming its documentation basis; unknown model IDs (for
 // example ChatGPT-curated gpt-5.x endpoints, whose window is not publicly
 // documented) resolve to ok=false so the UI renders "ctx —" instead of a
@@ -75,7 +75,7 @@ func ContextWindow(modelName string) (int64, bool) {
 
 // ResolveContextWindow resolves a context limit for the selected provider and
 // model. A positive user override takes precedence over positive provider
-// metadata, followed by Lisa's documented model catalog. Provider-specific
+// metadata, followed by Likha's documented model catalog. Provider-specific
 // values are supplied by the caller; the static catalog is keyed by model ID,
 // so providerID does not affect the catalog fallback.
 func ResolveContextWindow(providerID, modelID string, override, metadata int64) (int64, bool) {

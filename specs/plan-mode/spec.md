@@ -4,7 +4,7 @@
 
 ## Context
 
-Lisa already separates repository reads from gated writes. In
+Likha already separates repository reads from gated writes. In
 `internal/app/agent.go`, `dispatchTool` executes `read`, `read`, and
 `grep` directly (repository-scoped per
 [v1-spec.md](../v1-spec.md) FR-05), while `edit_file`, `run_command`, and MCP
@@ -15,7 +15,7 @@ current session's mode is.
 
 The precedent is Claude Code's plan mode (Shift+Tab): the agent surveys the
 codebase with read-only tools, then presents a plan in text for the user to
-approve before any mutation happens. Lisa's equivalent makes that a one-shot,
+approve before any mutation happens. Likha's equivalent makes that a one-shot,
 per-session mode the user toggles from the prompt.
 
 Why it is worth having: a user who wants to explore "what would you change?" —
@@ -42,7 +42,7 @@ agent from proposing (and after approval, applying) edits in the same turn.
 
 3. While plan mode is active, every proposed mutation is **refused before the
    approval flow starts**: an `edit_file` or `run_command` tool call returns a
-   refusal result to the model and Lisa reports it to the user. A refusal is a
+   refusal result to the model and Likha reports it to the user. A refusal is a
    failed/refused action recorded and reported per FR-09 — it is never
    silently dropped, never counted as success, and never surfaced as a diff
    review for approval. The refusal names the mode, so the user's status
@@ -56,7 +56,7 @@ agent from proposing (and after approval, applying) edits in the same turn.
 5. MCP tool calls in plan mode: **open decision — mark as decision.** The safe
    stance blocks MCP tool calls entirely while plan mode is active: an MCP
    server is a separate process on the user's machine, its tools may carry
-   arbitrary side effects that Lisa's approval gate cannot see ahead of time
+   arbitrary side effects that Likha's approval gate cannot see ahead of time
    (FR-16 only gates the first call per server, then session-trusts the
    rest), so "approval-gated like a command" does not make an MCP call a read.
    The alternative — allowing already-trusted MCP servers to run as in normal
@@ -64,7 +64,7 @@ agent from proposing (and after approval, applying) edits in the same turn.
    before implementation; the safe default (`plan mode blocks all MCP tool
    calls with the same refusal reporting as mutation tools`) is preferred.
 
-6. The model is told it is in a read-only mode. Lisa currently sends no
+6. The model is told it is in a read-only mode. Likha currently sends no
    system role message, so plan mode **adds one** for the duration of the
    mode; how that message is composed and whether it is applied per-prompt or
    per-run is an implementation detail (see tasks), but the user-visible
@@ -75,7 +75,7 @@ agent from proposing (and after approval, applying) edits in the same turn.
    persisted by the session store.
 
 7. Exiting plan mode (typing `/plan` again) resumes exactly the
-   approval-gated behavior Lisa already has: every edit and command proposes
+   approval-gated behavior Likha already has: every edit and command proposes
    to the user as before, there is no blanket permission and no backdoor
    write path (FR-06/07/08 unchanged). The toggle works in both directions
    while no run is active; while an agent run is executing or an approval is
@@ -90,7 +90,7 @@ agent from proposing (and after approval, applying) edits in the same turn.
 ## Acceptance criteria
 
 - [ ] `/plan` toggles read-only mode on then off within the same session;
-      a new or resumed Lisa session is never still in plan mode.
+      a new or resumed Likha session is never still in plan mode.
 - [ ] While a session is in plan mode, the status footer carries a mode
       marker on every rendered frame, including during streaming, reviews,
       and paging.

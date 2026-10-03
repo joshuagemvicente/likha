@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"lisa/internal/model"
-	"lisa/internal/repository"
+	"likha/internal/model"
+	"likha/internal/repository"
 )
 
 // An actual model-protocol tool request enters the agent loop; approval is

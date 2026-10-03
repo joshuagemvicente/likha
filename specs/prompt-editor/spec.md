@@ -7,7 +7,7 @@ amends FR-14 (mouse no longer captured; keys page).
 
 ## Context
 
-Lisa's prompt input is currently append-only text: `m.input []rune` with a
+Likha's prompt input is currently append-only text: `m.input []rune` with a
 backspace that trims the tail, no cursor, and no paste semantics beyond
 key-by-key runes. Users of agent TUIs (OpenCode, OMP, Claude Code) expect
 readline-style editing, terminal-native text selection for copy/paste, and
@@ -24,11 +24,11 @@ image pasting. Two constraints shape the design:
 
 - **Image source:** clipboard paste only (Ctrl+V). Image file paths typed in
   the prompt are NOT auto-detected or auto-attached.
-- **Selection UX:** native terminal selection — Lisa releases mouse capture so
+- **Selection UX:** native terminal selection — Likha releases mouse capture so
   the terminal handles highlight and copy itself. No in-app selection, no
   in-app copy bindings; Ctrl+C keeps its cancel/quit meaning.
 - **Vision scope:** attachments are allowed for every provider; when a
-  provider/model rejects images, Lisa surfaces a clear error suggesting a
+  provider/model rejects images, Likha surfaces a clear error suggesting a
   text-only retry. No capability matrix to maintain.
 - **Image history:** image data stays in the session history and is resent
   with every turn (OpenCode-style). Token cost grows with each image; README
@@ -47,7 +47,7 @@ image pasting. Two constraints shape the design:
   whitespace counts as one word boundary — deleting a word plus its preceding
   spaces removes them in one keystroke, as a native terminal does.
 - Ctrl+Y yanks the most recent kill; the kill ring keeps the last eight kills.
-- Highlighting text for copy/paste is the terminal's job: Lisa releases mouse
+- Highlighting text for copy/paste is the terminal's job: Likha releases mouse
   capture, so dragging selects, and the terminal's copy/paste commands work
   (Cmd+C/Cmd+V on macOS, Ctrl+Shift+C/V on Linux).
 - Bracketed-paste text (multi-line or large) is inserted at the cursor as one
@@ -56,7 +56,7 @@ image pasting. Two constraints shape the design:
 
 ### Image attachments (FR-18)
 
-- Ctrl+V pastes the clipboard: if it holds an image, Lisa inserts a
+- Ctrl+V pastes the clipboard: if it holds an image, Likha inserts a
   `[Image #N]` token into the draft and shows a visible confirmation; the
   token is a single editing unit — backspace or any word-kill removes the
   token and its image together.

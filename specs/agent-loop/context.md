@@ -26,7 +26,7 @@ Code paths this feature touches, validated 2026-10-01.
   continue-instruction is appended mid-turn.
 - `internal/tui/tui.go` — event switch around `:470-540`. Unknown event
   kinds are ignored by the switch; the new `notice` kind needs a case
-  that appends a `Lisa`-role entry without ending the turn (the existing
+  that appends a `Likha`-role entry without ending the turn (the existing
   `error` case at `:511-535` is the shape to differ from: it clears
   `working`).
 - `internal/session/session.go` — persisted history snapshot comes from
@@ -36,5 +36,5 @@ Code paths this feature touches, validated 2026-10-01.
   implements only its tool-contract section; update its "Amend FR-03 or
   add FR-17" note to point at FR-19 to keep the two specs consistent.
 
-Precedent for the notice UX: the `Lisa`-role entries already used for
+Precedent for the notice UX: the `Likha`-role entries already used for
 cancellation (`tui.go:532`).

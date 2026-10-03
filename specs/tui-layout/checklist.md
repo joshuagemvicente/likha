@@ -10,7 +10,7 @@ gate for phase 3. Phase 2's string-viewport invariant suite is green as of
 
 ## Phase 1a — header declutter + mini logo
 - [x] No top header at ≥56 columns; page 1 opens with the logo block only.
-- [x] Small Lisa mark renders at the bottom-right of the status bar and
+- [x] Small Likha mark renders at the bottom-right of the status bar and
       retires before identity information clips. *(Verified against
       rendered string output; an actual terminal cursor position is a
       walkthrough item.)*

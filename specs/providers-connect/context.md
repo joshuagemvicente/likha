@@ -12,7 +12,7 @@ Code paths this feature touches. The behavior in spec.md is the contract.
 - `internal/tui/dialog.go` — `confirmDialog` `dialogProviders` branch (row press route: goes before auth, never
   switch); `dialogKind`/keys (none new); `commandHelp` text mention.
 - `internal/tui/keyfile helpers` — `providers.StoredKey` / `ReadCredentials` (the new auth-state view names its
-  source: state-dir store vs env `LISA_<PROVIDER>_API_KEY`).
+  source: state-dir store vs env `LIKHA_<PROVIDER>_API_KEY`).
 - `internal/model` — `model.New` peer-URL check helper reuse: client construction only for the connection check
   (dry lines never become caps to the live UI); the live client is never passed until `/models` selects a provider.
 - `internal/tui/providers_test.go` — switch-path tests being converted: activation becomes auth checks (row stays,

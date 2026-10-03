@@ -1,4 +1,4 @@
-# Checklist: Likha web UI (`lisa --serve`)
+# Checklist: Likha web UI (`likha --serve`)
 
 Observable outcomes; unchecked until seen. Status mirrors
 [spec.md](spec.md) acceptance criteria and the milestone gates in
@@ -16,9 +16,9 @@ must hold before any web code is written.
 - [ ] `internal/runtime` does not import `bubbletea`, `lipgloss`, `tui`,
       or `server`; `go test ./...` and `go test -race ./...` pass.
 
-## M2 — `lisa --serve` MVP
+## M2 — `likha --serve` MVP
 
-- [ ] `lisa --serve` prints a loopback URL with a pairing token; opening it
+- [ ] `likha --serve` prints a loopback URL with a pairing token; opening it
       pairs the browser; the token is single-use; the cookie dies with the
       server.
 - [ ] A non-loopback `--host` without a token is refused; with a token it
@@ -63,7 +63,7 @@ must hold before any web code is written.
 
 ## M4 — attach mode and polish
 
-- [ ] `lisa --web` shows the live session in both the terminal and the
+- [ ] `likha --web` shows the live session in both the terminal and the
       browser; streaming appears in both; steering and approvals from
       either surface land in the other.
 - [ ] `export.html` opens offline and reproduces the transcript.

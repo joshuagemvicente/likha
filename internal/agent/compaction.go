@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"lisa/internal/model"
+	"likha/internal/model"
 )
 
 // compactPrefix is prepended to the summary so a later model turn knows the

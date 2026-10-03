@@ -4,7 +4,7 @@
 
 ## Context
 
-After the user presses Enter, Lisa enters the working state but shows no
+After the user presses Enter, Likha enters the working state but shows no
 transcript row until the first provider event arrives. `startTurn`
 (`internal/tui/tui.go`) appends the `You:` prompt, sets
 `m.status = "Waiting for model"` and `m.working = true`, then waits on the
@@ -28,7 +28,7 @@ Reference TUIs all fill this gap with an explicit working affordance:
   (`src/components/Spinner/SpinnerAnimationRow.tsx`: 50 ms clock, 120 ms
   glyph step; `code.claude.com/docs/en/settings-reference`).
 
-Lisa already has the pieces this builds on: theme roles (`internal/ui/theme.go`),
+Likha already has the pieces this builds on: theme roles (`internal/ui/theme.go`),
 ASCII/Nerd glyph sets (`internal/ui/glyphs.go`), a caret blink tick
 (`internal/tui/scroll.go`), per-role transcript bands (`internal/tui/view.go`
 `rebuild()`), phase status strings (`internal/tui/tui.go`, `status_line.go`),
@@ -45,7 +45,7 @@ and per-run furniture that is never persisted (`Logo`, `Queued` in
    sweeps gently across a short label plus a small changing ASCII mark. No
    large banner, no multi-color noise.
 3. **Wording: generic activity.** The placeholder says `Working…` while
-   waiting. It never claims to be reasoning and never implies Lisa can reveal
+   waiting. It never claims to be reasoning and never implies Likha can reveal
    private chain-of-thought. Provider-streamed `Reasoning` output stays
    exactly what it is today: actual streamed tokens, rendered muted.
 
@@ -56,7 +56,7 @@ and per-run furniture that is never persisted (`Logo`, `Queued` in
    immediately under the `You:` prompt: an ASCII spinner cell plus the fixed
    label `Working…`. It also appears when a compaction run starts
    (`Compacting…` status), under the last transcript row.
-2. **The row animates while Lisa is working and no real content exists.**
+2. **The row animates while Likha is working and no real content exists.**
    The spinner cycles fixed-width ASCII frames (`|`, `/`, `-`, `\`); one
    accent cell sweeps across the label text left-to-right and wraps. Text
    never changes, never reflows, never grows beyond one wrapped line.
@@ -98,7 +98,7 @@ and per-run furniture that is never persisted (`Logo`, `Queued` in
 ## Scope boundaries
 
 - This is a display and timing feature, not a reasoning feature. It does not
-  change which messages Lisa sends, provider selection, model output limits,
+  change which messages Likha sends, provider selection, model output limits,
   tool dispatch, approval gating, session persistence semantics, or context
   accounting.
 - No rotating phrases, no configurable verbs, no tips, no elapsed-time or
@@ -113,7 +113,7 @@ and per-run furniture that is never persisted (`Logo`, `Queued` in
 
 ## Functional changes (v1-spec.md)
 
-None requested: the reliability bullet "Show whether Lisa is waiting for the
+None requested: the reliability bullet "Show whether Likha is waiting for the
 model, executing a tool, or waiting for the user" (§5) and the TUI contract's
 conversation/activity/review/input distinction (§7) already describe this.
 This feature implements them; if implementation reveals an FR wording gap,
@@ -123,7 +123,7 @@ v1-spec is amended first and the checklist mirrors it.
 
 1. **Reduced-motion / animations toggle** — deferred. Claude Code
    (`prefersReducedMotion`) and OpenCode (`animations_enabled`) both ship
-   one. Lisa has no such setting today; this pass ships the static-text
+   one. Likha has no such setting today; this pass ships the static-text
    legibility guarantee instead and records the toggle as the follow-up if
    asked.
 2. **Compaction label** — the activity row uses the same `Working…` label

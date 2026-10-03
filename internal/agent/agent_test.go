@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"lisa/internal/model"
-	"lisa/internal/repository"
+	"likha/internal/model"
+	"likha/internal/repository"
 )
 
 // serveModels answers the connection-check path used by client.EnsureConnected.

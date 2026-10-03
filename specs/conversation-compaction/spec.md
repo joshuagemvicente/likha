@@ -4,7 +4,7 @@
 
 ## Context
 
-Lisa's sessions are repository-associated SQLite stores ([v1-spec.md](../v1-spec.md)
+Likha's sessions are repository-associated SQLite stores ([v1-spec.md](../v1-spec.md)
 FR-10) and every turn resends the full history to the provider
 (`internal/model/client.go` `Stream`). Long sessions therefore grow without
 bound: tool results, diffs, and command output accumulate until the request
@@ -15,7 +15,7 @@ session.
 Terminal coding agents solve this with explicit compaction: Claude Code's
 `/compact` summarizes the conversation so far and lets the same task continue
 under the summary; auto-compaction near the context limit is the follow-on
-behavior. This feature brings that escape hatch to Lisa as a plain model call —
+behavior. This feature brings that escape hatch to Likha as a plain model call —
 one summarize turn, no agent pipeline (v1 §2 keeps subagents and concurrency out
 of scope).
 
@@ -27,7 +27,7 @@ listed so implementation cannot re-litigate them.
 - **`/compact` is a reserved slash command** (FR-03): intercepted in the TUI,
   acts on the application, and is never sent to the model as a prompt. FR-03's
   reserved-command list was amended to include it.
-- **Compaction is a single plain model call.** Lisa sends the existing history
+- **Compaction is a single plain model call.** Likha sends the existing history
   plus one summarize instruction, takes the streamed summary text back, and
   stores it. No subagents, no concurrency, no second loop.
 - **The summary replaces prior turns in the live history.** After compaction the
@@ -38,7 +38,7 @@ listed so implementation cannot re-litigate them.
   replacement. The last user turn is part of "continue from here", not part of
   the summarized past.
 - **The TUI shows a clear compaction marker entry.** A visible entry (distinct
-  role line, e.g. a "Lisa" system-style note) marks where compaction happened;
+  role line, e.g. a "Likha" system-style note) marks where compaction happened;
   the summary text itself is inspectable through the normal paging behavior
   (FR-14) — no special viewer, no silently clipped content.
 - **Compaction is persisted.** The compacted history and the marker entry are
@@ -58,7 +58,7 @@ listed so implementation cannot re-litigate them.
 ## User-visible behavior
 
 1. The user types `/compact` (optionally `/compact <focus instructions>`).
-   Lisa makes one summarize call over the conversation so far, then replaces the
+   Likha makes one summarize call over the conversation so far, then replaces the
    summarized turns with the summary. A compaction marker entry appears in the
    conversation view and the summary is readable via normal paging.
 2. Focus instructions, when given, steer what the summary emphasizes; they are

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"lisa/internal/session"
+	"likha/internal/session"
 )
 
 func TestResolveRootFollowsSelectedRepository(t *testing.T) {
@@ -56,9 +56,9 @@ func TestRunRejectsInvalidRepository(t *testing.T) {
 }
 
 func TestRunReportsMissingModel(t *testing.T) {
-	t.Setenv("LISA_MODEL", "")
-	t.Setenv("LISA_ENDPOINT", "")
-	t.Setenv("LISA_STATE_DIR", t.TempDir())
+	t.Setenv("LIKHA_MODEL", "")
+	t.Setenv("LIKHA_ENDPOINT", "")
+	t.Setenv("LIKHA_STATE_DIR", t.TempDir())
 	var stdout, stderr bytes.Buffer
 	// A closed port keeps the test independent of any real model server; with
 	// no provider named, the custom endpoint's discovery fails and names the
@@ -72,10 +72,10 @@ func TestRunReportsMissingModel(t *testing.T) {
 }
 
 func TestRunWithoutConfigurationExplainsSetup(t *testing.T) {
-	for _, key := range []string{"LISA_MODEL", "LISA_PROVIDER", "LISA_API_KEY", "LISA_ENDPOINT"} {
+	for _, key := range []string{"LIKHA_MODEL", "LIKHA_PROVIDER", "LIKHA_API_KEY", "LIKHA_ENDPOINT"} {
 		t.Setenv(key, "")
 	}
-	t.Setenv("LISA_STATE_DIR", t.TempDir())
+	t.Setenv("LIKHA_STATE_DIR", t.TempDir())
 	var stdout, stderr bytes.Buffer
 	if code := Run([]string{t.TempDir()}, &stdout, &stderr); code == 0 {
 		t.Fatal("started without provider configuration in a non-interactive terminal")
@@ -90,10 +90,10 @@ func TestRunHelpDoesNotRequireRepository(t *testing.T) {
 	if code := Run([]string{"--help"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("help failed: exit code = %d, stderr = %q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Usage: lisa") || stderr.Len() != 0 {
+	if !strings.Contains(stdout.String(), "Usage: likha") || stderr.Len() != 0 {
 		t.Fatalf("stdout = %q, stderr = %q", stdout.String(), stderr.String())
 	}
-	for _, expected := range []string{"--provider", "--api-key", "--model", "--endpoint", "--sessions", "--resume", "--version", "LISA_STATE_DIR", "Providers", "BYOK"} {
+	for _, expected := range []string{"--provider", "--api-key", "--model", "--endpoint", "--sessions", "--resume", "--version", "LIKHA_STATE_DIR", "Providers", "BYOK"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Fatalf("help is missing %q: %q", expected, stdout.String())
 		}
@@ -102,8 +102,8 @@ func TestRunHelpDoesNotRequireRepository(t *testing.T) {
 
 func TestSessionListWorksWithoutModelOrTerminal(t *testing.T) {
 	root, base := t.TempDir(), t.TempDir()
-	t.Setenv("LISA_STATE_DIR", base)
-	t.Setenv("LISA_MODEL", "")
+	t.Setenv("LIKHA_STATE_DIR", base)
+	t.Setenv("LIKHA_MODEL", "")
 	store, err := session.Open(base, root)
 	if err != nil {
 		t.Fatal(err)

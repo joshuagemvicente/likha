@@ -8,7 +8,7 @@ Coding agents behave noticeably better when the conversation already knows the
 repository's build commands, layout, and conventions. Claude Code's `/init`
 established the pattern: the agent surveys the repository and drafts a context
 file (there, `CLAUDE.md`; here, the neutral `AGENTS.md` name) describing build
-and test commands, code layout, project conventions, and gotchas. Lisa sessions
+and test commands, code layout, project conventions, and gotchas. Likha sessions
 are repo-scoped (v1-spec §2: one selected repository), and an approved-write
 flow already exists (FR-06/FR-07), so a per-repository context file compounds
 value: it is created once, and other agent features can consume it later.
@@ -16,7 +16,7 @@ value: it is created once, and other agent features can consume it later.
 The user-visible behavior of this feature is only the *generation* step: the
 `/init` command starts an agent turn whose job is to survey the repository and
 draft `AGENTS.md`. Reading, reusing the normal edit approval, and normal
-session persistence are Lisa behaviors this spec must not change.
+session persistence are Likha behaviors this spec must not change.
 
 ## Relation to v1-spec.md
 
@@ -66,7 +66,7 @@ session persistence are Lisa behaviors this spec must not change.
 
 ## Open decisions (resolve before implementation)
 
-1. **Auto-injection into later sessions.** Does Lisa read `AGENTS.md` at
+1. **Auto-injection into later sessions.** Does Likha read `AGENTS.md` at
    session start and append its content as part of system context? This is
    explicit in scope only if a later feature decides it; the tradeoffs are
    real: token cost on every turn, staleness when `AGENTS.md` drifts from the
@@ -79,7 +79,7 @@ session persistence are Lisa behaviors this spec must not change.
    existing file either way. Decision needed; no behavior is decided here.
 3. **Prompt shape.** Whether the survey is one turn (survey + draft + proposal)
    or a staged flow the user steers. Recommendation: single turn, cancel/
-   reject-stoppable, matching Lisa's turn model.
+   reject-stoppable, matching Likha's turn model.
 
 ## Acceptance criteria
 

@@ -9,9 +9,9 @@ import (
 )
 
 func TestStartupWithoutConfigurationExplainsSetup(t *testing.T) {
-	cmd := exec.Command("go", "run", "./cmd/lisa", t.TempDir())
+	cmd := exec.Command("go", "run", "./cmd/likha", t.TempDir())
 	cmd.Dir = filepath.Join("..", "..")
-	cmd.Env = append(os.Environ(), "LISA_MODEL=", "LISA_PROVIDER=", "LISA_API_KEY=", "LISA_ENDPOINT=", "LISA_STATE_DIR="+t.TempDir())
+	cmd.Env = append(os.Environ(), "LIKHA_MODEL=", "LIKHA_PROVIDER=", "LIKHA_API_KEY=", "LIKHA_ENDPOINT=", "LIKHA_STATE_DIR="+t.TempDir())
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("CLI started without provider configuration: %q", out)
@@ -24,9 +24,9 @@ func TestStartupWithoutConfigurationExplainsSetup(t *testing.T) {
 func TestStartupCommandExplainsMissingModel(t *testing.T) {
 	// Point discovery at a closed port so the test does not depend on whether
 	// a real model server happens to be running.
-	cmd := exec.Command("go", "run", "./cmd/lisa", "--endpoint", "http://127.0.0.1:9/v1", t.TempDir())
+	cmd := exec.Command("go", "run", "./cmd/likha", "--endpoint", "http://127.0.0.1:9/v1", t.TempDir())
 	cmd.Dir = filepath.Join("..", "..")
-	cmd.Env = append(os.Environ(), "LISA_MODEL=", "LISA_ENDPOINT=", "LISA_STATE_DIR="+t.TempDir())
+	cmd.Env = append(os.Environ(), "LIKHA_MODEL=", "LIKHA_ENDPOINT=", "LIKHA_STATE_DIR="+t.TempDir())
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("CLI started without model: %q", out)
@@ -37,9 +37,9 @@ func TestStartupCommandExplainsMissingModel(t *testing.T) {
 }
 
 func TestStartupCommandRequiresProviderKey(t *testing.T) {
-	cmd := exec.Command("go", "run", "./cmd/lisa", "--provider", "openrouter", "--model", "anthropic/claude-3.5-sonnet", t.TempDir())
+	cmd := exec.Command("go", "run", "./cmd/likha", "--provider", "openrouter", "--model", "anthropic/claude-3.5-sonnet", t.TempDir())
 	cmd.Dir = filepath.Join("..", "..")
-	cmd.Env = append(os.Environ(), "LISA_API_KEY=", "LISA_STATE_DIR="+t.TempDir())
+	cmd.Env = append(os.Environ(), "LIKHA_API_KEY=", "LIKHA_STATE_DIR="+t.TempDir())
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("CLI started without provider key: %q", out)
@@ -50,9 +50,9 @@ func TestStartupCommandRequiresProviderKey(t *testing.T) {
 }
 
 func TestStartupCommandRejectsUnknownProvider(t *testing.T) {
-	cmd := exec.Command("go", "run", "./cmd/lisa", "--provider", "not-a-provider", "--model", "m", t.TempDir())
+	cmd := exec.Command("go", "run", "./cmd/likha", "--provider", "not-a-provider", "--model", "m", t.TempDir())
 	cmd.Dir = filepath.Join("..", "..")
-	cmd.Env = append(os.Environ(), "LISA_STATE_DIR="+t.TempDir())
+	cmd.Env = append(os.Environ(), "LIKHA_STATE_DIR="+t.TempDir())
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("CLI started with unknown provider: %q", out)

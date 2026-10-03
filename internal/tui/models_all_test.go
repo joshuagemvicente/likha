@@ -10,9 +10,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/model"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 // fakeProviderRow registers a canned model list for one provider row: the
@@ -432,7 +432,7 @@ func TestAllModelsCrossProviderSwitch(t *testing.T) {
 		t.Fatalf("stored pair: %+v %v", cfg, err)
 	}
 	last := m.entries[len(m.entries)-1]
-	if last.role != "Lisa" || !strings.Contains(last.content, "router-a") || !strings.Contains(last.content, "OpenRouter") {
+	if last.role != "Likha" || !strings.Contains(last.content, "router-a") || !strings.Contains(last.content, "OpenRouter") {
 		t.Fatalf("switch entry = %+v", last)
 	}
 }

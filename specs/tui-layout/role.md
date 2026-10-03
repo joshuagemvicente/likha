@@ -18,7 +18,7 @@ executed under it on 2026-09-30; phases 2–3 pick the same stance up).
   numbers, no stale zeros.
 - Height stability outranks density: optional segments retire left-side
   first, identity (`provider · model`) never retires entirely, and the
-  Lisa mark is the first thing dropped under width pressure.
+  Likha mark is the first thing dropped under width pressure.
 - No new Go dependencies; the naming and pricing catalogs live beside the
   existing `windows.go` table and follow its matching and documentation
   conventions.

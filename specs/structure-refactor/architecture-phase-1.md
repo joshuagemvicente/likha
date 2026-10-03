@@ -12,26 +12,26 @@ removed one item from Phase 1 (§6). Developer-friendly and user-friendly to a
 
 ## 1. Baseline topology (verified by grep, 2026-09-30)
 
-Module `lisa`. Consumers of the moving pieces:
+Module `likha`. Consumers of the moving pieces:
 
 | Symbol | Files (exact) |
 |---|---|
-| `lisaui "lisa/ui"` import | `internal/app/run.go:21`, `internal/app/tui.go:23`, `internal/app/status_markers_test.go:10`, `internal/app/tui_muted_tools_test.go:10` |
-| `lisaui.*` call sites | `run.go:222`; `tui.go:76-77,184,248-252,412,553,558,898,914,929,1845`; `status_markers_test.go:34-35,63-64`; `tui_muted_tools_test.go:89-90` |
+| `likhaui "likha/ui"` import | `internal/app/run.go:21`, `internal/app/tui.go:23`, `internal/app/status_markers_test.go:10`, `internal/app/tui_muted_tools_test.go:10` |
+| `likhaui.*` call sites | `run.go:222`; `tui.go:76-77,184,248-252,412,553,558,898,914,929,1845`; `status_markers_test.go:34-35,63-64`; `tui_muted_tools_test.go:89-90` |
 | `internal/skills` importers | none (zero results repo-wide, `.cache` excluded) |
 | `statusbar_test.go` (531 lines, 14 tests) | subjects are `tui.go` `ui`-methods (`m.header`, `m.statusTitle`, `m.statusLineRows`, `m.spendSegment`, `m.startTurn`, …), not status files |
-| Doc references to moving paths | `specs/update-notification/banner.md:124` (`` `lisa/ui` ``), `specs/tui-layout/context.md:17` (`` `internal/app/statusbar_test.go` ``), `specs/tui-layout/context.md:18` (`` `ui/theme.go` ``) |
+| Doc references to moving paths | `specs/update-notification/banner.md:124` (`` `likha/ui` ``), `specs/tui-layout/context.md:17` (`` `internal/app/statusbar_test.go` ``), `specs/tui-layout/context.md:18` (`` `ui/theme.go` ``) |
 
 ```mermaid
 flowchart LR
     subgraph before["Before Phase 1"]
-        cmd1["cmd/lisa"] --> app1["internal/app"]
+        cmd1["cmd/likha"] --> app1["internal/app"]
         app1 --> leaves1["actions · mcp · model\nrepository · session · update"]
         app1 -.-> ui1["ui/ — repo root"]
         skills1["internal/skills\n4-line placeholder"]
     end
     subgraph after["After Phase 1"]
-        cmd2["cmd/lisa"] --> app2["internal/app"]
+        cmd2["cmd/likha"] --> app2["internal/app"]
         app2 --> leaves2["actions · mcp · model\nrepository · session · update"]
         app2 --> ui2["internal/ui"]
         skills2["internal/skills\nplaceholder, RETAINED — §6"]
@@ -42,9 +42,9 @@ flowchart LR
 
 | # | Change | Files touched | Type |
 |---|---|---|---|
-| P1-1 | `git mv ui internal/ui` (`glyphs.go` 32 lines, `theme.go` 147 lines + package doc); rewrite the import line in the 4 consumer files to `"lisa/internal/ui"`, dropping the `lisaui` alias (collision pre-verified: no bare `ui.` symbol in scope) | 2 moved, 4 import lines | move |
+| P1-1 | `git mv ui internal/ui` (`glyphs.go` 32 lines, `theme.go` 147 lines + package doc); rewrite the import line in the 4 consumer files to `"likha/internal/ui"`, dropping the `likhaui` alias (collision pre-verified: no bare `ui.` symbol in scope) | 2 moved, 4 import lines | move |
 | P1-2 | `git mv internal/app/statusbar_test.go internal/app/status_view_test.go`; all 14 test function names byte-identical | 1 renamed | move |
-| P1-3 | Doc hygiene for the two moves: `banner.md:124` `` `lisa/ui` `` → `` `lisa/internal/ui` ``; `tui-layout/context.md:17` `statusbar_test.go` → `status_view_test.go`; `tui-layout/context.md:18` `ui/theme.go` → `internal/ui/theme.go` | 3 lines in 2 docs | edit |
+| P1-3 | Doc hygiene for the two moves: `banner.md:124` `` `likha/ui` `` → `` `likha/internal/ui` ``; `tui-layout/context.md:17` `statusbar_test.go` → `status_view_test.go`; `tui-layout/context.md:18` `ui/theme.go` → `internal/ui/theme.go` | 3 lines in 2 docs | edit |
 | — | `internal/skills` deletion | **REMOVED from scope — see §6** | — |
 | — | `tui_m2_keys_test.go` rename | **deferred to Phase 2** (owning feature `tool-rendering-terminal-keys` is `in progress`; rename rides with its checklist as originally specified) | — |
 
@@ -59,7 +59,7 @@ flowchart LR
 - **The four consumers.** `run.go` (theme-name validation at startup),
   `tui.go` (theme/glyph state + resolution), `status_markers_test.go` and
   `tui_muted_tools_test.go` (theme × glyph matrix assertions for FR-15).
-  All four change by exactly one import line each; every `lisaui.X` call
+  All four change by exactly one import line each; every `likhaui.X` call
   site becomes `ui.X` with identical resolution.
 - **`internal/skills` (retained).** 4-line inert placeholder. It is the
   explicitly named anchor for two draft specs (§6); its cost is 4 lines and
@@ -67,7 +67,7 @@ flowchart LR
   architecture decision.
 - **`internal/app/status_view_test.go` (after P1-2).** The 14 view-behavior
   tests (`TestHeaderCollapsesToFiftySixColumns`, `TestLogoEntryIsPureLogo`,
-  `TestLisaMarkPlacementAndRetirement`, `TestContextSegmentFormats`, …)
+  `TestLikhaMarkPlacementAndRetirement`, `TestContextSegmentFormats`, …)
   finally named after what they exercise. `status_markers_test.go` (3
   marker/theme-contract tests) keeps its accurate name; its import line
   changes per P1-1 only.
@@ -92,7 +92,7 @@ here.
 | `text-transforms/context.md` (transforms "load through" the skills placeholder; "must not create a parallel loader") | Placeholder path preserved; no loader created | ✅ comply |
 | `slash-commands/spec.md` + `role.md` (`/skills` placeholder, "Do not implement `/skills`") | Reservation untouched, still inert | ✅ comply |
 | `tui-layout/context.md` (paths to `statusbar_test.go`, `ui/theme.go`) | P1-3 keeps both references resolvable | ✅ comply |
-| `update-notification/banner.md:124` (`` `lisa/ui` `` roles) | P1-3 keeps the reference resolvable | ✅ comply |
+| `update-notification/banner.md:124` (`` `likha/ui` `` roles) | P1-3 keeps the reference resolvable | ✅ comply |
 | `tool-rendering-terminal-keys` (`in progress`; owns `tui_muted_tools_test.go`, `tui_m2_keys_test.go`) | Muted-tools test changes by one import line only; M2 file untouched; its checklist stays the authority | ✅ comply |
 | `v1-spec.md` FR-03/04/06/07/08/10/12/14/15/16/17 | No FR touched; FR-15 marker suites and `approval_test.go` are the oracles | ✅ comply |
 | `feature-test-plan.md` smoke | Behavior identical ⇒ smoke steps valid unchanged | ✅ comply |
@@ -152,8 +152,8 @@ here, not hidden.
   `go test -race ./...`, `gofmt -l .`, `go list ./...`.
 - **Per change:** `go build ./...` green after P1-1, after P1-2.
 - **Exit gate:** full baseline suite green + `gofmt -l` clean +
-  `grep -rn 'lisa/ui' --include='*.go' .` empty +
-  `go list ./...` shows `lisa/internal/ui`, no `lisa/ui` +
+  `grep -rn 'likha/ui' --include='*.go' .` empty +
+  `go list ./...` shows `likha/internal/ui`, no `likha/ui` +
   `git diff` move-detection audit shows moves + 4 import lines + 3 doc
   lines, zero function-body changes. Only then `implemented (local)`.
 
@@ -165,7 +165,7 @@ here, not hidden.
 2. `tasks.md` task 3 → struck; replaced by: "Verify `internal/skills` has
    zero importers and leave it in place (`go list ./...` still shows it)."
 3. `checklist.md` skills item → replaced by: "`go list ./...` still shows
-   `lisa/internal/skills`; `/skills` reservation behavior unchanged."
+   `likha/internal/skills`; `/skills` reservation behavior unchanged."
 4. `checklist.md` Phase 1 gate → append P1-3 doc-line updates to the diff
    audit (moves + 4 import lines + 3 doc lines).
 

@@ -11,9 +11,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	lisaui "lisa/internal/ui"
+	"likha/internal/model"
+	"likha/internal/providers"
+	likhaui "likha/internal/ui"
 )
 
 // statusSegment is measured as plain terminal cells before any theme styling.
@@ -366,11 +366,11 @@ func (m *ui) statusLeft(maxWidth int) []statusSegment {
 	return parts
 }
 
-// statusMarkWidth is the cells the bottom-right Lisa mark claims, including
+// statusMarkWidth is the cells the bottom-right Likha mark claims, including
 // its two-space gap; zero below the wordmark's 70-column threshold.
 func (m *ui) statusMarkWidth() int {
 	if m.width >= 70 {
-		return runewidth.StringWidth("Lisa") + 2
+		return runewidth.StringWidth("Likha") + 2
 	}
 	return 0
 }
@@ -385,7 +385,7 @@ func (m *ui) renderStatusCanvas(row string) string {
 	// Pad to full width first (plain spaces), then paint the canvas behind
 	// the whole row: role colors survive because PaintRow re-applies the bg
 	// around each SGR span instead of re-styling text.
-	return lisaui.PaintRow(row, m.width, m.theme.BaseBG())
+	return likhaui.PaintRow(row, m.width, m.theme.BaseBG())
 }
 
 func (m *ui) renderStatusCells(left []statusSegment, right string, warning bool) string {
@@ -400,7 +400,7 @@ func (m *ui) renderStatusCells(left []statusSegment, right string, warning bool)
 	if warning {
 		rightStyle = m.theme.Warning
 	}
-	// The Lisa mark lives at the far right END of the row, after the page or
+	// The Likha mark lives at the far right END of the row, after the page or
 	// mode hint (spec tui-layout 1a.3). It renders only at 70 columns and up
 	// and retires first under width pressure: callers already reserve its
 	// cells before hint downgrades and optional segments, and here it yields
@@ -413,7 +413,7 @@ func (m *ui) renderStatusCells(left []statusSegment, right string, warning bool)
 				b.WriteString(rightStyle.Render(right))
 			}
 			b.WriteString(strings.Repeat(" ", 2))
-			b.WriteString(m.theme.Title.Render("Lisa"))
+			b.WriteString(m.theme.Title.Render("Likha"))
 			return b.String()
 		}
 	}
@@ -444,7 +444,7 @@ func (m *ui) statusLineRows(page, pages int) []string {
 		}
 		return []string{m.renderStatusRow(left, "", false), m.renderStatusRow(nil, fitHint(right, m.width), m.pending != nil)}
 	}
-	// Reserve the right-hand controls first, then the Lisa mark's cells: the
+	// Reserve the right-hand controls first, then the Likha mark's cells: the
 	// mark retires before any hint downgrade and before optional segments
 	// retire, so every width computation below happens inside the
 	// mark-reserving budget. A rate-window summary is retained before

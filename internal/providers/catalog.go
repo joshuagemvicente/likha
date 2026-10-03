@@ -1,7 +1,7 @@
 package providers
 
 import (
-	"lisa/internal/model"
+	"likha/internal/model"
 )
 
 // SwitchModelID resolves the model a switch lands on: the provider's

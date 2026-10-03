@@ -12,7 +12,7 @@ Code paths and precedent this feature touches. No code changes yet
   refusals return as failed tool results (FR-09 reporting) instead of
   reaching `requestApproval`. Note the history/system message construction
   in the same file (`history` slice built around line 43-45): that is where
-  the read-only system message is injected while the mode is active — Lisa
+  the read-only system message is injected while the mode is active — Likha
   currently sends no system role message, so plan mode introduces it.
 - `internal/app/tui.go` — status line state (field `status`, rendered in
   `mainView` around line 1300 as `fmt.Sprintf("%s | Page %d/%d", ...)`);
@@ -43,7 +43,7 @@ Code paths and precedent this feature touches. No code changes yet
   first-call approval then session trust — the reason plan mode's MCP
   stance is a decision rather than a given).
 - Precedent: Claude Code plan mode (Shift+Tab) — a read-only survey mode
-  that presents a plan for approval before any mutation. Lisa's version is
+  that presents a plan for approval before any mutation. Likha's version is
   a per-session toggle plus a gate on dispatched tool calls, not new
   execution machinery.
 - `specs/slash-commands/` — the existing reserved-command extension point

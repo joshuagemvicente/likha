@@ -18,10 +18,10 @@ import (
 )
 
 const (
-	defaultEndpoint = "https://api.github.com/repos/gem/lisa/releases/latest"
+	defaultEndpoint = "https://api.github.com/repos/gem/likha/releases/latest"
 	// apiOverrideEnv lets users point the check at a different endpoint,
 	// mirroring the override the installer supports.
-	apiOverrideEnv = "LISA_UPDATE_API"
+	apiOverrideEnv = "LIKHA_UPDATE_API"
 )
 
 // endpointClient bounds every request independently of the caller's context so

@@ -3,10 +3,10 @@ package tui
 import (
 	"testing"
 
-	"lisa/internal/agent"
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/agent"
+	"likha/internal/model"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 func TestContextWindowResolutionUsesOverrideMetadataThenCatalog(t *testing.T) {

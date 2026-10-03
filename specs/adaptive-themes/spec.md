@@ -21,7 +21,7 @@ report. Both are by-construction, not bugs:
    `Enter → confirmDialog → applyTheme`. Highlighting Nord vs Habamax shows
    nothing until commit.
 2. **Nowhere for the theme to show.** `rebuild()` renders `You`/`Assistant`/
-   `Lisa` entries in a bare `lipgloss.NewStyle()` (`tui.go:1697-1708`); only
+   `Likha` entries in a bare `lipgloss.NewStyle()` (`tui.go:1697-1708`); only
    `Reasoning`/`Tool` (Muted) and `Error` carry theme color, per the
    themes-spec "prose stays uncolored" rule. And no role anywhere paints a
    background — every surface is the terminal default, so there is no
@@ -90,7 +90,7 @@ restores.
   (activity and result share the band — distinction stays in prefix text);
   `Reasoning` → `Muted` fg, **no band** (quietest layer stays flat);
   `Error` → `Error` fg on base (failures signal by fg, not band);
-  `Lisa`/system + logo → existing styles on `BgBase`.
+  `Likha`/system + logo → existing styles on `BgBase`.
 - Bands are full-width for free: `mainView` already renders
   `style.Render(fit(line, width))`, and foreground on padding spaces is
   invisible while background paints the pad.

@@ -17,7 +17,7 @@ type Provider struct {
 	Auth          AuthKind // authentication kind; zero value is a user-supplied API key
 }
 
-// AuthKind selects how Lisa authenticates to a provider. The zero value is
+// AuthKind selects how Likha authenticates to a provider. The zero value is
 // the classic BYOK key so every existing provider row is unchanged.
 type AuthKind uint8
 
@@ -32,20 +32,20 @@ const (
 
 // Providers is the predefined hosted-provider list. Rows without a completed
 // admission probe are pending-probe and must not be described as accepted.
-// Lisa hosts no models and does not bundle a local inference server.
+// Likha hosts no models and does not bundle a local inference server.
 var Providers = []Provider{
-	{Name: "openai", DisplayName: "OpenAI", BaseURL: "https://api.openai.com/v1", KeyEnv: "LISA_OPENAI_API_KEY", DefaultModel: "gpt-4o-mini", Hosted: true},
-	{Name: "openrouter", DisplayName: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", KeyEnv: "LISA_OPENROUTER_API_KEY", DefaultModel: "openai/gpt-4o-mini", Hosted: true},
-	{Name: "bedrock", DisplayName: "Amazon Bedrock", BaseURL: "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1", KeyEnv: "LISA_BEDROCK_API_KEY", DefaultModel: "anthropic.claude-3-5-haiku-20241022-v1:0", Hosted: true},
-	{Name: "dialagram", DisplayName: "Dialagram", BaseURL: "https://dialagram.me/router/v1", KeyEnv: "LISA_DIALAGRAM_API_KEY", Hosted: true},
-	{Name: "opencode-zen", DisplayName: "Opencode Zen", BaseURL: "https://opencode.ai/zen/v1", KeyEnv: "LISA_OPENCODE_ZEN_API_KEY", DefaultModel: "gpt-5.3-codex", Hosted: true, SessionHeader: "x-opencode-session"},
-	{Name: "opencode-go", DisplayName: "Opencode Go", BaseURL: "https://opencode.ai/zen/go/v1", KeyEnv: "LISA_OPENCODEGO_API_KEY", DefaultModel: "glm-5.3-flash", Hosted: true, SessionHeader: "x-opencode-session"},
+	{Name: "openai", DisplayName: "OpenAI", BaseURL: "https://api.openai.com/v1", KeyEnv: "LIKHA_OPENAI_API_KEY", DefaultModel: "gpt-4o-mini", Hosted: true},
+	{Name: "openrouter", DisplayName: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", KeyEnv: "LIKHA_OPENROUTER_API_KEY", DefaultModel: "openai/gpt-4o-mini", Hosted: true},
+	{Name: "bedrock", DisplayName: "Amazon Bedrock", BaseURL: "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1", KeyEnv: "LIKHA_BEDROCK_API_KEY", DefaultModel: "anthropic.claude-3-5-haiku-20241022-v1:0", Hosted: true},
+	{Name: "dialagram", DisplayName: "Dialagram", BaseURL: "https://dialagram.me/router/v1", KeyEnv: "LIKHA_DIALAGRAM_API_KEY", Hosted: true},
+	{Name: "opencode-zen", DisplayName: "Opencode Zen", BaseURL: "https://opencode.ai/zen/v1", KeyEnv: "LIKHA_OPENCODE_ZEN_API_KEY", DefaultModel: "gpt-5.3-codex", Hosted: true, SessionHeader: "x-opencode-session"},
+	{Name: "opencode-go", DisplayName: "Opencode Go", BaseURL: "https://opencode.ai/zen/go/v1", KeyEnv: "LIKHA_OPENCODEGO_API_KEY", DefaultModel: "glm-5.3-flash", Hosted: true, SessionHeader: "x-opencode-session"},
 	{Name: "chatgpt", DisplayName: "ChatGPT (Plus/Pro)", BaseURL: "https://chatgpt.com/backend-api/codex", DefaultModel: "gpt-5.5", Hosted: true, SessionHeader: "session-id", Auth: AuthOAuth},
-	{Name: "groq", DisplayName: "Groq", BaseURL: "https://api.groq.com/openai/v1", KeyEnv: "LISA_GROQ_API_KEY", Hosted: true},
-	{Name: "xai", DisplayName: "xAI", BaseURL: "https://api.x.ai/v1", KeyEnv: "LISA_XAI_API_KEY", Hosted: true},
-	{Name: "together", DisplayName: "Together AI", BaseURL: "https://api.together.ai/v1", KeyEnv: "LISA_TOGETHER_API_KEY", Hosted: true},
-	{Name: "mistral", DisplayName: "Mistral AI", BaseURL: "https://api.mistral.ai/v1", KeyEnv: "LISA_MISTRAL_API_KEY", Hosted: true},
-	{Name: "cerebras", DisplayName: "Cerebras", BaseURL: "https://api.cerebras.ai/v1", KeyEnv: "LISA_CEREBRAS_API_KEY", Hosted: true},
+	{Name: "groq", DisplayName: "Groq", BaseURL: "https://api.groq.com/openai/v1", KeyEnv: "LIKHA_GROQ_API_KEY", Hosted: true},
+	{Name: "xai", DisplayName: "xAI", BaseURL: "https://api.x.ai/v1", KeyEnv: "LIKHA_XAI_API_KEY", Hosted: true},
+	{Name: "together", DisplayName: "Together AI", BaseURL: "https://api.together.ai/v1", KeyEnv: "LIKHA_TOGETHER_API_KEY", Hosted: true},
+	{Name: "mistral", DisplayName: "Mistral AI", BaseURL: "https://api.mistral.ai/v1", KeyEnv: "LIKHA_MISTRAL_API_KEY", Hosted: true},
+	{Name: "cerebras", DisplayName: "Cerebras", BaseURL: "https://api.cerebras.ai/v1", KeyEnv: "LIKHA_CEREBRAS_API_KEY", Hosted: true},
 }
 
 // ChatGPT OAuth 2 login constants. They follow the flow OpenCode and other
@@ -58,7 +58,7 @@ const (
 	ChatGPTIssuer       = "https://auth.openai.com"
 	ChatGPTClientID     = "app_EMoamEEZ73f0CkXaXp7hrann"
 	ChatGPTCallbackPort = 1455
-	ChatGPTOriginator   = "lisa"
+	ChatGPTOriginator   = "likha"
 	// ChatGPTDevicePath is where the user enters the headless device code.
 	ChatGPTDevicePath = "/codex/device"
 )

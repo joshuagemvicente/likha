@@ -13,10 +13,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	"lisa/internal/repository"
-	"lisa/internal/session"
+	"likha/internal/model"
+	"likha/internal/providers"
+	"likha/internal/repository"
+	"likha/internal/session"
 )
 
 // steerE2Emsg is the subset of a provider message body these end-to-end

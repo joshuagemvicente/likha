@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/mattn/go-runewidth"
-	"lisa/internal/providers"
+	"likha/internal/providers"
 )
 
 func TestContextSegmentRendersMeasuredAndEstimatedInput(t *testing.T) {

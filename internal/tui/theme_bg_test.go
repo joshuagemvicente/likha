@@ -5,14 +5,14 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"lisa/internal/providers"
-	"lisa/internal/session"
-	lisaui "lisa/internal/ui"
+	"likha/internal/providers"
+	"likha/internal/session"
+	likhaui "likha/internal/ui"
 )
 
 func TestThemeBackgroundFollowsPalette(t *testing.T) {
-	for _, name := range lisaui.ThemeNames() {
-		theme := lisaui.Resolve(name, true)
+	for _, name := range likhaui.ThemeNames() {
+		theme := likhaui.Resolve(name, true)
 		m := NewUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true, Theme: name}, t.TempDir(), nil, session.Snapshot{})
 		m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		forceANSI(t)

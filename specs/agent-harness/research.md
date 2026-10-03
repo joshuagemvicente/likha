@@ -3,7 +3,7 @@
 **Date:** 2026-10-03 · **Status:** research note feeding [spec.md](spec.md) (agent-harness) and related drafts.
 **Method:** primary sources only — official docs and source repositories. Terminal source claims cite repository paths at pinned commits (clones fetched 2026-10-03); doc claims cite official documentation URLs. Where evidence is docs-only (closed-source Claude Code) or absent, the text says so. Analysis and ratings are marked as such. No live probe of hosted/cloud surfaces was run.
 
-Terminals surveyed: **Claude Code**, **OpenAI Codex**, **OpenCode**, **OMP**, **Gemini CLI**, **Aider** (contrast case), plus **Lisa** (current state and four-layer confirmation).
+Terminals surveyed: **Claude Code**, **OpenAI Codex**, **OpenCode**, **OMP**, **Gemini CLI**, **Aider** (contrast case), plus **Likha** (current state and four-layer confirmation).
 
 ---
 
@@ -173,18 +173,18 @@ The recurring design tension across terminals: **static prompt prefix stability*
 
 **Four-layer mapping.** Foundation: BYO keys across many models, local models via litellm-style routing [55][60]. Agent harness: format-specific prompts + reflections; no generic tool loop [56][57]. Repository layer: repo map + explicit file set + aiderignore + auto-commit [57][58][59]. Runtime layer: Python process, optional lint/test subprocesses, git snapshots; no sandbox/UI runtime in the terminal-agent sense [57][60].
 
-### 2.7 Lisa (current state) — do all four layers exist?
+### 2.7 Likha (current state) — do all four layers exist?
 
 Verified against this repository on 2026-10-03.
 
 | Layer | Present? | Evidence |
 | --- | --- | --- |
-| **Foundation model** | **No — by design (BYO).** Lisa hosts no models and bundles no local inference; it connects to hosted providers with the user’s key. | `internal/app/run.go` package doc (“Lisa talks directly to the configured model provider’s OpenAI-compatible API with your own API key (BYOK); it hosts no models and bundles no local inference server”); `internal/model/` (client, providers, Codex OAuth); `internal/providers/` (keys/config). [62][65] |
+| **Foundation model** | **No — by design (BYO).** Likha hosts no models and bundles no local inference; it connects to hosted providers with the user’s key. | `internal/app/run.go` package doc (“Likha talks directly to the configured model provider’s OpenAI-compatible API with your own API key (BYOK); it hosts no models and bundles no local inference server”); `internal/model/` (client, providers, Codex OAuth); `internal/providers/` (keys/config). [62][65] |
 | **Agent harness** | **Yes, but the prompt half is missing.** Turn loop, tool dispatch, approvals, round cap, compaction, mentions, session naming exist; no system prompt / instruction-file layer is sent. | `internal/agent/agent.go` (`RunTurn`, `agentTools` = glob/read/grep/edit_file/run_command, `dispatchTool`, `requestApproval`, 32-round cap), `mentions.go`, `compaction.go`, `sessionname.go` [62]. FR-19 (compiled-in harness system message) and FR-20 (round-cap auto-continue) are specified in `specs/v1-spec.md` but not implemented; `specs/agent-harness/spec.md` is draft; `specs/agent-loop/spec.md` is planned [67]. |
 | **Repository/workspace harness** | **Yes, minimal.** Path-confined read/search tools, ignore-aware tree, diff-preview edits, shell execution; no LSP, repo map, checkpoints, or worktree isolation. | `internal/repository/repository.go` (glob/read/grep with limits and `.git`/symlink refusal), `tree.go` (`.gitignore` + node_modules-aware tree for `@` completion), `internal/actions/edit.go` (`PrepareEdit` diff → `Apply` atomic replace, repo-confined, 1 MiB cap), `command.go` (`sh -c` with process-group cancel, 256 KiB output cap); `@file` expansion in `internal/agent/mentions.go`; git status only for the status bar [63][64][66]. |
 | **Runtime harness** | **Yes, minimal.** Bubbletea TUI event loop drives `RunTurn`; session persistence in a per-repo SQLite store; MCP stdio manager; no OS sandbox (approval-gated only), no hooks/extensions, skills package is a placeholder. | `internal/tui/tui.go` (event pump → `agent.RunTurn`), `internal/session/session.go` (SQLite store), `internal/mcp/` (manager/config, trust-on-first-use), `internal/actions/command.go` doc comment: “The working directory is not a sandbox”; `internal/skills/skills.go` placeholder [66]. |
 
-**Answer in one line:** Lisa includes the **agent harness (runtime half), the repository/workspace harness, and the runtime harness** in minimal form; it deliberately **does not include a foundation model**, and the **prompt-layer harness is specified but not yet implemented** (FR-19/FR-20, `specs/agent-harness/`, `specs/agent-loop/`).
+**Answer in one line:** Likha includes the **agent harness (runtime half), the repository/workspace harness, and the runtime harness** in minimal form; it deliberately **does not include a foundation model**, and the **prompt-layer harness is specified but not yet implemented** (FR-19/FR-20, `specs/agent-harness/`, `specs/agent-loop/`).
 
 ---
 
@@ -200,7 +200,7 @@ Verified against this repository on 2026-10-03.
 | OMP | Bundled Handlebars template; template/plain override chain; append; `PERSONALITY.md` [36] | `.omp/AGENTS.md` + foreign conventions; `RULES.md` sticky; rules/skills [37][38][44] | Project-first discovery; literal > template; provider priorities; one file per scope/depth; farthest-first injection [36][37] | Template is model-agnostic; provider-side cache breakpoint; data-driven sections [36] | `<project-context>` footer (workstation, tree, dir-context, nested repos) after static block [36] |
 | Gemini CLI | Generated section snippets; `GEMINI_SYSTEM_MD` full replacement with substitutions [46][47] | GEMINI.md (global/workspace/JIT), configurable filenames, `@` imports [48] | Concatenated global → workspace → JIT; settings layers system > project > user [48][53] | Modern vs legacy snippet sets by model generation [46] | Prompt includes approval-mode/interactivity wording; env context via `environmentContext` [46] |
 | Aider | Prompt class per edit format (`main_system`, `system_reminder`, examples) [56] | CONVENTIONS.md read-only; `.aider.conf.yml` [60] | No discovery hierarchy; explicit files + repo map [56][58] | Per edit format, per weak/editor model role [57][60] | Repo map summaries + added files + shell command prompts [56][58] |
-| Lisa | **Absent** (FR-19 pending) — only tool definitions + conversation [62][67] | None (repo-init draft) [67] | — | — | Compaction summary as `developer` message [62] |
+| Likha | **Absent** (FR-19 pending) — only tool definitions + conversation [62][67] | None (repo-init draft) [67] | — | — | Compaction summary as `developer` message [62] |
 
 ### 3.2 Runtime harness
 
@@ -212,7 +212,7 @@ Verified against this repository on 2026-10-03.
 | OMP | Tool loop with internal URL devices [44] | Tiers read/write/exec + `always-ask`/`write`/`yolo` + per-tool rules [39] | None (approval is not containment; explicit) [40] | Rich definitions, spawn policy, depth 2, role models, prewalk/advisor [41] | Hook factories + extension modules (in-process, unsandboxed) [42][44] | 6 compaction triggers, method order incl. provider-native, pruning [43] |
 | Gemini CLI | `sendMessageStream`, MAX_TURNS 100 [54] | `plan`/`default`/`autoEdit`/`yolo` policy [49] | Seatbelt profiles or Docker/Podman/runsc/lxc [50] | `invoke_agent` + agent registry [45][46] | 10 hook events, JSON stdin/stdout [52] | Compression service + PreCompress hook; shadow-git checkpoints [51][52] |
 | Aider | Edit → apply → reflect, max 3 [57] | None (chat-loop confirmation) [60] | None [55] | None [55] | None (git/lint/test integration) [57] | Chat-history summarizer; repo-map budgets [56][58] |
-| Lisa | `for range 32` tool rounds, fails at cap [62] | Diff/command/MCP approvals [62] | None — “working directory is not a sandbox” [64] | None | None (`internal/skills` placeholder) [66] | Manual `/compact` summarization only [62] |
+| Likha | `for range 32` tool rounds, fails at cap [62] | Diff/command/MCP approvals [62] | None — “working directory is not a sandbox” [64] | None | None (`internal/skills` placeholder) [66] | Manual `/compact` summarization only [62] |
 
 ### 3.3 Attribute summary (assessment)
 
@@ -224,7 +224,7 @@ Verified against this repository on 2026-10-03.
 | OMP | Very high (templates, every discovery convention, hooks, agents) | High (explicit block/precedence contracts) | Medium-high (dense feature set) | Hooks, extensions, MCP, internal URLs |
 | Gemini CLI | High (system prompt replacement, extensions) | High (docs, settings layers) | High (TUI, ACP, checkpointing) | Hooks, extensions, MCP, ACP |
 | Aider | Medium (formats/modes) | Medium (fixed scaffolding strings) | High for edits, low for autonomy | Git, repo map, lint/test |
-| Lisa | Low today (no prompt/extension surface) | Medium (small, explicit codebase) | Medium (TUI solid; limited tooling) | Approvals, MCP, sessions; hooks absent |
+| Likha | Low today (no prompt/extension surface) | Medium (small, explicit codebase) | Medium (TUI solid; limited tooling) | Approvals, MCP, sessions; hooks absent |
 
 ---
 
@@ -237,7 +237,7 @@ Verified against this repository on 2026-10-03.
 5. **Tool-output discipline.** Output caps, truncation with artifacts (`artifact://` / spill files), pruning of superseded reads, and per-turn stale-result elision appear in OMP, Claude, Codex, and Gemini (40k truncation threshold in Gemini).
 6. **Context management is automated and multi-strategy.** Overflow recovery, threshold checks (including mid-turn), summarization vs mechanical elision vs provider-native compaction, and auto-continue after compaction.
 7. **Extension surface = hooks first, in-process second.** Typed event hooks over tool calls and turns exist in all five agentic terminals; in-process modules (Claude mods, OMP extensions) are powerful but explicitly unsandboxed and same-process.
-8. **Subagents are a runtime primitive with explicit policy.** Definition formats, own context windows, spawn allowlists, depth caps, and model roles (Claude, OMP, OpenCode, Codex, Gemini) — Lisa has none, which is a deliberate scope choice rather than an omission.
+8. **Subagents are a runtime primitive with explicit policy.** Definition formats, own context windows, spawn allowlists, depth caps, and model roles (Claude, OMP, OpenCode, Codex, Gemini) — Likha has none, which is a deliberate scope choice rather than an omission.
 9. **Headless/SDK surface follows the TUI.** `claude -p` + Agent SDK, `codex exec` + SDK, OpenCode server, Gemini ACP/headless, OMP print/RPC/ACP.
 10. **Repo-layer depth varies:** repo maps (Aider), LSP + diagnostics (OMP, OpenCode, Claude), apply-patch primitives (Codex, OpenCode), checkpoint/restore or worktrees (Gemini, Claude).
 
@@ -252,14 +252,14 @@ Verified against this repository on 2026-10-03.
 - **Flexibility:** hooks over tool calls/turns as the minimum extension API; skills as on-demand prompt packs; per-model prompt variants only where measured; discovery adapters for foreign instruction conventions to reduce migration cost.
 - **Usability:** `/init`-style instruction-file generation; prompt/context inspection commands (`/context`, `/memory show`, `/dump`); checkpoint/rewind or shadow-git undo; parallel read-only tools and clear progress rendering; headless mode for CI.
 
-### 5.2 For Lisa (prioritized; maps to existing specs)
+### 5.2 For Likha (prioritized; maps to existing specs)
 
 1. **P0 — Implement FR-19 as a versioned prompt file.** Add `internal/agent/prompt.md` embedded with `go:embed` per `specs/agent-harness/spec.md`: identity; tool contract (built-in `read`/`glob`/`grep` are the default for repository inspection; `run_command` reserved for actions only the shell can perform — the `agent-loop` defect); workflow rules; output discipline. Send it as the first message per request; never persist it (session snapshots must contain user-owned history only) [62][67].
 2. **P0 — Implement FR-20 (round-cap auto-continue).** Replace the hard fail at 32 rounds with a visible checkpoint notice and a `developer`-role continue instruction, per `specs/agent-loop/spec.md` [67].
-3. **P1 — Project instructions loader + `/init`.** Add `internal/agent/instructions.go` discovering `AGENTS.md` from repo root → cwd (Codex pattern), with a size cap (~32 KiB) and `@import` reuse of the existing mention expander; optionally honor `CLAUDE.md`/`LISA.md` as fallbacks. Wire the draft `specs/repo-init/spec.md` to generate one.
+3. **P1 — Project instructions loader + `/init`.** Add `internal/agent/instructions.go` discovering `AGENTS.md` from repo root → cwd (Codex pattern), with a size cap (~32 KiB) and `@import` reuse of the existing mention expander; optionally honor `CLAUDE.md`/`LIKHA.md` as fallbacks. Wire the draft `specs/repo-init/spec.md` to generate one.
 4. **P1 — Cache-stable prompt layout.** Keep the static prompt as its own message and inject dynamic context (cwd, git branch/status, tree) in a separate trailing message; this mirrors OMP’s block boundary and Claude’s layer order, and matters for provider prompt caching as soon as the prompt lands [11][36].
 5. **P2 — Sandbox option + approval tiers.** Introduce `read`/`write`/`exec` tiers per tool (`read`/`glob`/`grep` = read; `edit_file` = write; `run_command`/MCP = exec) and modes `always-ask`/`auto-edit`/`yolo`; add an opt-in OS sandbox for `run_command` (macOS `sandbox-exec`, Linux Landlock) with network policy. Document, like OMP, that shell approval is not containment until then [39][40][21][8].
-6. **P2 — Automated context management.** Trigger compaction at a context threshold (not only manual `/compact`), prune stale tool outputs, and spill truncated command output to a retrievable artifact instead of dropping it (Lisa truncates at 256 KiB today) [43][40].
+6. **P2 — Automated context management.** Trigger compaction at a context threshold (not only manual `/compact`), prune stale tool outputs, and spill truncated command output to a retrievable artifact instead of dropping it (Likha truncates at 256 KiB today) [43][40].
 7. **P3 — Hooks before plugins.** A minimal in-process hook surface (`tool_call`, `tool_result`, `turn_start/end`, `session_*`) unblocks policy injection and observability without committing to a plugin runtime; keep it out of the approval contract’s critical path [42][4][52].
 8. **P3 — Deferred scope, design for it now.** Subagents, skills, and LSP are out of v1, but the prompt/session design should not preclude per-agent prompts, own-context children, or `Skill`-style on-demand packs [41][44][33].
 
@@ -350,7 +350,7 @@ Verified against this repository on 2026-10-03.
 [60] `aider/website/docs/usage/conventions.md` · `usage/modes.md` · `more/edit-formats.md`
 [61] `aider/prompts.py`
 
-**Lisa (this repository)**
+**Likha (this repository)**
 [62] `internal/agent/agent.go`, `mentions.go`, `compaction.go`, `sessionname.go`
 [63] `internal/repository/repository.go`, `tree.go`
 [64] `internal/actions/edit.go`, `command.go`

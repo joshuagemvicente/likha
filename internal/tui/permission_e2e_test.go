@@ -14,11 +14,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/agent"
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	"lisa/internal/repository"
-	"lisa/internal/session"
+	"likha/internal/agent"
+	"likha/internal/model"
+	"likha/internal/providers"
+	"likha/internal/repository"
+	"likha/internal/session"
 )
 
 // permE2EnewTurn starts a real turn against an httptest model whose first

@@ -8,11 +8,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"lisa/internal/agent"
-	"lisa/internal/mcp"
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/agent"
+	"likha/internal/mcp"
+	"likha/internal/model"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 func statusTestUI(t *testing.T, style string, width, height int, options providers.StoredStatusLineConfig) *ui {
@@ -36,12 +36,12 @@ func TestStatusViewportAcrossComposerStyles(t *testing.T) {
 			if len(status) != m.statusLineHeight() || !strings.Contains(stripANSI(status[0]), "Local · model-alpha · ctx —") {
 				t.Fatalf("%s at %dx%d status = %q", style, size[0], size[1], status)
 			}
-			// The Lisa mark moved to the far right end of the row (after the
+			// The Likha mark moved to the far right end of the row (after the
 			// page hint) and only renders at 70 columns and up.
-			if size[0] >= 70 && !strings.HasSuffix(stripANSI(status[0]), "Lisa") {
+			if size[0] >= 70 && !strings.HasSuffix(stripANSI(status[0]), "Likha") {
 				t.Fatalf("%s at %dx%d lost the bottom-right mark: %q", style, size[0], size[1], status[0])
 			}
-			if size[0] < 70 && strings.Contains(stripANSI(strings.Join(status, "\n")), "Lisa") {
+			if size[0] < 70 && strings.Contains(stripANSI(strings.Join(status, "\n")), "Likha") {
 				t.Fatalf("%s at %dx%d kept the mark narrow: %q", style, size[0], size[1], status)
 			}
 			if !strings.Contains(stripANSI(status[len(status)-1]), "Page 1/1") {
@@ -89,8 +89,8 @@ func TestStatusOptionalOrderAndNarrowControls(t *testing.T) {
 		}
 		previous = index
 	}
-	// The Lisa mark closes the row at the far right end.
-	if !strings.HasSuffix(row, "Lisa") {
+	// The Likha mark closes the row at the far right end.
+	if !strings.HasSuffix(row, "Likha") {
 		t.Fatalf("bottom-right mark missing: %q", row)
 	}
 	plain := statusTestUI(t, "minimal", 100, 24, providers.StoredStatusLineConfig{})
@@ -106,7 +106,7 @@ func TestStatusOptionalOrderAndNarrowControls(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
 	assertViewport(t, m.View(), 40, 12)
 	rows := m.statusLineRows(1, 1)
-	if strings.Contains(stripANSI(rows[0]), "Lisa") {
+	if strings.Contains(stripANSI(rows[0]), "Likha") {
 		t.Fatalf("narrow layout kept the wordmark: %q", rows[0])
 	}
 	if !strings.Contains(stripANSI(rows[1]), "Page 1/1") || !strings.Contains(stripANSI(rows[1]), "PgUp/PgDn") || strings.Contains(stripANSI(rows[0]), "First prompt") {

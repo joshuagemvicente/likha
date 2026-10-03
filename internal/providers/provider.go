@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"lisa/internal/mcp"
-	"lisa/internal/model"
+	"likha/internal/mcp"
+	"likha/internal/model"
 )
 
 // connection is the provider identity and startup health the UI displays.
@@ -38,8 +38,8 @@ type ResolvedProvider struct {
 
 // resolveProvider turns the --provider/--endpoint/--api-key flags and
 // environment into a concrete endpoint, key, and verified status. Resolution
-// order for hosted keys: the --api-key flag (which includes LISA_API_KEY), the
-// provider's own LISA_<NAME>_API_KEY, then the private state-directory store.
+// order for hosted keys: the --api-key flag (which includes LIKHA_API_KEY), the
+// provider's own LIKHA_<NAME>_API_KEY, then the private state-directory store.
 // Keys are never read from the selected repository. An explicitly passed key is
 // stored when persistKey is set, so the next run needs no flag. OAuth
 // providers have no API key at all: they resolve to a stored login
@@ -50,9 +50,9 @@ func ResolveProvider(providerName, endpointFlag, apiKeyFlag string, persistKey b
 	name := strings.TrimSpace(providerName)
 	if name == "" {
 		// No provider named: only an explicit endpoint gives anything to talk
-		// to, and it runs as unverified. Lisa ships no default local server.
+		// to, and it runs as unverified. Likha ships no default local server.
 		if endpoint == "" {
-			endpoint = os.Getenv("LISA_ENDPOINT")
+			endpoint = os.Getenv("LIKHA_ENDPOINT")
 		}
 		if endpoint == "" {
 			return ResolvedProvider{}, fmt.Errorf("no provider configured; choose one with --provider (interactive runs offer the first-run setup)")
@@ -79,7 +79,7 @@ func ResolveProvider(providerName, endpointFlag, apiKeyFlag string, persistKey b
 			return ResolvedProvider{}, err
 		}
 		if !ok {
-			return ResolvedProvider{}, fmt.Errorf("provider %s uses ChatGPT login; run lisa in an interactive terminal to sign in, or run lisa --provider %s --device-login", p.Name, p.Name)
+			return ResolvedProvider{}, fmt.Errorf("provider %s uses ChatGPT login; run likha in an interactive terminal to sign in, or run likha --provider %s --device-login", p.Name, p.Name)
 		}
 		return ResolvedProvider{Endpoint: endpoint, Verified: true, Display: p.DisplayName, Creds: creds, OAuth: true}, nil
 	}
@@ -96,7 +96,7 @@ func ResolveProvider(providerName, endpointFlag, apiKeyFlag string, persistKey b
 			key = stored
 		}
 		if key == "" {
-			return ResolvedProvider{}, fmt.Errorf("provider %s requires an API key; set --api-key, LISA_API_KEY, or %s, or pass --api-key once to store it", p.Name, p.KeyEnv)
+			return ResolvedProvider{}, fmt.Errorf("provider %s requires an API key; set --api-key, LIKHA_API_KEY, or %s, or pass --api-key once to store it", p.Name, p.KeyEnv)
 		}
 		if persistKey {
 			if err := StoreKey(stateDir, p.Name, key); err != nil {

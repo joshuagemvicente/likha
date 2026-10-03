@@ -8,9 +8,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/providers"
-	"lisa/internal/repository"
-	"lisa/internal/session"
+	"likha/internal/providers"
+	"likha/internal/repository"
+	"likha/internal/session"
 )
 
 func TestMentionPopupCompletes(t *testing.T) {

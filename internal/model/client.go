@@ -1,4 +1,4 @@
-// Package model connects Lisa to an OpenAI-compatible chat endpoint, local or
+// Package model connects Likha to an OpenAI-compatible chat endpoint, local or
 // hosted from the predefined accepted provider list.
 package model
 
@@ -47,10 +47,10 @@ type ToolDefinition struct {
 	Parameters  json.RawMessage
 }
 
-// UserAgent identifies Lisa to providers that inspect client identity
+// UserAgent identifies Likha to providers that inspect client identity
 // (OpenCode Go requires an agent user agent instead of a generic HTTP-library
 // name). Run overwrites the version from the build tag.
-var UserAgent = "lisa/dev"
+var UserAgent = "likha/dev"
 
 type Client struct {
 	url     string // chat completions URL
@@ -145,7 +145,7 @@ func (c *Client) SetSessionHeader(name string) {
 }
 
 // SetSession records the stable per-conversation session identifier sent in
-// the provider's session header. Lisa uses its own SQLite session ID.
+// the provider's session header. Likha uses its own SQLite session ID.
 func (c *Client) SetSession(id string) {
 	c.sessionID = id
 }
@@ -712,7 +712,7 @@ func (c *Client) Check(ctx context.Context) error {
 
 // ListModels returns the model IDs the endpoint reports on its /models route.
 // It accepts both the OpenAI data envelope and a bare array of model objects;
-// Lisa uses the result for setup, connection checks, and model selection.
+// Likha uses the result for setup, connection checks, and model selection.
 func ListModels(ctx context.Context, endpoint, apiKey string) ([]string, error) {
 	base, err := parseEndpoint(endpoint)
 	if err != nil {

@@ -3,7 +3,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/agent"
+	"likha/internal/agent"
 )
 
 // mentionState is the @ completion popup: fileIndex is the cached walk,

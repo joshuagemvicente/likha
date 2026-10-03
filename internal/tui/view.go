@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
-	lisaui "lisa/internal/ui"
+	likhaui "likha/internal/ui"
 )
 
 // entry is one transcript row: assistant prose, tool activity, or an error.
@@ -29,7 +29,7 @@ func (m *ui) header() []string {
 	if m.width >= 56 {
 		return nil
 	}
-	return []string{"Lisa · " + filepath.Base(m.root)}
+	return []string{"Likha · " + filepath.Base(m.root)}
 }
 
 func (m *ui) bodyHeight() int {
@@ -74,7 +74,7 @@ func (m *ui) rebuild() {
 		for _, line := range lines {
 			m.lines = append(m.lines, line)
 			m.lineStyles = append(m.lineStyles, style)
-			m.lineSpans = append(m.lineSpans, lisaui.FindSwatches(line))
+			m.lineSpans = append(m.lineSpans, likhaui.FindSwatches(line))
 			m.lineActivity = append(m.lineActivity, false)
 		}
 	}
@@ -156,7 +156,7 @@ func (m *ui) rebuild() {
 				// user's words, not yet sent.
 				style = withBase(m.theme.Muted, m.theme.BgUser)
 			case e.role != "You":
-				// Lisa/system and any future prose role keep their existing
+				// Likha/system and any future prose role keep their existing
 				// look on the canvas.
 				style = withBase(plain, m.theme.Base)
 			}
@@ -178,7 +178,7 @@ func (m *ui) View() string {
 		return ""
 	}
 	if m.width < minWidth || m.height < minHeight {
-		return m.frame([]string{"Lisa: enlarge terminal to at least 40 columns by 12 rows"})
+		return m.frame([]string{"Likha: enlarge terminal to at least 40 columns by 12 rows"})
 	}
 	if m.mode == modeSetup {
 		return m.setupView()
@@ -221,7 +221,7 @@ func (m *ui) mainView() string {
 	for i := range body {
 		line := ""
 		style := m.theme.Base
-		var spans []lisaui.Swatch
+		var spans []likhaui.Swatch
 		if start+i < len(m.lines) {
 			line = m.lines[start+i]
 			if start+i < len(m.lineStyles) {
@@ -306,7 +306,7 @@ func renderActivityRow(fitted, plainLine string, frame int, muted, accent lipglo
 // address the padded row unchanged. Zero spans render the band style alone.
 // The swatch shows the literal's own runes (decoration only), so padding
 // and wrapping are unaffected.
-func renderSwatches(band lipgloss.Style, spans []lisaui.Swatch, fitted string) string {
+func renderSwatches(band lipgloss.Style, spans []likhaui.Swatch, fitted string) string {
 	if len(spans) == 0 {
 		return band.Render(fitted)
 	}
@@ -324,7 +324,7 @@ func renderSwatches(band lipgloss.Style, spans []lisaui.Swatch, fitted string) s
 			continue
 		}
 		emit(sp.Start, band)
-		out.WriteString(lisaui.SwatchStyle(sp.Hex).Render(string(runes[sp.Start:sp.End])))
+		out.WriteString(likhaui.SwatchStyle(sp.Hex).Render(string(runes[sp.Start:sp.End])))
 		pos = sp.End
 	}
 	emit(len(runes), band)
@@ -362,8 +362,8 @@ func dimRow(row string) string {
 
 func dimRowOn(row, bg string) string {
 	open := ""
-	if r, g, b, ok := lisaui.ParseHex(bg); ok {
-		open = "\x1b[48;2;" + lisaui.Itoa(r) + ";" + lisaui.Itoa(g) + ";" + lisaui.Itoa(b) + "m"
+	if r, g, b, ok := likhaui.ParseHex(bg); ok {
+		open = "\x1b[48;2;" + likhaui.Itoa(r) + ";" + likhaui.Itoa(g) + ";" + likhaui.Itoa(b) + "m"
 		// Empty padding needs no dim: paint the canvas bg alone so blank
 		// surround rows keep the background without a faint span.
 		if strings.TrimSpace(stripANSI(row)) == "" {

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// The fake-server harness lives in mcp_test.go's TestMain (LISA_FAKE_MCP);
+// The fake-server harness lives in mcp_test.go's TestMain (LIKHA_FAKE_MCP);
 // these tests exercise the manager against it.
 func writeTestMcpConfig(t *testing.T, stateDir string) error {
 	t.Helper()
@@ -16,21 +16,21 @@ func writeTestMcpConfig(t *testing.T, stateDir string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(stateDir+"/mcp.json", []byte(`{"mcpServers":{"fake":{"command":"`+exe+`","env":{"LISA_FAKE_MCP":"1"}}}}`), 0600)
+	return os.WriteFile(stateDir+"/mcp.json", []byte(`{"mcpServers":{"fake":{"command":"`+exe+`","env":{"LIKHA_FAKE_MCP":"1"}}}}`), 0600)
 }
 func TestMcpTrustGateAndStatus(t *testing.T) {
 	stateDir := t.TempDir()
 	if err := writeTestMcpConfig(t, stateDir); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := NewMcpManager(stateDir, "lisa/test")
+	manager, err := NewMcpManager(stateDir, "likha/test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer manager.Stop()
 
 	// The server's tool joins the built-in set.
-	tools := manager.Tools("lisa/test")
+	tools := manager.Tools("likha/test")
 	found := false
 	for _, tool := range tools {
 		if tool.Name == "echo" && strings.Contains(tool.Description, "fake") {
@@ -86,7 +86,7 @@ func TestMcpCrashSurfacesAsFailure(t *testing.T) {
 		map[string]ServerConfig{"dead": {Command: "sh", Args: []string{"-c", "exit 0"}}},
 		map[string]*Client{}, map[string]bool{}, map[string]string{},
 	)
-	if tools := manager.Tools("lisa/test"); len(tools) != 0 {
+	if tools := manager.Tools("likha/test"); len(tools) != 0 {
 		t.Fatalf("crashed server contributed tools: %+v", tools)
 	}
 	if !strings.Contains(manager.Status(), "crashed") {

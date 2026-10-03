@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"lisa/internal/app"
+	"likha/internal/app"
 )
 
 func main() {

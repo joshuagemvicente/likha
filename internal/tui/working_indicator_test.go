@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"lisa/internal/agent"
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/agent"
+	"likha/internal/model"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 func workingTestUI(t *testing.T) *ui {
@@ -173,7 +173,7 @@ func TestWorkingIndicatorTerminalCleanupAndPersistence(t *testing.T) {
 	compact.working, compact.runID = true, 10
 	compact.showActivity()
 	compact.Update(agent.TurnEvent{RunID: 10, Kind: "compacted", Text: "brief", History: []model.Message{{Role: "user", Content: "brief"}}})
-	if compact.hasActivity() || compact.working || compact.entries[len(compact.entries)-1].role != "Lisa" {
+	if compact.hasActivity() || compact.working || compact.entries[len(compact.entries)-1].role != "Likha" {
 		t.Fatalf("compaction completion left activity or lost marker: %+v", compact.entries)
 	}
 

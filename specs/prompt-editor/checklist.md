@@ -15,7 +15,7 @@ Observable outcomes. Mirrors v1-spec FR-14 (amended), FR-17, FR-18.
 - [ ] Ctrl+Y restores the most recent kill; repeated kills are retrievable
   through the ring.
 - [ ] Highlight-drag selects in the terminal's own UI and the terminal's
-  copy/paste commands work while Lisa runs.
+  copy/paste commands work while Likha runs.
 - [ ] Pasted text (bracketed paste) inserts at the cursor with newlines as
   spaces.
 - [ ] Editing stays inert while a turn streams and while an approval is
@@ -23,7 +23,7 @@ Observable outcomes. Mirrors v1-spec FR-14 (amended), FR-17, FR-18.
 
 ## Mouse capture (FR-14 amendment)
 
-- [ ] Lisa does not capture the mouse; the terminal's native selection works.
+- [ ] Likha does not capture the mouse; the terminal's native selection works.
 - [ ] PgUp/PgDn, Ctrl+P/N, Home, End page the session; mouse wheel does not.
 - [ ] README and `--help` state the wheel tradeoff.
 

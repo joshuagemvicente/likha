@@ -14,10 +14,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/agent"
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/agent"
+	"likha/internal/model"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 // statusFlag builds an explicit optional-segment value for config literals;
@@ -50,7 +50,7 @@ func TestHeaderCollapsesToFiftySixColumns(t *testing.T) {
 			}
 		} else {
 			lines := m.header()
-			if len(lines) != 1 || lines[0] != "Lisa · repo-x" {
+			if len(lines) != 1 || lines[0] != "Likha · repo-x" {
 				t.Fatalf("%d columns header = %q", width, lines)
 			}
 		}
@@ -83,7 +83,7 @@ func TestLogoEntryIsPureLogo(t *testing.T) {
 	}
 }
 
-func TestLisaMarkPlacementAndRetirement(t *testing.T) {
+func TestLikhaMarkPlacementAndRetirement(t *testing.T) {
 	newAt := func(width int) *ui {
 		m := NewUI("/sample", nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
@@ -91,22 +91,22 @@ func TestLisaMarkPlacementAndRetirement(t *testing.T) {
 		return m
 	}
 	row := stripANSI(newAt(90).statusLineRows(1, 1)[0])
-	if !strings.HasSuffix(row, "Lisa") {
+	if !strings.HasSuffix(row, "Likha") {
 		t.Fatalf("wide row does not end with the mark: %q", row)
 	}
 	// The mark sits flush right, after the page hint, separated by spaces.
-	if strings.HasSuffix(row, " Lisa") && !strings.Contains(row, " · Lisa") && !strings.Contains(row, "  Lisa") && !strings.Contains(row, "· Lisa") {
+	if strings.HasSuffix(row, " Likha") && !strings.Contains(row, " · Likha") && !strings.Contains(row, "  Likha") && !strings.Contains(row, "· Likha") {
 		t.Fatalf("mark not separated from the hint: %q", row)
 	}
 	for _, width := range []int{40, 69} {
 		m := newAt(width)
 		joined := stripANSI(strings.Join(m.statusLineRows(1, 1), "\n"))
-		if strings.Contains(joined, "Lisa") {
+		if strings.Contains(joined, "Likha") {
 			t.Fatalf("%d columns rendered the mark: %q", width, joined)
 		}
 		// The left side never leads with a wordmark at any width.
 		left := stripANSI(m.statusLineRows(1, 1)[0])
-		if strings.HasPrefix(left, "Lisa") {
+		if strings.HasPrefix(left, "Likha") {
 			t.Fatalf("%d columns left side leads with the wordmark: %q", width, left)
 		}
 	}

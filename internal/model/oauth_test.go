@@ -530,7 +530,7 @@ func TestDeviceLogin(t *testing.T) {
 	srv = issuerPolicy(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/accounts/deviceauth/usercode":
-			if ua := r.Header.Get("User-Agent"); ua != "lisa-test-agent" {
+			if ua := r.Header.Get("User-Agent"); ua != "likha-test-agent" {
 				t.Errorf("usercode User-Agent: %q", ua)
 			}
 			var req struct {
@@ -585,7 +585,7 @@ func TestDeviceLogin(t *testing.T) {
 
 	var shownUser, shownURL string
 	shownOnce := 0
-	ts, err := DeviceLogin(context.Background(), srv.URL, ChatGPTClientID, "lisa-test-agent",
+	ts, err := DeviceLogin(context.Background(), srv.URL, ChatGPTClientID, "likha-test-agent",
 		func(userCodeArg, verifyURL string) error {
 			shownUser, shownURL = userCodeArg, verifyURL
 			shownOnce++
@@ -615,7 +615,7 @@ func TestDeviceLoginStringInterval(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	_, err := DeviceLogin(ctx, srv.URL, ChatGPTClientID, "lisa-test-agent",
+	_, err := DeviceLogin(ctx, srv.URL, ChatGPTClientID, "likha-test-agent",
 		func(string, string) error { return nil }, shortClient)
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected polling to continue (deadline hit), got: %v", err)
@@ -636,7 +636,7 @@ func TestDeviceLoginShowCodeError(t *testing.T) {
 			w.WriteHeader(http.StatusForbidden)
 		}
 	})
-	ts, err := DeviceLogin(context.Background(), srv.URL, ChatGPTClientID, "lisa-test-agent",
+	ts, err := DeviceLogin(context.Background(), srv.URL, ChatGPTClientID, "likha-test-agent",
 		func(string, string) error { return fmt.Errorf("cannot display code") }, shortClient)
 	requireEqual(t, "show-code error surfaced", err != nil, true)
 	if !strings.Contains(err.Error(), "cannot display code") {
@@ -656,7 +656,7 @@ func TestDeviceLoginServerError(t *testing.T) {
 			_, _ = w.Write([]byte(`{"error":"slow down"}`))
 		}
 	})
-	_, err := DeviceLogin(context.Background(), srv.URL, ChatGPTClientID, "lisa-test-agent",
+	_, err := DeviceLogin(context.Background(), srv.URL, ChatGPTClientID, "likha-test-agent",
 		func(string, string) error { return nil }, shortClient)
 	if err == nil {
 		t.Fatal("expected 500 to abort the device flow")

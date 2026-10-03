@@ -7,8 +7,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
 
-	"lisa/internal/model"
-	lisaui "lisa/internal/ui"
+	"likha/internal/model"
+	likhaui "likha/internal/ui"
 )
 
 // dialogKind identifies which selection dialog is open.
@@ -92,7 +92,7 @@ func (m *ui) openDialog(kind dialogKind) tea.Cmd {
 	m.dialog = dialogState{kind: kind, open: true, cursor: 0, loading: false}
 	switch kind {
 	case dialogThemes:
-		m.dialogItems = lisaui.ThemeNames()
+		m.dialogItems = likhaui.ThemeNames()
 		for i, name := range m.dialogItems {
 			if name == m.themeName {
 				m.dialog.cursor = i
@@ -123,7 +123,7 @@ func (m *ui) openDialog(kind dialogKind) tea.Cmd {
 			return nil
 		}
 		if len(summaries) == 0 {
-			m.entries = append(m.entries, entry{role: "Lisa", content: "No saved sessions for this repository yet."})
+			m.entries = append(m.entries, entry{role: "Likha", content: "No saved sessions for this repository yet."})
 			m.dialog = dialogState{}
 			return nil
 		}
@@ -172,7 +172,7 @@ func (m *ui) handleCommand(line string) tea.Cmd {
 		}
 		return tea.Quit
 	case "help":
-		m.entries = append(m.entries, entry{role: "Lisa", content: commandHelp})
+		m.entries = append(m.entries, entry{role: "Likha", content: commandHelp})
 		return nil
 	case "compact":
 		// One model call replaces the summarized past. Refusals are visible
@@ -186,7 +186,7 @@ func (m *ui) handleCommand(line string) tea.Cmd {
 			return nil
 		}
 		if len(m.history) == 0 {
-			m.entries = append(m.entries, entry{role: "Lisa", content: "Nothing to compact yet."})
+			m.entries = append(m.entries, entry{role: "Likha", content: "Nothing to compact yet."})
 			return nil
 		}
 		return m.startCompaction(arg)
@@ -212,7 +212,7 @@ func (m *ui) handleCommand(line string) tea.Cmd {
 	case "themes":
 		return m.handleThemesCommand(arg)
 	case "mcp":
-		m.entries = append(m.entries, entry{role: "Lisa", content: m.conn.Mcp.Status()})
+		m.entries = append(m.entries, entry{role: "Likha", content: m.conn.Mcp.Status()})
 		return nil
 	default:
 		m.input = []rune(line)

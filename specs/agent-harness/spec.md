@@ -4,10 +4,10 @@
 
 ## Purpose and scope
 
-Lisa's model interactions currently carry no identity or rules: the model sees
+Likha's model interactions currently carry no identity or rules: the model sees
 only tool definitions and conversation. A top-tier agent harness injects a
 **system prompt** — the harness's operating instructions — on every turn. This
-feature adds that layer: a structured, compiled-in prompt that makes Lisa
+feature adds that layer: a structured, compiled-in prompt that makes Likha
 behave like a real coding agent instead of a chat window, plus a
 **repository instructions file** so each project can steer the agent.
 
@@ -21,7 +21,7 @@ domain-generic on purpose.
 ```
 model request per turn
 ├─ [1] system message        ← harness prompt (compiled, go:embed)
-├─ [1] project instructions  ← AGENTS.md / LISA.md from the repository root
+├─ [1] project instructions  ← AGENTS.md / LIKHA.md from the repository root
 ├─ prior conversation        ← assistant/tool messages from the session store
 ├─ current user prompt
 └─ tool definitions          ← built-ins + MCP tools (already wired)
@@ -36,7 +36,7 @@ session store can distinguish harness-owned context from user-owned history.
 - **`internal/agent/prompt.md`** — the harness prompt itself, embedded with
   `go:embed`. A real file (not a magic string): versioned, reviewable, and
   editable without touching logic. Content sections, in order:
-  1. **Identity** — "You are Lisa's agent: a terminal coding agent working
+  1. **Identity** — "You are Likha's agent: a terminal coding agent working
      in one repository."
   2. **Tool contract** — when to use `read`/`grep` vs guessing;
      that `edit_file` proposes full-file replacements shown as diffs; that
@@ -49,7 +49,7 @@ session store can distinguish harness-owned context from user-owned history.
   5. **Output discipline** — concise prose between tool calls; no filler.
 - **Project instructions loader** — `internal/agent/instructions.go`: reads
   `AGENTS.md` from the repository root (the ecosystem-standard name, shared
-  with OpenCode/Claude Code/other agents; no Lisa-specific file), capped
+  with OpenCode/Claude Code/other agents; no Likha-specific file), capped
   (e.g. 8 KiB, truncated with a visible marker), injected as a `developer`
   role message after the system message. Missing file = no-op.
 - **Session wiring** — the harness prompt is prepended per request from the
@@ -64,7 +64,7 @@ Compiled-in harness prompt + project instructions file, both in one feature:
    no UI change.
 2. Prepend the system message (and project instructions when present) in
    `runTurn` before `prior`.
-3. Amend FR-03 or add FR-17: "Lisa sends a structured harness prompt with
+3. Amend FR-03 or add FR-17: "Likha sends a structured harness prompt with
    every request; repository instructions files are included when present."
    *(Update: FR-19 added 2026-10-01; its tool-contract steering slice is
    specified narrowly in [agent-loop/](../agent-loop/spec.md) — the full

@@ -27,7 +27,7 @@ Pi Agent), the shared terminal-UI principles are consistent:
   overflows, then retires into history exactly once. Persistent logo
   furniture wastes conversation rows for the whole session.
 
-Lisa adopts these principles with its own execution: no screens copied, no
+Likha adopts these principles with its own execution: no screens copied, no
 mouse-driven panels, no Nerd-Font requirements.
 
 ## 2. Overall layout
@@ -38,12 +38,12 @@ Single region, no sidebar. Top to bottom:
    rendered once at session start as the first content block. It scrolls
    away naturally as the transcript grows (the OMP welcome-header
    retirement pattern): identity without permanent furniture. FR-12 keeps
-   its "identify Lisa" guarantee; the wide/narrow logo header variants are
+   its "identify Likha" guarantee; the wide/narrow logo header variants are
    removed in favor of this block plus the wordmark in the status line.
 2. **Transcript** — paged exactly as today (FR-14: no scrollback, PgUp/PgDn
    + Home/End + wheel, full-session coverage). Rendering stays
    **log-minimal** (Claude Code style): role-prefixed plain prose, glyph
-   markers, no boxes. This is already Lisa's style; the polish is
+   markers, no boxes. This is already Likha's style; the polish is
    consistency, not restyling — spacing, marker alignment, and a single
    rule of one blank line between blocks.
 3. **Composer** — selectable style, §3.
@@ -61,7 +61,7 @@ cancels. Four styles, one input engine behind them — only decoration differs:
 
 | Style | Render |
 | --- | --- |
-| `minimal` (default) | Rule line (Border role) above; dim placeholder "Ask Lisa… // escapes a slash" when empty; draft renders plainly. The Claude Code look. |
+| `minimal` (default) | Rule line (Border role) above; dim placeholder "Ask Likha… // escapes a slash" when empty; draft renders plainly. The Claude Code look. |
 | `bordered` | Full rounded box around the input, Border role edges, placeholder inside. The Codex/OpenCode box. Costs two rows. |
 | `borderless` | No rule, no box — just the placeholder and text, one blank line of separation from the transcript. Maximum flatness. |
 | `chatter` | The draft renders inline with a role prefix (`You ›`) in the Selected role, blending the composer into the transcript like a chat message; the hint row stays beneath. |
@@ -132,7 +132,7 @@ cancel`) — mode hints never lose their slot.
 
 - **Startup block** (§2.1) carries the logo — drawn once, scrolls away.
 - **Status line** carries the persistent identity: the `version` segment
-  and the `Lisa` wordmark on the left of the default preset.
+  and the `Likha` wordmark on the left of the default preset.
 - The logo remains plain ASCII text; no font requirements.
 
 ## 6. Visual style guidelines
@@ -177,13 +177,13 @@ cancel`) — mode hints never lose their slot.
    five-row logo header is retired in favor of the compact three-line
    header; fresh sessions keep the ASCII logo as the first transcript block
    (skipped below 56 columns, never persisted or redrawn on resume). The
-   status line gains the `Lisa` wordmark (width ≥ 70, first segment dropped
+   status line gains the `Likha` wordmark (width ≥ 70, first segment dropped
    under width pressure), `changes`/`staged` counts read from
    `git status --porcelain` (`--no-optional-locks`, bounded at 3 s; read at
    session start and refreshed after tool results), the condensed `mcp`
    summary (hidden when no servers are configured), and the `update → vX`
    segment fed by the throttled startup check (`internal/update`: 24 h
-   throttle file, `LISA_UPDATE_API` override, `LISA_UPDATE_CHECK=0` opt-out,
+   throttle file, `LIKHA_UPDATE_API` override, `LIKHA_UPDATE_CHECK=0` opt-out,
    silent on any failure, dev builds never notify). Every optional segment
    remains off by default; the full order is wordmark, provider · model,
    ctx, folder, branch, changes, staged, mcp, session, minutes, tokens,
@@ -206,7 +206,7 @@ content growth) and must leave all existing tests green.
   Git HEAD when its optional toggle is enabled.
 - **Update check:** shipped in Phase D — `internal/update` provides the
   read-only, throttled latest-release lookup feeding the `update` segment.
-  The in-TUI banner (§4 narrow/wide variants) and the `lisa update` command
+  The in-TUI banner (§4 narrow/wide variants) and the `likha update` command
   from `specs/update-notification/` remain open.
 - Everything else is a re-arrangement of existing state.
 

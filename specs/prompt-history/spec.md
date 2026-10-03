@@ -6,7 +6,7 @@
 
 Prompt recall lets users reuse or revise an earlier submission without
 retyping it. The interaction follows OpenCode's chronological Up/Down history
-model while respecting Lisa's editable, multiline composer and its completion
+model while respecting Likha's editable, multiline composer and its completion
 popups. History belongs to a session and remains available when that session
 is resumed.
 
@@ -48,7 +48,7 @@ is resumed.
 
 ### Entries and session lifetime
 
-- A submission enters history when Lisa accepts it for processing: a normal
+- A submission enters history when Likha accepts it for processing: a normal
   prompt accepted for sending, a recognized slash command accepted for
   dispatch, or a prompt accepted into the run's queue. The recorded entry is
   the user's submitted input, so recalling a slash command allows it to be

@@ -17,7 +17,7 @@ composer-key tasks; the muted-tools task is independent and can land first.
    stays muted, and You/Assistant stay plain; existing tui_test.go green.
 2. **Theme-swap legibility check.** [x] DONE 2026-09-30 —
    `TestToolEntriesMutedAcrossThemes` renders a Tool entry under every
-   predefined theme (dark variant, `lisaui.ThemeNames()` × `lisaui.Resolve`)
+   predefined theme (dark variant, `likhaui.ThemeNames()` × `likhaui.Resolve`)
    and asserts the Tool line is visible and carries each theme's own Muted
    style — no hardcoded color path. Full `go test ./...` green (`go vet` +
    `gofmt` clean).

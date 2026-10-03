@@ -6,7 +6,7 @@
 
 The precedent is Wispr Flow's **transforms**: user-defined rewrites applied to
 text before it is sent — clean up dictated text, structure a rough idea — with
-the transformed output landing where the user can review it. Lisa already has
+the transformed output landing where the user can review it. Likha already has
 all the machinery this needs on the surface: an editable input buffer
 (`m.input []rune` in `internal/app/tui.go`) that is fully user-editable until
 Enter sends it to `runTurn`, and a slash-command dispatch that intercepts
@@ -43,7 +43,7 @@ names produce a visible error and are never sent to the model.
 Applies the named transform to the CURRENT input buffer text:
 
 - The buffer must be non-empty (after trimming surrounding whitespace). If the
-  buffer is empty or whitespace-only, Lisa shows a visible error ("nothing in
+  buffer is empty or whitespace-only, Likha shows a visible error ("nothing in
   the draft to transform") and does not run the model.
 - The captured buffer text is passed to the transform (the `$TEXT` placeholder
   in the transform's markdown template; the placeholder token follows whatever
@@ -81,7 +81,7 @@ conversation view's history, so the pre-transform text is recoverable by
 reading, not by faith).
 
 For `<text>` spanning multiple words no surrounding characters are required;
-Lisa takes the raw remainder. Empty remainder with `<name>` present behaves
+Likha takes the raw remainder. Empty remainder with `<name>` present behaves
 exactly like `/transform <name>` (transforms the buffer).
 
 ### Routing (hard rule)
@@ -101,7 +101,7 @@ exactly like `/transform <name>` (transforms the buffer).
 
 ### Shipped default transform: `prompt-engineer`
 
-Lisa ships exactly one built-in transform, named exactly `prompt-engineer`. It
+Likha ships exactly one built-in transform, named exactly `prompt-engineer`. It
 is defined as markdown (the same template format as user-defined transforms),
 so its full text below is the implementation source, copied verbatim:
 

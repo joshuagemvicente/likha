@@ -7,9 +7,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
-	"lisa/internal/providers"
-	"lisa/internal/session"
-	lisaui "lisa/internal/ui"
+	"likha/internal/providers"
+	"likha/internal/session"
+	likhaui "likha/internal/ui"
 )
 
 // M3 band roles (specs/adaptive-themes M3): rebuild wires each role to its
@@ -51,9 +51,9 @@ func roleLine(m *ui, prefix string) (int, string) {
 	return -1, ""
 }
 
-func rebuildRoles(t *testing.T, name string) (*ui, lisaui.Theme) {
+func rebuildRoles(t *testing.T, name string) (*ui, likhaui.Theme) {
 	t.Helper()
-	theme := lisaui.Resolve(name, true)
+	theme := likhaui.Resolve(name, true)
 	m := bandsTestUI(t)
 	m.theme = theme
 	m.themeName = name
@@ -64,7 +64,7 @@ func rebuildRoles(t *testing.T, name string) (*ui, lisaui.Theme) {
 		entry{role: "Reasoning", content: "thinking"},
 		entry{role: "Error", content: "boom"},
 		entry{role: "Queued", content: "queued prompt"},
-		entry{role: "Lisa", content: "plain prose"},
+		entry{role: "Likha", content: "plain prose"},
 	)
 	m.layoutWidth = 0
 	_ = m.View()
@@ -72,7 +72,7 @@ func rebuildRoles(t *testing.T, name string) (*ui, lisaui.Theme) {
 }
 
 func TestBandRolesAcrossThemes(t *testing.T) {
-	for _, name := range lisaui.ThemeNames() {
+	for _, name := range likhaui.ThemeNames() {
 		if name == "default" {
 			continue
 		}
@@ -112,13 +112,13 @@ func TestBandRolesAcrossThemes(t *testing.T) {
 		if _, ok := m.lineStyles[idx].GetBackground().(lipgloss.NoColor); !ok {
 			t.Fatalf("theme %s: Reasoning must carry no band, got bg %v (line %q)", name, m.lineStyles[idx].GetBackground(), line)
 		}
-		// Lisa/system keeps the canvas: no bespoke band.
-		lisaIdx, _ := roleLine(m, "Lisa:")
-		if lisaIdx < 0 {
-			t.Fatalf("theme %s: Lisa line missing", name)
+		// Likha/system keeps the canvas: no bespoke band.
+		likhaIdx, _ := roleLine(m, "Likha:")
+		if likhaIdx < 0 {
+			t.Fatalf("theme %s: Likha line missing", name)
 		}
-		if bg := colorName(m.lineStyles[lisaIdx].GetBackground()); bg != colorName(theme.Base.GetBackground()) {
-			t.Fatalf("theme %s: Lisa bg %v, want canvas %v", name, bg, colorName(theme.Base.GetBackground()))
+		if bg := colorName(m.lineStyles[likhaIdx].GetBackground()); bg != colorName(theme.Base.GetBackground()) {
+			t.Fatalf("theme %s: Likha bg %v, want canvas %v", name, bg, colorName(theme.Base.GetBackground()))
 		}
 		// Bands are real for non-default families.
 		if got := theme.BgUserBG(); got == "" {
@@ -134,18 +134,18 @@ func TestBandRolesAcrossThemes(t *testing.T) {
 }
 
 func TestLogoOnCanvasAcrossThemes(t *testing.T) {
-	for _, name := range lisaui.ThemeNames() {
+	for _, name := range likhaui.ThemeNames() {
 		if name == "default" {
 			continue
 		}
-		theme := lisaui.Resolve(name, true)
+		theme := likhaui.Resolve(name, true)
 		m := bandsTestUI(t)
 		m.theme = theme
 		m.themeName = name
-		m.entries = append(m.entries, entry{role: "Logo", content: "LISA"})
+		m.entries = append(m.entries, entry{role: "Logo", content: "LIKHA"})
 		m.layoutWidth = 0
 		_ = m.View()
-		idx, line := roleLine(m, "LISA")
+		idx, line := roleLine(m, "LIKHA")
 		if idx < 0 {
 			t.Fatalf("theme %s: Logo line missing: %q", name, m.lines)
 		}
@@ -166,7 +166,7 @@ func TestDefaultBandsAreNoOps(t *testing.T) {
 			theme.BgUserBG(), theme.BgToolBG(), theme.BgModelBG())
 	}
 	plain := lipgloss.NewStyle()
-	for _, prefix := range []string{"You:", "Assistant:", "Tool:", "Lisa:"} {
+	for _, prefix := range []string{"You:", "Assistant:", "Tool:", "Likha:"} {
 		idx, line := roleLine(m, prefix)
 		if idx < 0 {
 			t.Fatalf("default: %s line missing", prefix)
@@ -194,10 +194,10 @@ func TestDegradationAcrossProfiles(t *testing.T) {
 		lipgloss.SetColorProfile(profile)
 		func() {
 			defer lipgloss.SetColorProfile(previous)
-			for _, name := range lisaui.ThemeNames() {
+			for _, name := range likhaui.ThemeNames() {
 				m, _ := rebuildRoles(t, name)
 				view := m.View()
-				for _, want := range []string{"You: hello", "Assistant: hi there", "Tool: listing files", "Reasoning: thinking", "Error: boom", "Lisa: plain prose"} {
+				for _, want := range []string{"You: hello", "Assistant: hi there", "Tool: listing files", "Reasoning: thinking", "Error: boom", "Likha: plain prose"} {
 					if !strings.Contains(stripANSI(view), want) {
 						t.Fatalf("profile %v theme %s: content %q lost in %q", profile, name, want, stripANSI(view)[:min(200, len(stripANSI(view)))])
 					}
@@ -210,8 +210,8 @@ func TestDegradationAcrossProfiles(t *testing.T) {
 func TestDegradedBandsKeepWidths(t *testing.T) {
 	forceANSI(t)
 	for _, width := range []int{40, 80} {
-		for _, name := range lisaui.ThemeNames() {
-			theme := lisaui.Resolve(name, true)
+		for _, name := range likhaui.ThemeNames() {
+			theme := likhaui.Resolve(name, true)
 			m := bandsTestUI(t)
 			m.theme = theme
 			m.themeName = name

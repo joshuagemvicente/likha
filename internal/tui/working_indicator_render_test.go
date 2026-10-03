@@ -7,9 +7,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
-	"lisa/internal/providers"
-	"lisa/internal/session"
-	lisaui "lisa/internal/ui"
+	"likha/internal/providers"
+	"likha/internal/session"
+	likhaui "likha/internal/ui"
 )
 
 func workingRenderUI(t *testing.T, width int) *ui {
@@ -74,8 +74,8 @@ func TestWorkingIndicatorFramesAndThemeRender(t *testing.T) {
 		t.Fatal("activity row has a role prefix")
 	}
 
-	for _, name := range lisaui.ThemeNames() {
-		theme := lisaui.Resolve(name, true)
+	for _, name := range likhaui.ThemeNames() {
+		theme := likhaui.Resolve(name, true)
 		m := workingRenderUI(t, 80)
 		m.theme = theme
 		m.layoutWidth = 0

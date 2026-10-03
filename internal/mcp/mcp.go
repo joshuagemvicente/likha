@@ -1,7 +1,7 @@
-// Package mcp connects Lisa to user-configured Model Context Protocol (MCP)
-// servers over stdio. Lisa launches each server as a child process, performs
+// Package mcp connects Likha to user-configured Model Context Protocol (MCP)
+// servers over stdio. Likha launches each server as a child process, performs
 // the MCP initialize handshake, exposes the server's tools to the agent loop,
-// and calls them on demand. Lisa hosts no servers of its own: every server
+// and calls them on demand. Likha hosts no servers of its own: every server
 // comes from the user's mcp.json and its processes are killed on exit.
 package mcp
 
@@ -69,7 +69,7 @@ type rpcResponse struct {
 // initialize → notifications/initialized → tools/list.
 func Start(name string, cfg ServerConfig, userAgent string) (*Client, error) {
 	cmd := exec.Command(cfg.Command, cfg.Args...)
-	cmd.Env = append(cmd.Environ(), "LISA_USER_AGENT="+userAgent)
+	cmd.Env = append(cmd.Environ(), "LIKHA_USER_AGENT="+userAgent)
 	for key, value := range cfg.Env {
 		cmd.Env = append(cmd.Env, key+"="+value)
 	}
@@ -106,7 +106,7 @@ func (c *Client) handshake(userAgent string) error {
 	params := map[string]any{
 		"protocolVersion": protocolVersion,
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "lisa", "version": strings.TrimPrefix(userAgent, "lisa/")},
+		"clientInfo":      map[string]any{"name": "likha", "version": strings.TrimPrefix(userAgent, "likha/")},
 	}
 	var result struct {
 		ProtocolVersion string `json:"protocolVersion"`
@@ -118,7 +118,7 @@ func (c *Client) handshake(userAgent string) error {
 		return fmt.Errorf("mcp %s: initialize: %w", c.name, err)
 	}
 	if result.ProtocolVersion != protocolVersion {
-		return fmt.Errorf("mcp %s: server speaks protocol %q, Lisa speaks %q", c.name, result.ProtocolVersion, protocolVersion)
+		return fmt.Errorf("mcp %s: server speaks protocol %q, Likha speaks %q", c.name, result.ProtocolVersion, protocolVersion)
 	}
 	if err := c.notify("notifications/initialized", nil); err != nil {
 		return fmt.Errorf("mcp %s: initialized notification: %w", c.name, err)

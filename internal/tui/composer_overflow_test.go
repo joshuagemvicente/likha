@@ -7,9 +7,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/mattn/go-runewidth"
-	"lisa/internal/agent"
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/agent"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 // overflowUI builds a ui instance at the given size for overflow testing.

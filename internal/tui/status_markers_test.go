@@ -6,10 +6,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"lisa/internal/agent"
-	"lisa/internal/providers"
-	"lisa/internal/session"
-	lisaui "lisa/internal/ui"
+	"likha/internal/agent"
+	"likha/internal/providers"
+	"likha/internal/session"
+	likhaui "likha/internal/ui"
 )
 
 // The unverified warning (v1 spec §3, predefined-providers spec 4): a custom
@@ -33,8 +33,8 @@ func TestStatusIdentityShowsUnverifiedWarning(t *testing.T) {
 // review markers swap to icon glyphs; without it the plain text carries no
 // marker at all.
 func TestNerdMarkersOnlyWithOptIn(t *testing.T) {
-	clock := lisaui.NerdGlyphs().Waiting
-	pencil := lisaui.NerdGlyphs().Review
+	clock := likhaui.NerdGlyphs().Waiting
+	pencil := likhaui.NerdGlyphs().Review
 	nerd := NewUI("/sample", nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true, Nerd: true}, t.TempDir(), nil, session.Snapshot{})
 	nerd.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	nerd.status = "Waiting for model"
@@ -62,12 +62,12 @@ func TestNerdMarkersOnlyWithOptIn(t *testing.T) {
 // Error entries are the one colored prose role (themes spec): the rebuilt
 // Error line carries the theme's Error style while ordinary roles stay plain.
 func TestErrorEntriesRenderThemeError(t *testing.T) {
-	for _, name := range lisaui.ThemeNames() {
-		theme := lisaui.Resolve(name, true)
+	for _, name := range likhaui.ThemeNames() {
+		theme := likhaui.Resolve(name, true)
 		m := NewUI("/sample", nil, nil, "local", providers.Connection{Provider: "OpenAI", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 		m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		m.theme = theme
-		m.entries = append(m.entries, entry{role: "Error", content: "startup connection check failed"}, entry{role: "Lisa", content: "plain prose"})
+		m.entries = append(m.entries, entry{role: "Error", content: "startup connection check failed"}, entry{role: "Likha", content: "plain prose"})
 		m.layoutWidth = 0
 		forceANSI(t)
 		_ = m.View()
@@ -77,7 +77,7 @@ func TestErrorEntriesRenderThemeError(t *testing.T) {
 			switch {
 			case strings.HasPrefix(line, "Error:"):
 				errIdx = i
-			case strings.HasPrefix(line, "Lisa:"):
+			case strings.HasPrefix(line, "Likha:"):
 				plainIdx = i
 			}
 		}

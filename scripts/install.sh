@@ -1,26 +1,26 @@
 #!/bin/sh
-# Install the latest (or a pinned) published Lisa release for this machine.
+# Install the latest (or a pinned) published Likha release for this machine.
 #
 # Public one-liner:
-#   curl -fsSL https://raw.githubusercontent.com/gem/lisa/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/gem/likha/main/scripts/install.sh | sh
 #
 # Pin a version:
-#   curl -fsSL https://raw.githubusercontent.com/gem/lisa/main/scripts/install.sh | sh -s -- v1.2.3
+#   curl -fsSL https://raw.githubusercontent.com/gem/likha/main/scripts/install.sh | sh -s -- v1.2.3
 #
 # Environment overrides:
-#   LISA_VERSION      release tag to install (same as the optional argument)
-#   LISA_RELEASE_BASE download base; <BASE>/<VERSION>/<archive> is the URL.
-#                     Default: https://github.com/gem/lisa/releases/download
-#   LISA_RELEASE_API  latest-release lookup URL; used only when no version is
-#                     pinned. Default: https://api.github.com/repos/gem/lisa/releases/latest
-#   LISA_INSTALL_DIR  target directory; default: $HOME/.local/bin
+#   LIKHA_VERSION      release tag to install (same as the optional argument)
+#   LIKHA_RELEASE_BASE download base; <BASE>/<VERSION>/<archive> is the URL.
+#                     Default: https://github.com/gem/likha/releases/download
+#   LIKHA_RELEASE_API  latest-release lookup URL; used only when no version is
+#                     pinned. Default: https://api.github.com/repos/gem/likha/releases/latest
+#   LIKHA_INSTALL_DIR  target directory; default: $HOME/.local/bin
 #
 # The archive is checksum-verified against the release's checksum manifest
 # before installation. No root privileges are used.
 set -eu
 
-DEFAULT_BASE='https://github.com/gem/lisa/releases/download'
-DEFAULT_API='https://api.github.com/repos/gem/lisa/releases/latest'
+DEFAULT_BASE='https://github.com/gem/likha/releases/download'
+DEFAULT_API='https://api.github.com/repos/gem/likha/releases/latest'
 
 fail() {
     printf 'install.sh: %s\n' "$*" >&2
@@ -29,7 +29,7 @@ fail() {
 
 if [ "$#" -gt 1 ]; then
     printf 'Usage: install.sh [vVERSION]\n' >&2
-    printf 'Environment overrides: LISA_VERSION, LISA_RELEASE_BASE, LISA_RELEASE_API, LISA_INSTALL_DIR\n' >&2
+    printf 'Environment overrides: LIKHA_VERSION, LIKHA_RELEASE_BASE, LIKHA_RELEASE_API, LIKHA_INSTALL_DIR\n' >&2
     exit 2
 fi
 
@@ -43,9 +43,9 @@ else
     fail 'sha256sum or shasum is required to verify the release checksum'
 fi
 
-base=${LISA_RELEASE_BASE:-$DEFAULT_BASE}
-api=${LISA_RELEASE_API:-$DEFAULT_API}
-install_dir=${LISA_INSTALL_DIR:-"$HOME/.local/bin"}
+base=${LIKHA_RELEASE_BASE:-$DEFAULT_BASE}
+api=${LIKHA_RELEASE_API:-$DEFAULT_API}
+install_dir=${LIKHA_INSTALL_DIR:-"$HOME/.local/bin"}
 
 # Plain HTTP is permitted only for loopback test hosts. Each pattern is
 # followed by an authority check so userinfo tricks like
@@ -73,12 +73,12 @@ case $base in
 esac
 [ "$http_ok" = 1 ] || fail "download base must use HTTPS (refusing: $base)"
 
-# Resolve the release version: argument wins, then LISA_VERSION, then latest.
+# Resolve the release version: argument wins, then LIKHA_VERSION, then latest.
 version=${1:-}
-if [ -n "${LISA_VERSION:-}" ]; then
-    [ -z "$version" ] || [ "$version" = "$LISA_VERSION" ] || \
-        fail "version argument ($version) conflicts with LISA_VERSION ($LISA_VERSION)"
-    version=$LISA_VERSION
+if [ -n "${LIKHA_VERSION:-}" ]; then
+    [ -z "$version" ] || [ "$version" = "$LIKHA_VERSION" ] || \
+        fail "version argument ($version) conflicts with LIKHA_VERSION ($LIKHA_VERSION)"
+    version=$LIKHA_VERSION
 fi
 if [ -z "$version" ]; then
     printf 'install.sh: resolving latest release...\n'
@@ -104,10 +104,10 @@ case "$(uname -m)" in
     *) fail "unsupported machine architecture: $(uname -m). Supported: amd64 (x86_64), arm64 (aarch64)" ;;
 esac
 
-archive="lisa_${version}_${os}_${arch}.tar.gz"
-manifest="lisa_${version}_checksums.txt"
+archive="likha_${version}_${os}_${arch}.tar.gz"
+manifest="likha_${version}_checksums.txt"
 
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/lisa-install.XXXXXXXX") || fail 'cannot create a temporary directory'
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/likha-install.XXXXXXXX") || fail 'cannot create a temporary directory'
 trap 'rm -rf "$tmp"' 0
 trap 'exit 1' 1 2 3 15
 
@@ -129,36 +129,36 @@ fi
 printf 'install.sh: checksum verified (%s)\n' "$expected"
 
 contents=$(tar -tzf "$tmp/$archive") || fail 'cannot inspect the downloaded archive'
-expected_contents=$(printf 'lisa\nREADME.md\nLICENSE')
+expected_contents=$(printf 'likha\nREADME.md\nLICENSE')
 [ "$contents" = "$expected_contents" ] || fail 'unexpected archive contents; aborting'
 
 tar -xzf "$tmp/$archive" -C "$tmp"
-[ -x "$tmp/lisa" ] || fail 'archive has no executable lisa binary'
+[ -x "$tmp/likha" ] || fail 'archive has no executable likha binary'
 
-reported=$("$tmp/lisa" --version) || fail 'downloaded binary failed to run'
-[ "$reported" = "Lisa $version" ] || fail "binary reports '$reported', expected 'Lisa $version'"
+reported=$("$tmp/likha" --version) || fail 'downloaded binary failed to run'
+[ "$reported" = "Likha $version" ] || fail "binary reports '$reported', expected 'Likha $version'"
 
 case $install_dir in
     /*) ;;
-    *) fail "LISA_INSTALL_DIR must be an absolute path (got: $install_dir)" ;;
+    *) fail "LIKHA_INSTALL_DIR must be an absolute path (got: $install_dir)" ;;
 esac
 mkdir -p "$install_dir" || fail "cannot create $install_dir"
 [ -d "$install_dir" ] || fail "not a usable directory: $install_dir"
-[ -w "$install_dir" ] || fail "$install_dir is not writable by you; set LISA_INSTALL_DIR to a directory you can write, e.g. export LISA_INSTALL_DIR=\"\$HOME/.local/bin\""
+[ -w "$install_dir" ] || fail "$install_dir is not writable by you; set LIKHA_INSTALL_DIR to a directory you can write, e.g. export LIKHA_INSTALL_DIR=\"\$HOME/.local/bin\""
 
 # Replace any previous binary in one shot; the smoke checks above already ran.
-mv "$tmp/lisa" "$install_dir/lisa"
+mv "$tmp/likha" "$install_dir/likha"
 
-printf 'Installed Lisa %s at %s/lisa\n' "$version" "$install_dir"
-"$install_dir/lisa" --version
+printf 'Installed Likha %s at %s/likha\n' "$version" "$install_dir"
+"$install_dir/likha" --version
 
 # PATH advice: only when the final binary is not the one the shell would find.
-found=$(command -v lisa 2>/dev/null || true)
-if [ "$found" != "$install_dir/lisa" ]; then
+found=$(command -v likha 2>/dev/null || true)
+if [ "$found" != "$install_dir/likha" ]; then
     case ":$PATH:" in
         *":$install_dir:"*)
             if [ -n "$found" ]; then
-                printf 'install.sh: note: your PATH finds an earlier lisa at %s ahead of %s\n' "$found" "$install_dir/lisa"
+                printf 'install.sh: note: your PATH finds an earlier likha at %s ahead of %s\n' "$found" "$install_dir/likha"
             fi
             ;;
         *)

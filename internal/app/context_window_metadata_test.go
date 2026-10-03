@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"lisa/internal/model"
+	"likha/internal/model"
 )
 
 func withModelDetailsFunc(t *testing.T, fn func(context.Context, string, string) ([]model.ModelDetails, error)) {

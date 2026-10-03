@@ -4,11 +4,11 @@
 
 ## Context
 
-Lisa is a BYOK agent harness: it hosts no models and talks directly to the
+Likha is a BYOK agent harness: it hosts no models and talks directly to the
 provider's OpenAI-compatible API route with the user's key. Until now the
 provider and key had to arrive through CLI flags or environment variables
-(`--provider`, `--api-key`, `LISA_*`). That is developer-hostile for a first
-run. This feature makes Lisa prompt for it: launch with no configuration and
+(`--provider`, `--api-key`, `LIKHA_*`). That is developer-hostile for a first
+run. This feature makes Likha prompt for it: launch with no configuration and
 the TUI walks the user through provider selection, masked API-key entry, a
 connection check, and model selection, then stores the choice in the private
 state directory so the next launch is zero-configuration.
@@ -19,11 +19,11 @@ approval flow, or session storage.
 ## Resolved decisions
 
 1. **Trigger:** setup starts when no provider is configured anywhere — no
-   `--provider`, no `LISA_PROVIDER`, no stored config, no `--endpoint`/`LISA_ENDPOINT`.
+   `--provider`, no `LIKHA_PROVIDER`, no stored config, no `--endpoint`/`LIKHA_ENDPOINT`.
    Anything configured skips setup entirely (flags and environment win over
    stored config).
 2. **Non-interactive safety:** when stdin/stdout is not a TTY and no provider
-   is configured, Lisa exits 2 with a clear error instead of starting setup.
+   is configured, Likha exits 2 with a clear error instead of starting setup.
    `--sessions` and `--resume` never require setup.
 3. **Stages:** provider picker (arrow keys + Enter) → masked key entry →
    connection check against the provider's `/models` route (bounded, read-only)
@@ -49,7 +49,7 @@ approval flow, or session storage.
 
 ## Acceptance criteria
 
-- [ ] Bare `lisa` with no configuration opens the setup flow in an
+- [ ] Bare `likha` with no configuration opens the setup flow in an
       interactive terminal; a second launch after completing it starts
       straight into the conversation with the stored provider/model.
 - [ ] Flag and environment settings skip setup and override stored config.

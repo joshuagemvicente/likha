@@ -7,9 +7,9 @@
 
 Every agent IDE and terminal agent exposes in-session provider switching:
 the user picks which provider this terminal talks to, without leaving the
-TUI and without editing config files. Lisa today has the storage (one API
+TUI and without editing config files. Likha today has the storage (one API
 key **per** predefined provider in `providers.json`, `keyfile.go`) but only
-one activation path: first-run setup / `--provider` / `LISA_PROVIDER`, fixed
+one activation path: first-run setup / `--provider` / `LIKHA_PROVIDER`, fixed
 at launch and written into `config.json`. Two gaps follow:
 
 1. A user with keys for several providers cannot switch mid-session.
@@ -31,7 +31,7 @@ model, so two overlapping live-switch commands are not kept in sync.
 | Model-selection surface | Keep `/models`; **remove** `/model <n-or-id>` entirely |
 | `/providers` persistence | **Session-only** — live switch only, `config.json` untouched; setup flow remains the way to change the stored default |
 | Provider with no stored key | **Inline key prompt** — a dedicated modal focused on that provider's API key |
-| Custom endpoint (`--endpoint`/`LISA_ENDPOINT`) | **Implemented but hidden** — plumbing exists, not surfaced in `/providers` yet |
+| Custom endpoint (`--endpoint`/`LIKHA_ENDPOINT`) | **Implemented but hidden** — plumbing exists, not surfaced in `/providers` yet |
 | Interaction pattern | **Shared selection modal** with a typed **query filter** for provider names |
 
 ## 3. `/providers` command semantics
@@ -150,7 +150,7 @@ and the client-build path for an arbitrary base URL exist behind an
 internal flag so §6's build/verify/activate steps do not special-case
 "predefined only" later. **Not visible:** no `/providers` row, no in-TUI
 URL editing, no argument accepting a URL. Enabling it later is a removal
-of a gate, not new plumbing. The `LISA_ENDPOINT` flag/env startup path is
+of a gate, not new plumbing. The `LIKHA_ENDPOINT` flag/env startup path is
 unchanged and remains exactly as broad as today.
 
 ## 7. Removal: `/model <n-or-id>`

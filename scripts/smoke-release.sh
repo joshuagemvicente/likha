@@ -3,7 +3,7 @@
 set -eu
 
 usage() {
-    printf 'Usage: %s path/to/lisa_vVERSION_OS_ARCH.tar.gz vVERSION\n' "$0" >&2
+    printf 'Usage: %s path/to/likha_vVERSION_OS_ARCH.tar.gz vVERSION\n' "$0" >&2
     exit 2
 }
 
@@ -28,7 +28,7 @@ case "$(uname -m)" in
     arm64|aarch64) arch=arm64 ;;
     *) printf 'Unsupported host architecture\n' >&2; exit 1 ;;
 esac
-expected="lisa_${version}_${os}_${arch}.tar.gz"
+expected="likha_${version}_${os}_${arch}.tar.gz"
 [ "$(basename "$archive")" = "$expected" ] || {
     printf 'Wrong release target or version: expected %s\n' "$expected" >&2
     exit 1
@@ -36,7 +36,7 @@ expected="lisa_${version}_${os}_${arch}.tar.gz"
 
 # Refuse unexpected archive entries before unpacking into a project-local directory.
 contents=$(tar -tzf "$archive") || { printf 'Cannot inspect archive: %s\n' "$archive" >&2; exit 1; }
-expected_contents=$(printf 'lisa\nREADME.md\nLICENSE')
+expected_contents=$(printf 'likha\nREADME.md\nLICENSE')
 [ "$contents" = "$expected_contents" ] || { printf 'Unexpected archive contents: %s\n' "$archive" >&2; exit 1; }
 
 root=$(CDPATH= cd "$(dirname "$0")/.." && pwd -P)
@@ -45,18 +45,18 @@ cleanup() { rm -rf "$staging"; }
 trap cleanup 0
 trap 'exit 1' 1 2 3 15
 tar -xzf "$archive" -C "$staging"
-[ -f "$staging/README.md" ] && [ -f "$staging/LICENSE" ] && [ -x "$staging/lisa" ] || {
-    printf 'Missing README.md, LICENSE, or executable lisa in archive\n' >&2
+[ -f "$staging/README.md" ] && [ -f "$staging/LICENSE" ] && [ -x "$staging/likha" ] || {
+    printf 'Missing README.md, LICENSE, or executable likha in archive\n' >&2
     exit 1
 }
-actual=$("$staging/lisa" --version)
-[ "$actual" = "Lisa $version" ] || {
-    printf 'Wrong binary version: expected Lisa %s, got %s\n' "$version" "$actual" >&2
+actual=$("$staging/likha" --version)
+[ "$actual" = "Likha $version" ] || {
+    printf 'Wrong binary version: expected Likha %s, got %s\n' "$version" "$actual" >&2
     exit 1
 }
-help=$("$staging/lisa" --help)
+help=$("$staging/likha" --help)
 case "$help" in
-    *'Usage: lisa'*) ;;
-    *) printf 'Installed binary did not print Lisa usage\n' >&2; exit 1 ;;
+    *'Usage: likha'*) ;;
+    *) printf 'Installed binary did not print Likha usage\n' >&2; exit 1 ;;
 esac
 printf 'Installed %s locally; --version and --help passed\n' "$expected"

@@ -15,8 +15,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/model"
-	"lisa/internal/providers"
+	"likha/internal/model"
+	"likha/internal/providers"
 )
 
 // openPerfModelsBatch opens /models and unwraps the fan-out command into its

@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"lisa/internal/providers"
+	"likha/internal/providers"
 	"strings"
 
 	"github.com/mattn/go-runewidth"

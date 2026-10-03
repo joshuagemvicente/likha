@@ -18,11 +18,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
-	"lisa/internal/agent"
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	"lisa/internal/repository"
-	"lisa/internal/session"
+	"likha/internal/agent"
+	"likha/internal/model"
+	"likha/internal/providers"
+	"likha/internal/repository"
+	"likha/internal/session"
 )
 
 func TestUIUsesFixedViewportAndPagesCompleteContent(t *testing.T) {
@@ -537,7 +537,7 @@ func TestUIRequiresResizeBeforePrompt(t *testing.T) {
 	assertViewport(t, m.View(), 15, 5)
 	m.input = []rune("hello")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.working || !strings.Contains(m.View(), "Lisa:") {
+	if m.working || !strings.Contains(m.View(), "Likha:") {
 		t.Fatal("undersized viewport accepted a prompt")
 	}
 }
@@ -772,7 +772,7 @@ func TestUIReviewKeepsDecisionsAndPositionVisibleAtTerminalSizes(t *testing.T) {
 					// repository where the old three-line header did.
 					visible := []string{fmt.Sprintf("Page %d/%d", page+1, m.pageCount()), "local"}
 					if size[0] < 56 {
-						visible = append(visible, "Lisa · sample")
+						visible = append(visible, "Likha · sample")
 					}
 					for _, want := range visible {
 						if !strings.Contains(view, want) {
@@ -976,7 +976,7 @@ func TestSetupOAuthProviderOpensBrowserLoginStage(t *testing.T) {
 		t.Fatalf("OAuth provider did not enter the login stage: stage=%d", m.setup.stage)
 	}
 	view := m.View()
-	if !strings.Contains(view, "Lisa opens your browser to sign in with your ChatGPT account.") ||
+	if !strings.Contains(view, "Likha opens your browser to sign in with your ChatGPT account.") ||
 		!strings.Contains(view, "Press Enter to open the browser") ||
 		!strings.Contains(view, "Enter open browser  Esc back") {
 		t.Fatalf("login stage view incomplete: %q", view)
@@ -1173,7 +1173,7 @@ func TestStartupLogoBlockOpensFreshSessionAndScrollsAway(t *testing.T) {
 	if strings.Contains(narrowView, "____   ___  __") {
 		t.Fatalf("logo block rendered below the 56-column floor: %q", narrowView)
 	}
-	if !strings.Contains(narrowView, "Lisa · sample") {
+	if !strings.Contains(narrowView, "Likha · sample") {
 		t.Fatalf("narrow terminal lost the compact identity line: %q", narrowView)
 	}
 }
@@ -1487,7 +1487,7 @@ func TestCompactRefusalsChangeNothing(t *testing.T) {
 	sendRunes(m, "/compact")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	last = m.entries[len(m.entries)-1]
-	if m.working || last.role != "Lisa" || last.content != "Nothing to compact yet." {
+	if m.working || last.role != "Likha" || last.content != "Nothing to compact yet." {
 		t.Fatalf("empty-history refusal wrong: working=%t last=%+v", m.working, last)
 	}
 
@@ -1579,7 +1579,7 @@ func TestCompactSummarizesReplacesHistoryAndPersists(t *testing.T) {
 		t.Fatalf("history not replaced by the summary: %+v", m.history)
 	}
 	marker := m.entries[len(m.entries)-1]
-	if marker.role != "Lisa" || !strings.Contains(marker.content, "Conversation compacted. Summary of earlier turns:") {
+	if marker.role != "Likha" || !strings.Contains(marker.content, "Conversation compacted. Summary of earlier turns:") {
 		t.Fatalf("compaction marker missing: %+v", marker)
 	}
 	saved, err := store.Load(snapshot.ID)
@@ -1591,7 +1591,7 @@ func TestCompactSummarizesReplacesHistoryAndPersists(t *testing.T) {
 	}
 	markerSaved := false
 	for _, saved := range saved.Entries {
-		if saved.Role == "Lisa" && strings.Contains(saved.Content, "Conversation compacted. Summary of earlier turns:") {
+		if saved.Role == "Likha" && strings.Contains(saved.Content, "Conversation compacted. Summary of earlier turns:") {
 			markerSaved = true
 		}
 	}

@@ -12,9 +12,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/model"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 // modelsListBody is the canned /models payload the fake endpoints serve.
@@ -837,7 +837,7 @@ func TestProvidersChatgptStateSignedIn(t *testing.T) {
 // reports the env source and Enter opens the replace modal — nothing is
 // stored by navigation alone.
 func TestProvidersEnvKeySource(t *testing.T) {
-	t.Setenv("LISA_OPENAI_API_KEY", "env-key")
+	t.Setenv("LIKHA_OPENAI_API_KEY", "env-key")
 	stateDir := t.TempDir()
 	server := newProvidersServer(t, false)
 	defer server.Close()
@@ -850,7 +850,7 @@ func TestProvidersEnvKeySource(t *testing.T) {
 	if !m.keyModal.open || !m.keyModal.auth {
 		t.Fatalf("auth view not opened for the env-sourced provider: %+v", m.keyModal)
 	}
-	if !strings.Contains(m.View(), "provided via environment variable LISA_OPENAI_API_KEY") {
+	if !strings.Contains(m.View(), "provided via environment variable LIKHA_OPENAI_API_KEY") {
 		t.Fatalf("auth view missing the env source: %q", m.View())
 	}
 	if key, err := providers.StoredKey(stateDir, "openai"); err != nil || key != "" {

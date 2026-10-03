@@ -1,16 +1,16 @@
-# Feature: Likha web UI (`lisa --serve`)
+# Feature: Likha web UI (`likha --serve`)
 
 **Status:** draft — awaiting review. No code exists yet; this folder is the
 proposal. Research record: [research.md](research.md). Delivery plan:
 [tasks.md](tasks.md).
 
-Naming: the binary, module, and package paths stay `lisa`; user-visible
+Naming: the binary, module, and package paths stay `likha`; user-visible
 surfaces use the Likha display name already in the TUI. Adjust titles only
 if the rename lands differently.
 
 ## 1. Why
 
-Lisa is TUI-only. Every other agent surface in the market now has a second
+Likha is TUI-only. Every other agent surface in the market now has a second
 front-end: opencode serves a web UI from the same local server that powers
 its TUI; Codex runs one harness behind CLI, IDE, app, and web; Claude Code
 adds Remote Control so a browser or phone can drive a session running in a
@@ -19,7 +19,7 @@ The research record in [research.md](research.md) shows the convergent
 shape: **the agent stays on the host, the UI is a remote, and the wire is a
 structured, resumable event stream** — not a PTY mirror.
 
-Lisa is unusually well positioned for this. `internal/agent` is already
+Likha is unusually well positioned for this. `internal/agent` is already
 UI-free: `RunTurn(ctx, client, repo, root, prior, prompt, mcp, steer,
 emit)` is driven by a context, a steering channel, an emit callback, and a
 blocking `ApprovalRequest.Reply` channel. Sessions, providers, credentials,
@@ -34,13 +34,13 @@ What a browser adds that the terminal cannot:
   phone can approve a command from the couch.
 - **A second window on one session.** A session driven in the terminal can
   be watched and steered from a browser on the same machine (attach mode,
-  §7) — Lisa's analogue of Claude's Remote Control, without a relay.
+  §7) — Likha's analogue of Claude's Remote Control, without a relay.
 - **Native affordances** the TUI deliberately refuses: clickable diffs,
   per-file review, images pasted into prompts, a real session sidebar.
 
 ## 2. What this is, and what it is not
 
-**Is:** a loopback HTTP server (`lisa --serve`) that owns sessions and
+**Is:** a loopback HTTP server (`likha --serve`) that owns sessions and
 serves an embedded single-page app; the browser drives the same
 `agent.RunTurn` engine the TUI drives, with the same approvals, steering,
 compaction, session naming, and SQLite persistence.
@@ -53,7 +53,7 @@ README). No cloud, no relay, no inbound exposure by default.
 ## 3. Starting the server
 
 ```
-lisa --serve [repository] [--port N] [--host H] [--token T]
+likha --serve [repository] [--port N] [--host H] [--token T]
 ```
 
 - Defaults: bind `127.0.0.1`, **ephemeral port**; the startup output prints
@@ -61,7 +61,7 @@ lisa --serve [repository] [--port N] [--host H] [--token T]
   a pinned port that is taken fails with a clear message (no silent
   fallback).
 - `--host` accepts a non-loopback address only together with `--token`
-  (or `LISA_SERVE_TOKEN`) and prints a prominent warning; without a token,
+  (or `LIKHA_SERVE_TOKEN`) and prints a prominent warning; without a token,
   non-loopback binds are refused. Documentation recommends SSH
   port-forwarding over direct exposure, matching opencode's guidance.
 - Startup performs the same connection check as the TUI
@@ -72,7 +72,7 @@ lisa --serve [repository] [--port N] [--host H] [--token T]
 - `Ctrl+C` stops the server and cancels any running turn; completed state
   is already persisted. Closing a browser tab **does not** cancel a run —
   the run belongs to the server (opencode's `prompt_async` semantics).
-- The TUI keeps working exactly as today. `lisa --serve` is a sibling mode
+- The TUI keeps working exactly as today. `likha --serve` is a sibling mode
   in `internal/app`, not a change to the TUI path.
 
 ## 4. Pairing and access
@@ -133,7 +133,7 @@ Single page, three regions on desktop; two on narrow screens.
 ### 5.2 Transcript
 
 - Rendered from persisted `session.Entry` rows (`Role`, `Content`) plus live
-  deltas; roles map to the same bands as the TUI: `You`, `Lisa`, `Tool`,
+  deltas; roles map to the same bands as the TUI: `You`, `Likha`, `Tool`,
   `Reasoning`, `Queued`, `Error`. `Logo` and `Queued` rows are never
   persisted (existing `persist()` rule); the web shows `Queued` rows only
   while the message is undelivered.
@@ -228,7 +228,7 @@ the point of a web UI. Desktop-first layout, mobile-verified.
 
 ## 7. Later (explicitly out of the MVP, tracked in tasks.md)
 
-- **Attach mode** (`lisa --web`): start the TUI and an in-process server
+- **Attach mode** (`likha --web`): start the TUI and an in-process server
   sharing one live runtime, so a browser mirrors and drives the session the
   terminal is running. This is the payoff of the shared-runtime refactor
   and the closest analogue to Claude's Remote Control / Aider's embedded
@@ -244,8 +244,8 @@ the point of a web UI. Desktop-first layout, mobile-verified.
 
 ## 8. Functional changes (to apply in v1-spec.md at implementation start)
 
-- **FR-24 added.** "Lisa can serve an embedded web UI from a local,
-  loopback-bound HTTP server (`lisa --serve`). The browser drives the same
+- **FR-24 added.** "Likha can serve an embedded web UI from a local,
+  loopback-bound HTTP server (`likha --serve`). The browser drives the same
   agent engine, approvals, steering queue, sessions, and provider settings
   as the TUI; a session is driven by one process at a time, and concurrent
   writes surface the existing conflict error instead of silent loss. Access
@@ -273,9 +273,9 @@ the point of a web UI. Desktop-first layout, mobile-verified.
    let the server drive `agent.RunTurn` with its own ~250-line runner and
    accept two implementations of freshly specced steering/persistence
    behavior; faster to demo, guaranteed drift. Recommendation: extract.
-2. **CLI shape: `lisa --serve` (recommended)** — matches the existing mode
+2. **CLI shape: `likha --serve` (recommended)** — matches the existing mode
    flags (`--sessions`, `--device-login`), no subcommand machinery.
-   Alternative: `lisa serve` subcommand, matching opencode/Goose.
+   Alternative: `likha serve` subcommand, matching opencode/Goose.
 3. **Frontend stack: no-build vanilla ES modules + vendored marked/DOMPurify
    (recommended).** The build stays `go build`; assets are embedded with
    `go:embed`; no Node toolchain in the repo. Alternative: Preact/React with
@@ -292,7 +292,7 @@ the point of a web UI. Desktop-first layout, mobile-verified.
 
 ## 10. Acceptance criteria
 
-- [ ] `lisa --serve` prints a loopback URL with a pairing token; opening it
+- [ ] `likha --serve` prints a loopback URL with a pairing token; opening it
       pairs the browser and shows the repository's sessions; the token is
       single-use and the cookie dies with the server.
 - [ ] A prompt sent from the browser streams assistant text, reasoning, and

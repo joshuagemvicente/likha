@@ -6,7 +6,7 @@ terminal probe is the gate.
 
 ## Context
 
-Lisa freezes its prompt input for the whole duration of a turn. `editable()`
+Likha freezes its prompt input for the whole duration of a turn. `editable()`
 is `!m.working && m.pending == nil` (`internal/tui/tui.go:919-921`), the Enter
 key returns early while `working` (`tui.go:876-878`), and the caret is hidden
 (`internal/tui/scroll.go:106-111`). A user who thinks of a correction
@@ -17,7 +17,7 @@ UI replaces `m.history` wholesale from `TurnEvent.History`
 (`tui.go:481-500`).
 
 Every reference agent keeps the input live while a run is active; they differ
-in what a submitted draft does (research below). Lisa takes the
+in what a submitted draft does (research below). Likha takes the
 Enter-queues shape, with delivery inside the running turn: the queue is
 visible, reorderable by waiting, and never aborts tool execution silently.
 
@@ -64,17 +64,17 @@ fetched 2026-10-02):
   transports (GPT-6 family Codex WebSocket) OMP can send a native
   `response.steer` mid-response (`supportsSteering`).
 
-**Decisions this forces for Lisa:**
+**Decisions this forces for Likha:**
 
 - Enter = queue (Claude Code / OpenCode shape). OMP's plain-Enter-steers is
-  not copied: Ctrl+Return is already Lisa's newline chord (user-confirmed
+  not copied: Ctrl+Return is already Likha's newline chord (user-confirmed
   2026-09-30, `specs/tool-rendering-terminal-keys/`), and OMP's
   Ctrl+Q/Ctrl+Enter followUp chord is therefore unavailable for queueing.
 - Delivery at provider-call boundaries inside the same run = OpenCode's safe
   boundary plus Claude Code's "as soon as those tool calls finish". Turn
-  end diverges (amended 2026-10-03): Lisa holds the queue for an explicit
+  end diverges (amended 2026-10-03): Likha holds the queue for an explicit
   Enter instead of Claude Code's auto-flush.
-- No provider-wire steering (`response.steer`-style): Lisa's client has one
+- No provider-wire steering (`response.steer`-style): Likha's client has one
   request/response `Stream` call per round (`internal/model/client.go:344`);
   a queued message attaches to the next request.
 
@@ -144,7 +144,7 @@ waiting for a boundary; it remains deferred on its open probe.
 
 - No mid-tool interruption and no backgrounding of running tool work.
 - No persistent or cross-restart queue; no draft persistence.
-- No queueing of slash commands or shell commands (Lisa has no `!` shell
+- No queueing of slash commands or shell commands (Likha has no `!` shell
   mode); commands are refused, not held.
 - No dequeue/recall chord in M1 (OMP's `app.message.dequeue`); noted as a
   possible follow-up.

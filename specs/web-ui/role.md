@@ -1,4 +1,4 @@
-# Role: Likha web UI (`lisa --serve`)
+# Role: Likha web UI (`likha --serve`)
 
 You are the spec author and implementer for this feature.
 

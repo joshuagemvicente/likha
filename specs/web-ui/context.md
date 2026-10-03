@@ -1,4 +1,4 @@
-# Context: Likha web UI (`lisa --serve`)
+# Context: Likha web UI (`likha --serve`)
 
 Code paths this feature touches. The behavior in [spec.md](spec.md) is the
 contract; the order of work is [tasks.md](tasks.md).
@@ -65,7 +65,7 @@ contract; the order of work is [tasks.md](tasks.md).
 - `ARCHITECTURE.md` — add `internal/runtime` and `internal/server` to the
   diagram and owns/may-not-import table; note that `tui` and `server` are
   sibling front-ends.
-- `cmd/lisa`/`internal/app` — `--serve`, `--port`, `--host`, `--token`
+- `cmd/likha`/`internal/app` — `--serve`, `--port`, `--host`, `--token`
   (M2); `--web` attach mode (M4).
 
 ## Tests to extend
@@ -77,8 +77,8 @@ contract; the order of work is [tasks.md](tasks.md).
 - `internal/agent/agent_test.go`, `approval_test.go` — scripted `httptest`
   SSE provider with call counters; the pattern for M2 protocol tests and
   for asserting the new structured fields.
-- `tests/integration/cli_test.go` — black-box `go run ./cmd/lisa` with
-  `LISA_STATE_DIR` isolation; extend for `--serve` startup/refusal cases.
+- `tests/integration/cli_test.go` — black-box `go run ./cmd/likha` with
+  `LIKHA_STATE_DIR` isolation; extend for `--serve` startup/refusal cases.
 - New: `internal/runtime/*_test.go` (steer ordering, cancel, persistence
   checkpoints, naming, conflict), `internal/server/*_test.go` (auth, SSE
   replay/overflow, session actors, approval decisions), plus an

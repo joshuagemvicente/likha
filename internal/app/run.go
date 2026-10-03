@@ -15,20 +15,20 @@ import (
 	"github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
 
-	"lisa/internal/mcp"
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	"lisa/internal/repository"
-	"lisa/internal/session"
-	"lisa/internal/tui"
-	lisaui "lisa/internal/ui"
+	"likha/internal/mcp"
+	"likha/internal/model"
+	"likha/internal/providers"
+	"likha/internal/repository"
+	"likha/internal/session"
+	"likha/internal/tui"
+	likhaui "likha/internal/ui"
 )
 
-const usageHeader = `Usage: lisa [options] [repository]
+const usageHeader = `Usage: likha [options] [repository]
 
-Start Lisa, an agent harness terminal UI, in a repository. Lisa talks directly
+Start Likha, an agent harness terminal UI, in a repository. Likha talks directly
 to the configured model provider's OpenAI-compatible API with your own API key
-(BYOK); it hosts no models and bundles no local inference server. Lisa checks
+(BYOK); it hosts no models and bundles no local inference server. Likha checks
 the connection at startup and before each agent run, and reports a dead or
 revoked key before any prompt is sent.
 
@@ -38,11 +38,11 @@ offers first-run setup):
 
 const usageFooter = `
 Options:
-  --provider NAME   Provider from the list above (or LISA_PROVIDER).
-  --api-key KEY     API key for a hosted provider; also LISA_API_KEY. An
+  --provider NAME   Provider from the list above (or LIKHA_PROVIDER).
+  --api-key KEY     API key for a hosted provider; also LIKHA_API_KEY. An
                     explicitly passed key is stored in the private state
                     directory (providers.json, mode 0600) for later runs.
-  --model NAME      Model to use. Optional: without it, Lisa uses the first
+  --model NAME      Model to use. Optional: without it, Likha uses the first
                     model the endpoint reports (local servers), or the
                     provider's documented default. Hosted model IDs are
                     provider-specific, e.g. "anthropic/claude-3.5-sonnet".
@@ -61,17 +61,17 @@ prompts for a provider, your API key, and a model, and stores the choice.
 ChatGPT signs in through your browser at first run instead of using an API
 key; the login is stored for later runs.
 
-Environment: LISA_MODEL, LISA_ENDPOINT, LISA_PROVIDER, LISA_API_KEY,
-LISA_STATE_DIR (private storage directory; default is the OS user
-configuration directory's "lisa" child). Each provider also accepts its own
-LISA_<NAME>_API_KEY (see the provider list above).
+Environment: LIKHA_MODEL, LIKHA_ENDPOINT, LIKHA_PROVIDER, LIKHA_API_KEY,
+LIKHA_STATE_DIR (private storage directory; default is the OS user
+configuration directory's "likha" child). Each provider also accepts its own
+LIKHA_<NAME>_API_KEY (see the provider list above).
 
 Examples:
-  lisa ~/projects/app                                        # first-run setup
-  lisa --provider opencode-go ~/projects/app                 # stored key, default model
-  lisa --provider openai --api-key sk-... ~/projects/app
+  likha ~/projects/app                                        # first-run setup
+  likha --provider opencode-go ~/projects/app                 # stored key, default model
+  likha --provider openai --api-key sk-... ~/projects/app
 
-Put options before the repository path. Lisa needs an interactive terminal.
+Put options before the repository path. Likha needs an interactive terminal.
 
 Composer editing keys: Ctrl+W / Ctrl+Backspace / Alt+Backspace delete the
 previous word (with its spaces), Ctrl+Delete or Alt+D the next word;
@@ -135,18 +135,18 @@ func usageText() string {
 
 // Run validates startup settings and runs the interactive terminal UI.
 func Run(args []string, stdout, stderr io.Writer) int {
-	model.UserAgent = "lisa/" + tui.Version
-	flags := flag.NewFlagSet("lisa", flag.ContinueOnError)
+	model.UserAgent = "likha/" + tui.Version
+	flags := flag.NewFlagSet("likha", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() { fmt.Fprint(stdout, usageText()) }
 	endpoint := flags.String("endpoint", "", "OpenAI-compatible endpoint (overrides the provider default)")
-	name := flags.String("model", os.Getenv("LISA_MODEL"), "model name")
-	providerName := flags.String("provider", os.Getenv("LISA_PROVIDER"), "provider from the predefined accepted list")
-	apiKey := flags.String("api-key", os.Getenv("LISA_API_KEY"), "API key for a hosted provider (stored in the private state directory)")
+	name := flags.String("model", os.Getenv("LIKHA_MODEL"), "model name")
+	providerName := flags.String("provider", os.Getenv("LIKHA_PROVIDER"), "provider from the predefined accepted list")
+	apiKey := flags.String("api-key", os.Getenv("LIKHA_API_KEY"), "API key for a hosted provider (stored in the private state directory)")
 	listSessions := flags.Bool("sessions", false, "list sessions for the selected repository")
 	resumeID := flags.String("resume", "", "resume a previous session ID")
-	themeFlag := flags.String("theme", os.Getenv("LISA_THEME"), "color theme (see --help list; stored in config.json when set)")
-	nerdFlag := flags.Bool("nerd-fonts", os.Getenv("LISA_NERD") == "1", "use Nerd Font glyphs for status markers")
+	themeFlag := flags.String("theme", os.Getenv("LIKHA_THEME"), "color theme (see --help list; stored in config.json when set)")
+	nerdFlag := flags.Bool("nerd-fonts", os.Getenv("LIKHA_NERD") == "1", "use Nerd Font glyphs for status markers")
 	showVersion := flags.Bool("version", false, "print the build version")
 	deviceLogin := flags.Bool("device-login", false, "sign in to the selected OAuth provider headlessly and store the login")
 	if err := flags.Parse(args); err != nil {
@@ -156,16 +156,16 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *showVersion {
-		fmt.Fprintf(stdout, "Lisa %s\n", tui.Version)
+		fmt.Fprintf(stdout, "Likha %s\n", tui.Version)
 		return 0
 	}
 	if flags.NArg() > 1 {
-		fmt.Fprintln(stderr, "lisa: expected at most one repository path")
+		fmt.Fprintln(stderr, "likha: expected at most one repository path")
 		return 2
 	}
 	path := "."
 	if *listSessions && *resumeID != "" {
-		fmt.Fprintln(stderr, "lisa: choose either --sessions or --resume")
+		fmt.Fprintln(stderr, "likha: choose either --sessions or --resume")
 		return 2
 	}
 	if flags.NArg() == 1 {
@@ -173,28 +173,28 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	root, err := resolveRoot(path)
 	if err != nil {
-		fmt.Fprintf(stderr, "lisa: %v\n", err)
+		fmt.Fprintf(stderr, "likha: %v\n", err)
 		return 2
 	}
-	stateDir := os.Getenv("LISA_STATE_DIR")
+	stateDir := os.Getenv("LIKHA_STATE_DIR")
 	if stateDir == "" {
 		configDir, err := os.UserConfigDir()
 		if err != nil {
-			fmt.Fprintf(stderr, "lisa: locate local session storage: %v\n", err)
+			fmt.Fprintf(stderr, "likha: locate local session storage: %v\n", err)
 			return 2
 		}
-		stateDir = filepath.Join(configDir, "lisa")
+		stateDir = filepath.Join(configDir, "likha")
 	}
 	store, err := session.Open(stateDir, root)
 	if err != nil {
-		fmt.Fprintf(stderr, "lisa: session storage: %v\n", err)
+		fmt.Fprintf(stderr, "likha: session storage: %v\n", err)
 		return 2
 	}
 	defer store.Close()
 	if *listSessions {
 		summaries, err := store.List()
 		if err != nil {
-			fmt.Fprintf(stderr, "lisa: list sessions: %v\n", err)
+			fmt.Fprintf(stderr, "likha: list sessions: %v\n", err)
 			return 1
 		}
 		for _, item := range summaries {
@@ -214,13 +214,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	})
 	stored, err := providers.LoadStoredConfig(stateDir)
 	if err != nil {
-		fmt.Fprintf(stderr, "lisa: %v\n", err)
+		fmt.Fprintf(stderr, "likha: %v\n", err)
 		return 2
 	}
-	// Precedence: --provider flag (which includes LISA_PROVIDER) > stored
+	// Precedence: --provider flag (which includes LIKHA_PROVIDER) > stored
 	// first-run config. A stored model applies only when the provider itself
 	// came from storage and no model was given. The theme follows the same
-	// rule: explicit --theme/LISA_THEME > stored config > default.
+	// rule: explicit --theme/LIKHA_THEME > stored config > default.
 	effectiveProvider := *providerName
 	if !providerExplicit && *providerName == "" && stored.Provider != "" {
 		effectiveProvider = stored.Provider
@@ -241,8 +241,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if !themeExplicit && themeName == "" && stored.Theme != "" {
 		themeName = stored.Theme
 	}
-	if _, ok := lisaui.Named(themeName, true); !ok && themeName != "" && themeName != "default" {
-		fmt.Fprintf(stderr, "lisa: unknown theme %q; using default (run lisa --help for the list)\n", themeName)
+	if _, ok := likhaui.Named(themeName, true); !ok && themeName != "" && themeName != "default" {
+		fmt.Fprintf(stderr, "likha: unknown theme %q; using default (run likha --help for the list)\n", themeName)
 		themeName = ""
 	}
 	composerStyle := ""
@@ -256,11 +256,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	// First-run setup: nothing configured anywhere. An interactive terminal
 	// walks the user through provider, key, and model; anything else fails
 	// clearly.
-	setupNeeded := effectiveProvider == "" && *endpoint == "" && os.Getenv("LISA_ENDPOINT") == ""
+	setupNeeded := effectiveProvider == "" && *endpoint == "" && os.Getenv("LIKHA_ENDPOINT") == ""
 	output, isFile := stdout.(*os.File)
 	interactive := isatty.IsTerminal(os.Stdin.Fd()) && isFile && isatty.IsTerminal(output.Fd())
 	if setupNeeded && !interactive {
-		fmt.Fprintln(stderr, "lisa: no provider configured; set --provider or LISA_PROVIDER (see --help), or run Lisa in an interactive terminal to set one up")
+		fmt.Fprintln(stderr, "likha: no provider configured; set --provider or LIKHA_PROVIDER (see --help), or run Likha in an interactive terminal to set one up")
 		return 2
 	}
 	var chosen, display string
@@ -273,14 +273,14 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if !setupNeeded {
 		res, err = providers.ResolveProvider(effectiveProvider, *endpoint, *apiKey, persistKey, stateDir)
 		if err != nil {
-			fmt.Fprintf(stderr, "lisa: %v\n", err)
+			fmt.Fprintf(stderr, "likha: %v\n", err)
 			return 2
 		}
 		chosen, verified, display, key = res.Endpoint, res.Verified, res.Display, res.Key
 		selected, _ = model.LookupProvider(effectiveProvider)
 		modelName, err = resolveModel(*name, selected, chosen, key)
 		if err != nil {
-			fmt.Fprintf(stderr, "lisa: %v\n", err)
+			fmt.Fprintf(stderr, "likha: %v\n", err)
 			return 2
 		}
 		if res.OAuth {
@@ -289,7 +289,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			client, err = model.New(chosen, modelName, key)
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "lisa: %v\n", err)
+			fmt.Fprintf(stderr, "likha: %v\n", err)
 			return 2
 		}
 		if res.OAuth {
@@ -303,17 +303,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	repo, err := repository.New(root)
 	if err != nil {
-		fmt.Fprintf(stderr, "lisa: %v\n", err)
+		fmt.Fprintf(stderr, "likha: %v\n", err)
 		return 2
 	}
 	mcpServers, err := mcp.NewMcpManager(stateDir, model.UserAgent)
 	if err != nil {
-		fmt.Fprintf(stderr, "lisa: %v\n", err)
+		fmt.Fprintf(stderr, "likha: %v\n", err)
 		return 2
 	}
 	defer mcpServers.Stop()
 	if !interactive {
-		fmt.Fprintln(stderr, "lisa: interactive terminal required")
+		fmt.Fprintln(stderr, "likha: interactive terminal required")
 		return 2
 	}
 	var startupErr error
@@ -335,7 +335,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		snapshot, err = store.Create()
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "lisa: session: %v\n", err)
+		fmt.Fprintf(stderr, "likha: session: %v\n", err)
 		return 2
 	}
 	if client != nil && selected.SessionHeader != "" {
@@ -348,10 +348,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		Provider: display, ProviderCanonical: selected.Name, Verified: verified, Err: startupErr,
 		Setup: setupNeeded, Theme: themeName, ComposerStyle: composerStyle, StatusLine: statusLine,
 		ContextWindows: contextWindows, ContextWindowOverrides: stored.ContextWindows,
-		Nerd: *nerdFlag || os.Getenv("LISA_NERD") == "1", Mcp: mcpServers,
+		Nerd: *nerdFlag || os.Getenv("LIKHA_NERD") == "1", Mcp: mcpServers,
 	}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
 	if _, err := program.Run(); err != nil {
-		fmt.Fprintf(stderr, "lisa: terminal: %v\n", err)
+		fmt.Fprintf(stderr, "likha: terminal: %v\n", err)
 		return 1
 	}
 	return 0
@@ -360,7 +360,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // resolveModel returns the model to use. An explicit name wins. Without one, a
 // hosted provider falls back to its documented default; the local and custom
 // endpoints fall back to the first model the endpoint reports, so a zero-
-// configuration local run needs no LISA_MODEL at all.
+// configuration local run needs no LIKHA_MODEL at all.
 func resolveModel(name string, p model.Provider, endpoint, key string) (string, error) {
 	if strings.TrimSpace(name) != "" {
 		return strings.TrimSpace(name), nil
@@ -369,16 +369,16 @@ func resolveModel(name string, p model.Provider, endpoint, key string) (string, 
 		if p.DefaultModel != "" {
 			return p.DefaultModel, nil
 		}
-		return "", fmt.Errorf("model is required for provider %s; set LISA_MODEL or --model", p.Name)
+		return "", fmt.Errorf("model is required for provider %s; set LIKHA_MODEL or --model", p.Name)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	ids, err := model.ListModels(ctx, endpoint, key)
 	if err != nil {
-		return "", fmt.Errorf("model is required; set LISA_MODEL or --model (model list failed: %v)", err)
+		return "", fmt.Errorf("model is required; set LIKHA_MODEL or --model (model list failed: %v)", err)
 	}
 	if len(ids) == 0 {
-		return "", fmt.Errorf("model is required; set LISA_MODEL or --model (the endpoint at %s reports no models)", endpoint)
+		return "", fmt.Errorf("model is required; set LIKHA_MODEL or --model (the endpoint at %s reports no models)", endpoint)
 	}
 	return ids[0], nil
 }
@@ -409,16 +409,16 @@ func resolveRoot(path string) (string, error) {
 func deviceLoginFlow(providerName, stateDir string, stdout, stderr io.Writer) int {
 	name := strings.TrimSpace(providerName)
 	if name == "" {
-		fmt.Fprintln(stderr, "lisa: --device-login needs a provider; choose one with --provider (e.g. --provider chatgpt)")
+		fmt.Fprintln(stderr, "likha: --device-login needs a provider; choose one with --provider (e.g. --provider chatgpt)")
 		return 2
 	}
 	p, ok := model.LookupProvider(name)
 	if !ok {
-		fmt.Fprintf(stderr, "lisa: unknown provider %q (see --help)\n", name)
+		fmt.Fprintf(stderr, "likha: unknown provider %q (see --help)\n", name)
 		return 2
 	}
 	if p.Auth != model.AuthOAuth {
-		fmt.Fprintln(stderr, "lisa: --device-login applies to OAuth providers (chatgpt)")
+		fmt.Fprintln(stderr, "likha: --device-login applies to OAuth providers (chatgpt)")
 		return 2
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -429,12 +429,12 @@ func deviceLoginFlow(providerName, stateDir string, stdout, stderr io.Writer) in
 		return nil
 	}, nil)
 	if err != nil {
-		fmt.Fprintf(stderr, "lisa: %v\n", err)
+		fmt.Fprintf(stderr, "likha: %v\n", err)
 		return 1
 	}
 	creds := tokenSet.Credentials()
 	if err := providers.StoreOAuth(stateDir, p.Name, creds); err != nil {
-		fmt.Fprintf(stderr, "lisa: store login: %v\n", err)
+		fmt.Fprintf(stderr, "likha: store login: %v\n", err)
 		return 1
 	}
 	account := creds.AccountID

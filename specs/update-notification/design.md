@@ -4,19 +4,19 @@
 
 ## Context
 
-Lisa is a Go CLI with a Bubble Tea TUI (`internal/tui`). The release pipeline
+Likha is a Go CLI with a Bubble Tea TUI (`internal/tui`). The release pipeline
 (`scripts/release.sh`) stamps the tag into `internal/tui.Version` via
-`-ldflags "-X lisa/internal/tui.Version=$version"` and publishes four archives
-plus a checksum manifest as GitHub Release assets of `gem/lisa`. The installer
+`-ldflags "-X likha/internal/tui.Version=$version"` and publishes four archives
+plus a checksum manifest as GitHub Release assets of `gem/likha`. The installer
 (`scripts/install.sh`) already resolves `releases/latest` via
-`https://api.github.com/repos/gem/lisa/releases/latest`, so the newest version
+`https://api.github.com/repos/gem/likha/releases/latest`, so the newest version
 is discoverable with no extra infrastructure. Versioning (semver tags, no
 scheme change) and the update path (re-running `install.sh`) stay unchanged.
 
 ## Rollout model
 
 Releases stay as-is; "rolling" here means users are told about each new tag
-rather than mass-redeployed. The check is read-only: Lisa never auto-updates,
+rather than mass-redeployed. The check is read-only: Likha never auto-updates,
 writes nothing except a 24-hour throttle timestamp, and stays silent offline.
 
 ## Step-by-step design
@@ -27,7 +27,7 @@ writes nothing except a 24-hour throttle timestamp, and stays silent offline.
    // Latest returns the newest published release tag (e.g. "v0.2.0").
    func Latest(ctx context.Context) (string, error) {
        req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-           "https://api.github.com/repos/gem/lisa/releases/latest", nil)
+           "https://api.github.com/repos/gem/likha/releases/latest", nil)
        if err != nil { return "", err }
        req.Header.Set("Accept", "application/vnd.github+json")
        res, err := http.DefaultClient.Do(req)
@@ -54,8 +54,8 @@ writes nothing except a 24-hour throttle timestamp, and stays silent offline.
    plain version per semver. No external semver dependency is added — the
    scheme is exactly three numbers, so ~15 lines of integer compare suffice.
 
-2. **Throttle in the state dir.** Lisa already stores everything under the
-   `LISA_STATE_DIR` (default: OS config dir's `lisa` child). Add one opaque
+2. **Throttle in the state dir.** Likha already stores everything under the
+   `LIKHA_STATE_DIR` (default: OS config dir's `likha` child). Add one opaque
    JSON file, same permissions model as `sessions.sqlite` (0700 dir, 0600
    file):
 
@@ -68,7 +68,7 @@ writes nothing except a 24-hour throttle timestamp, and stays silent offline.
    ```
 
    Check-at-most-once-per-day-per-machine; also the natural kill switch
-   (`LISA_UPDATE_CHECK=0` skips the check entirely).
+   (`LIKHA_UPDATE_CHECK=0` skips the check entirely).
 
 3. **Non-blocking check at TUI start.** `ui.Init()` currently returns `nil`
    (`internal/app/tui.go:118`). Bubble Tea runs `tea.Cmd`s on a goroutine, so
@@ -90,14 +90,14 @@ writes nothing except a 24-hour throttle timestamp, and stays silent offline.
            latest, err := update.Latest(ctx)
            if err != nil || !update.Newer(Version, latest) { return nil }
            mark(time.Now().UnixNano())
-           return updateAvailableMsg{version: latest, url: "https://github.com/gem/lisa/releases/tag/" + latest}
+           return updateAvailableMsg{version: latest, url: "https://github.com/gem/likha/releases/tag/" + latest}
        }
    }
    ```
 
    Failures return `nil` (no-op message) — a missing update is a non-event.
 
-4. **Display: one accent-colored line under the Lisa header.** The TUI already
+4. **Display: one accent-colored line under the Likha header.** The TUI already
    renders `Repository:` / provider / `Model:` lines via `m.header()`
    (`internal/app/tui.go:896`) and the statuses in the footer via
    `m.theme.Help.Render` (`tui.go:1035`). Add a field `update *updateInfo` to
@@ -105,8 +105,8 @@ writes nothing except a 24-hour throttle timestamp, and stays silent offline.
    append one line:
 
    ```
-   ⬡ Lisa v0.1.0 → v0.2.0 is available: run
-     curl -fsSL https://raw.githubusercontent.com/gem/lisa/main/scripts/install.sh | sh
+   ⬡ Likha v0.1.0 → v0.2.0 is available: run
+     curl -fsSL https://raw.githubusercontent.com/gem/likha/main/scripts/install.sh | sh
    ```
 
    Rendered with the theme's accent color (same style family as `Title`), at
@@ -117,20 +117,20 @@ writes nothing except a 24-hour throttle timestamp, and stays silent offline.
 
 ## UI presentation summary
 
-- **Where:** directly under the four-line Lisa logo block, above
+- **Where:** directly under the four-line Likha logo block, above
   `Repository:` — inside the terminal, before the conversation.
 - **What:** version transition + pinned-version-free upgrade command.
 - **What it does NOT do:** does not auto-install, does not interrupt typing,
   does not appear in JSON/non-TTY modes, does not alter `--version` output
-  (`Lisa <VERSION>` must keep matching the tag exactly — the installer
+  (`Likha <VERSION>` must keep matching the tag exactly — the installer
   asserts it).
 
 ## Verification outline
 
 - Unit: `Newer` across equal/older/newer/prerelease/unparseable inputs;
   throttle read/write respects the 24-hour window.
-- Integration: point `LISA_RELEASE_API`'s equivalent at a loopback server
-  (mirror the `install.sh` override, e.g. `LISA_UPDATE_API`) serving a fake
+- Integration: point `LIKHA_RELEASE_API`'s equivalent at a loopback server
+  (mirror the `install.sh` override, e.g. `LIKHA_UPDATE_API`) serving a fake
   `releases/latest`; assert the one-line notice renders and no notice renders
   when the version equals current.
 - Offline/network-failure: check must return before 2s and render nothing.

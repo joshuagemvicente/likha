@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"lisa/internal/model"
-	"lisa/internal/repository"
+	"likha/internal/model"
+	"likha/internal/repository"
 )
 
 func TestExpandFileReferences(t *testing.T) {

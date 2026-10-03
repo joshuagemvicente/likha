@@ -8,7 +8,7 @@ Today selecting a row in `/providers` switches the live provider
 (verify-then-activate, `internal/tui/providers.go`), and the dialog's
 purpose is ambiguous with model picking. The product target mirrors
 OpenCode's account flow: `/connect → authenticate → /models → select`.
-Lisa keeps the `/providers` name; the dialog becomes a connection
+Likha keeps the `/providers` name; the dialog becomes a connection
 manager: one row per predefined provider, Enter opens that provider's
 auth surface, and **Enter never switches the live provider**. Provider
 and model selection happen exclusively through `/models` (its rows
@@ -27,11 +27,11 @@ already move the session across providers, specs/all-models).
      the live provider/model stay untouched.
    - API-key provider with a stored key → an auth-state view: provider
      name, where the key came from (private state directory, or env var
-     key `LISA_<PROVIDER>_API_KEY` when both contexts resolve), and
+     key `LIKHA_<PROVIDER>_API_KEY` when both contexts resolve), and
      `Enter again to replace` / `Esc back`. A second Enter re-opens the
      key modal to replace the key (re-checked before storing).
    - `chatgpt` → auth-state view: signed in / not signed in; a not-signed-in
-     row points at first-run setup or `lisa --provider chatgpt --device-login`
+     row points at first-run setup or `likha --provider chatgpt --device-login`
      (the switcher still cannot sign in interactively — the modal is for
      keys only). No swap.
 3. The direct form `$ /providers <n-or-name> [key]` re-points at auth:

@@ -171,7 +171,7 @@ proposal's decisions cite this file.
 
 Adopted: local loopback server owning sessions (opencode); REST + SSE with
 `seq`/`Last-Event-ID` replay (opencode + Omnara); typed event kinds
-(Codex lifecycle, Lisa's existing `agent.TurnEvent` vocabulary); approvals
+(Codex lifecycle, Likha's existing `agent.TurnEvent` vocabulary); approvals
 as first-class requests with explicit decisions (all); one runtime, two
 front-ends, attach mode (Aider embedded, Claude RC, Codex's stated
 direction); pairing link + cookie auth (opencode pair, Goose secret key).

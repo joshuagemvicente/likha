@@ -1,4 +1,4 @@
-// Codex wire: encoding of Lisa conversations as OpenAI Responses API requests
+// Codex wire: encoding of Likha conversations as OpenAI Responses API requests
 // for the ChatGPT Codex backend, and decoding of that backend's SSE stream.
 // The chat-completions wire in client.go is untouched: the Codex endpoint
 // rejects sampling parameters with HTTP 400 and speaks a different event
@@ -43,7 +43,7 @@ type codexRequest struct {
 	Stream       bool             `json:"stream"`
 }
 
-// BuildCodexRequest maps a Lisa conversation onto an OpenAI Responses API
+// BuildCodexRequest maps a Likha conversation onto an OpenAI Responses API
 // request body for the ChatGPT Codex backend. System and developer messages
 // become the top-level "instructions" (joined with "\n\n" in order). Tool
 // reasoning (Message.Reasoning) is never included. Sampling parameters

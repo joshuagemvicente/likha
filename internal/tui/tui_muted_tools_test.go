@@ -6,10 +6,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"lisa/internal/agent"
-	"lisa/internal/providers"
-	"lisa/internal/session"
-	lisaui "lisa/internal/ui"
+	"likha/internal/agent"
+	"likha/internal/providers"
+	"likha/internal/session"
+	likhaui "likha/internal/ui"
 )
 
 // Muted tool entries (specs/tool-rendering-terminal-keys M1): a Tool entry
@@ -88,8 +88,8 @@ func TestToolEntriesRenderMutedLikeReasoning(t *testing.T) {
 // predefined theme (dark variant) and asserts the muted role carries it and
 // the render is non-empty — no hardcoded color path in the transcript.
 func TestToolEntriesMutedAcrossThemes(t *testing.T) {
-	for _, name := range lisaui.ThemeNames() {
-		theme := lisaui.Resolve(name, true)
+	for _, name := range likhaui.ThemeNames() {
+		theme := likhaui.Resolve(name, true)
 		m := newMutedTestUI(t)
 		m.theme = theme
 		m.themeName = name

@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"lisa/internal/model"
+	"likha/internal/model"
 )
 
 func TestResolveProviderSelectsEndpointsAndKeys(t *testing.T) {
-	t.Setenv("LISA_ENDPOINT", "")
+	t.Setenv("LIKHA_ENDPOINT", "")
 	if _, err := ResolveProvider("", "", "", false, t.TempDir()); err == nil || !strings.Contains(err.Error(), "no provider configured") {
 		t.Fatalf("no-provider error = %v", err)
 	}
@@ -61,7 +61,7 @@ func TestResolveProviderStoredOAuth(t *testing.T) {
 }
 
 func TestResolveProviderCustomEndpointUnchanged(t *testing.T) {
-	t.Setenv("LISA_ENDPOINT", "")
+	t.Setenv("LIKHA_ENDPOINT", "")
 	res, err := ResolveProvider("", "https://custom.example.net/v1", "sk-x", true, t.TempDir())
 	if err != nil || res.Endpoint != "https://custom.example.net/v1" || res.Verified || res.Display != "Custom endpoint" || res.Key != "" || res.OAuth {
 		t.Fatalf("custom endpoint = %+v err=%v", res, err)
@@ -69,7 +69,7 @@ func TestResolveProviderCustomEndpointUnchanged(t *testing.T) {
 }
 
 func TestResolveProviderRequiresAndStoresHostedKeys(t *testing.T) {
-	t.Setenv("LISA_API_KEY", "")
+	t.Setenv("LIKHA_API_KEY", "")
 	stateDir := t.TempDir()
 	if _, err := ResolveProvider("openrouter", "", "", false, stateDir); err == nil || !strings.Contains(err.Error(), "requires an API key") {
 		t.Fatalf("missing key error = %v", err)

@@ -4,11 +4,11 @@
 
 ## Context
 
-Lisa's v1 contract was local-first: one OpenAI-compatible local endpoint, no paid service,
-no provider-specific integrations. The product direction has shifted: Lisa ships with a
+Likha's v1 contract was local-first: one OpenAI-compatible local endpoint, no paid service,
+no provider-specific integrations. The product direction has shifted: Likha ships with a
 **predefined list of accepted providers** so a user can bring their own key (BYOK) and use
-hosted APIs the same way top agent harnesses do — user enters an API key, Lisa verifies the
-connection, and the session starts. (The offline fallback was since removed; Lisa hosts no
+hosted APIs the same way top agent harnesses do — user enters an API key, Likha verifies the
+connection, and the session starts. (The offline fallback was since removed; Likha hosts no
 models and bundles no local inference server.)
 
 This is a scope change to v1-spec.md, not just an added section: §2 (in-scope), §3
@@ -24,7 +24,7 @@ Keep language consistent with v1-spec.md — verifiable sentences, no unbounded 
 
 ## Resolved decisions (user-confirmed)
 
-1. **Providers are predefined by Lisa, not auto-discovered.** Lisa is the one defining the
+1. **Providers are predefined by Likha, not auto-discovered.** Likha is the one defining the
    accepted list; users add only an API key. Initial list: **Dialagram (Nexum Router),
    OpenRouter, Amazon Bedrock**.
 2. **Protocol surface:** OpenAI-compatible first, adapters later. All three providers ship
@@ -44,7 +44,7 @@ Keep language consistent with v1-spec.md — verifiable sentences, no unbounded 
 4. **Admission probe:** full tool-call probe — streamed text, structured tool calls (not
    prose suggestions), mid-stream cancellation, tool-result fidelity. This is the gate for
    adding any new provider row to the list.
-5. **Key storage:** API keys live in **private config inside the Lisa state directory**
+5. **Key storage:** API keys live in **private config inside the Likha state directory**
    (mode 0700, outside the repository, never in the SQLite session DB). This follows
    v1-spec.md's existing rule for private local state.
 6. **Connection check timing:** a cheap, read-only call at **startup** (e.g. models list)
@@ -56,7 +56,7 @@ Keep language consistent with v1-spec.md — verifiable sentences, no unbounded 
 
 - **§2 In scope:** replace "A local OpenAI-compatible model endpoint, with a documented
   working configuration" with "A predefined list of accepted model providers, local and
-  hosted, configured BYOK-style: the user supplies an API key and Lisa verifies the
+  hosted, configured BYOK-style: the user supplies an API key and Likha verifies the
   connection. Unlisted OpenAI-compatible endpoints are allowed with a visible
   unverified warning."
 - **§2 Out of scope:** narrow "broad provider-specific integrations" to "provider-specific
@@ -65,9 +65,9 @@ Keep language consistent with v1-spec.md — verifiable sentences, no unbounded 
   provider list (OpenRouter, Amazon Bedrock, Dialagram; local Ollama/llama.cpp remains the
   documented offline fallback). Adding a provider is configuration; adding a non-OpenAI
   protocol is a new adapter."
-- **§5 Privacy:** replace "Lisa requires no proprietary or paid service" with "Local
+- **§5 Privacy:** replace "Likha requires no proprietary or paid service" with "Local
   offline use requires no proprietary or paid service; hosted providers in the predefined
-  list require a user-supplied API key and receive conversation content. Lisa explains
+  list require a user-supplied API key and receive conversation content. Likha explains
   which provider receives what." Key storage wording already matches the existing private
   local state bullet.
 - **FR-02:** extend to "The user can configure one model provider from the predefined list

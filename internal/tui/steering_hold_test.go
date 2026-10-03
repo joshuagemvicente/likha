@@ -16,8 +16,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/agent"
-	"lisa/internal/model"
+	"likha/internal/agent"
+	"likha/internal/model"
 )
 
 // An error holds the queue exactly like a cancel: rows and texts survive,

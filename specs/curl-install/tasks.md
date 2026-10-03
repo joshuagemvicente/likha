@@ -9,8 +9,8 @@ Status: all unchecked. See [spec.md](spec.md) for behavior wording.
 - [x] POSIX `sh` script, `set -eu`, no bashisms; usage message lists the
       overridable environment variables.
 - [x] Validate version token with the same regex `scripts/release.sh` uses.
-- [x] Resolve version: first argument wins; else `LISA_VERSION`; conflicting
-      values are an error; else resolve latest via `LISA_RELEASE_API` response
+- [x] Resolve version: first argument wins; else `LIKHA_VERSION`; conflicting
+      values are an error; else resolve latest via `LIKHA_RELEASE_API` response
       `tag_name`.
 - [x] Detect host OS/arch with `uname -s` / `uname -m`, mapping is the same as
       `scripts/smoke-release.sh`.
@@ -21,13 +21,13 @@ Status: all unchecked. See [spec.md](spec.md) for behavior wording.
       clean it up on all exits (`trap ... 0`, `trap 'exit 1' 1 2 3 15`).
 - [x] Verify SHA-256 of the downloaded archive against the manifest line for
       that exact filename (`sha256sum`, else `shasum -a 256`).
-- [x] Extract; verify listing is exactly `lisa`, `README.md`, `LICENSE`; run
-      `--version` (expected `Lisa <VERSION>`).
-- [x] Install with `mv` into `LISA_INSTALL_DIR` (default `$HOME/.local/bin`),
+- [x] Extract; verify listing is exactly `likha`, `README.md`, `LICENSE`; run
+      `--version` (expected `Likha <VERSION>`).
+- [x] Install with `mv` into `LIKHA_INSTALL_DIR` (default `$HOME/.local/bin`),
       creating the directory if needed, without sudo; abort with an
       instruction if it is not writable.
 - [x] Print success line with version and path; print PATH advice when the
-      install dir is not in `PATH`; note an existing `lisa` found earlier in
+      install dir is not in `PATH`; note an existing `likha` found earlier in
       `PATH`.
 - **Verify:** done — success, checksum-mismatch, bogus-version 404,
       non-HTTPS base, userinfo-port trick, env/arg conflict, invalid
@@ -47,8 +47,8 @@ Status: all unchecked. See [spec.md](spec.md) for behavior wording.
 ## 3. Preflight checks (no code)
 
 - [x] Confirm `scripts/release.sh` asset names match what the installer
-      downloads (`lisa_<VERSION>_<OS>_<ARCH>.tar.gz`,
-      `lisa_<VERSION>_checksums.txt`).
+      downloads (`likha_<VERSION>_<OS>_<ARCH>.tar.gz`,
+      `likha_<VERSION>_checksums.txt`).
 - [x] Confirm raw.githubusercontent URL pattern works for a repo with no
       published repo yet: the URL is fixed in the installer header; the
       release publication step later must not need installer edits.
@@ -59,12 +59,12 @@ Status: all unchecked. See [spec.md](spec.md) for behavior wording.
 
 - [x] Build release: `./scripts/release.sh v0.9.9` (test tag).
 - [x] Serve a versioned mirror tree on loopback: `python3 -m http.server`.
-- [x] Run `LISA_RELEASE_BASE=http://127.0.0.1:8742 LISA_INSTALL_DIR=/tmp/lisa-smoke/bin
+- [x] Run `LIKHA_RELEASE_BASE=http://127.0.0.1:8742 LIKHA_INSTALL_DIR=/tmp/likha-smoke/bin
       ./scripts/install.sh v0.9.9`; expect installed binary reporting
-      `Lisa v0.9.9`.
+      `Likha v0.9.9`.
 - [x] Tamper a copy of the archive (flip a byte) and rerun; expect
       checksum-refusal, nothing installed, temp cleaned.
-- [x] Latest-release lookup pinned through `LISA_RELEASE_API` JSON; expect
+- [x] Latest-release lookup pinned through `LIKHA_RELEASE_API` JSON; expect
       tag parsed from the fixture and the same install result.
 - **Verify:** done; run against local mirrors only; no permanent test
   scripts committed. Unsupported host OS/arch cannot be exercised on macOS

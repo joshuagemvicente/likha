@@ -9,8 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/model"
-	"lisa/internal/providers"
+	"likha/internal/model"
+	"likha/internal/providers"
 )
 
 // perfCacheRow is one canned provider answer for the listModelsFunc seam.

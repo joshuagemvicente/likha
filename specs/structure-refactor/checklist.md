@@ -14,11 +14,11 @@ No skipped, always-passing, or mock-only tests may claim any item.
 
 ## Phase 1 — mechanical moves
 
-- [x] `go list ./...` shows `lisa/internal/ui` and no `lisa/ui`; the package
-      doc is intact; the `lisaui` alias is kept (struct-name shadowing);
+- [x] `go list ./...` shows `likha/internal/ui` and no `likha/ui`; the package
+      doc is intact; the `likhaui` alias is kept (struct-name shadowing);
       TUI themes, glyphs, and Nerd-Font markers behave identically
       (marker/theme suites green).
-- [x] `go list ./...` still shows `lisa/internal/skills` (deletion struck —
+- [x] `go list ./...` still shows `likha/internal/skills` (deletion struck —
       `custom-commands`/`text-transforms`/`slash-commands` depend on the
       path); the inert `/skills` reservation still behaves exactly as
       before (no new behavior, no removed behavior).
@@ -65,7 +65,7 @@ No skipped, always-passing, or mock-only tests may claim any item.
       final home with unmodified assertions.
 - [x] `internal/app` holds only composition (`Run`, model/root resolution,
       device login flow, the single `tea.NewProgram`/`tui.NewUI` call site);
-      `cmd/lisa/main.go` is byte-identical to baseline.
+      `cmd/likha/main.go` is byte-identical to baseline.
 - [x] `ARCHITECTURE.md` exists at root with the dependency diagram,
       per-package owns/may-not-import table, and the five-row
       "where do I add X" table; README points to it.

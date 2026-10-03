@@ -8,11 +8,11 @@ running a real fake server as a child process.
 
 ## Context
 
-Lisa is a BYOK agent harness (v1-spec.md §2/§5). To move from "toy" to
+Likha is a BYOK agent harness (v1-spec.md §2/§5). To move from "toy" to
 daily-driver, it needs the same extensibility surface top agent harnesses
 have: MCP servers. An MCP server is a separate process/service the harness
-talks to; its **tools** join Lisa's built-in tool loop (`glob`, `read`, `grep`, `edit_file`, `run_command`) and go through the
-same approval-gated execution path. Lisa hosts no models and runs no MCP
+talks to; its **tools** join Likha's built-in tool loop (`glob`, `read`, `grep`, `edit_file`, `run_command`) and go through the
+same approval-gated execution path. Likha hosts no models and runs no MCP
 servers of its own — servers come from the user's config.
 
 This is a scope change: v1-spec §2 currently excludes plugins; MCP is the one
@@ -35,7 +35,7 @@ deliberate exception the user wants (config-driven, no plugin API surface).
 4. **Security posture:** MCP tool calls are treated exactly like `run_command`
    — untrusted, approval-gated per call, shown with server name + tool name +
    arguments before execution. There is no blanket trust for a configured
-   server. Server env inherits Lisa's config; keys never auto-forwarded.
+   server. Server env inherits Likha's config; keys never auto-forwarded.
 5. **Capabilities:** tools only for v1. Resources and prompts are deferred.
    Tool results are returned to the model as tool messages, same as built-ins.
 6. **UI:** `/mcp` lists configured servers with state (running/crashed/

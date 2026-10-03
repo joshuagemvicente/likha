@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 func newPromptHistoryKeysUI(t *testing.T, prompts []string) *ui {

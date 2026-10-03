@@ -8,7 +8,7 @@ and where the five most likely changes land. Status: implemented (local)
 
 ```mermaid
 flowchart TD
-    cmd["cmd/lisa\nmain → app.Run"] --> app["internal/app\ncomposition root:\nRun, resolveModel,\nresolveRoot, deviceLoginFlow"]
+    cmd["cmd/likha\nmain → app.Run"] --> app["internal/app\ncomposition root:\nRun, resolveModel,\nresolveRoot, deviceLoginFlow"]
     app --> tui["internal/tui\nBubbletea UI:\nmodel, dialogs, setup,\nstatus, composer"]
     app --> providers["internal/providers\nConnection, ResolveProvider,\nconfig.json, providers.json"]
     app --> sess["internal/session"]
@@ -31,7 +31,7 @@ flowchart TD
     providers --> mcp["internal/mcp\n(McpManager type only)"]
 ```
 
-Rules: no cycles; only `cmd/lisa` imports `internal/app`; `agent`
+Rules: no cycles; only `cmd/likha` imports `internal/app`; `agent`
 imports no `bubbletea`/`lipgloss`/`tui` (grep-enforced by review, not
 lint — depguard is a recorded follow-up); `internal/` stays internal.
 

@@ -9,9 +9,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/model"
-	"lisa/internal/providers"
-	lisaui "lisa/internal/ui"
+	"likha/internal/model"
+	"likha/internal/providers"
+	likhaui "likha/internal/ui"
 )
 
 // First-run setup stages.
@@ -131,7 +131,7 @@ func (m *ui) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.previewSetupTheme()
 		case "down":
-			if m.setup.cursor < len(lisaui.ThemeNames())-1 {
+			if m.setup.cursor < len(likhaui.ThemeNames())-1 {
 				m.setup.cursor++
 			}
 			m.previewSetupTheme()
@@ -288,7 +288,7 @@ func (m *ui) finishSetup(modelID string) tea.Cmd {
 // previewSetupTheme re-resolves the live styles to the highlighted setup
 // candidate without committing; Enter stores via applySetupTheme.
 func (m *ui) previewSetupTheme() {
-	names := lisaui.ThemeNames()
+	names := likhaui.ThemeNames()
 	if m.setup.cursor < len(names) {
 		m.previewTheme(names[m.setup.cursor])
 	}
@@ -297,12 +297,12 @@ func (m *ui) previewSetupTheme() {
 // applySetupTheme resolves the highlighted theme, stores it with the setup
 // choice, and completes first-run setup into the conversation view.
 func (m *ui) applySetupTheme() tea.Cmd {
-	names := lisaui.ThemeNames()
+	names := likhaui.ThemeNames()
 	if m.setup.cursor >= len(names) {
 		return nil
 	}
 	m.themeName = names[m.setup.cursor]
-	m.theme = lisaui.Resolve(m.themeName, lisaui.HasDarkBackground())
+	m.theme = likhaui.Resolve(m.themeName, likhaui.HasDarkBackground())
 	cfg, err := providers.LoadStoredConfig(m.stateDir)
 	if err == nil && cfg.Provider != "" {
 		cfg.Theme = m.themeName
@@ -320,7 +320,7 @@ func (m *ui) applySetupTheme() tea.Cmd {
 func (m *ui) setupView() string {
 	body := max(1, m.height-6) // compact header, blank separator, three footer rows.
 	rows := make([]string, 0, m.height)
-	rows = append(rows, withBase(m.theme.Title, m.theme.Base).Render(fit("Lisa  |  First-run setup  |  Repo: "+m.root, m.width)))
+	rows = append(rows, withBase(m.theme.Title, m.theme.Base).Render(fit("Likha  |  First-run setup  |  Repo: "+m.root, m.width)))
 	rows = append(rows, fit("", m.width))
 	content := m.setupLines(body)
 	for _, line := range content {
@@ -353,7 +353,7 @@ func (m *ui) setupLines(body int) []string {
 	var lines []string
 	switch m.setup.stage {
 	case setupProvider:
-		lines = append(lines, "Choose a model provider (BYOK; Lisa hosts no models):", "")
+		lines = append(lines, "Choose a model provider (BYOK; Likha hosts no models):", "")
 		windowed, start := windowList(len(model.Providers), m.setup.cursor, body-len(lines))
 		for i := start; i < start+windowed; i++ {
 			p := model.Providers[i]
@@ -378,12 +378,12 @@ func (m *ui) setupLines(body int) []string {
 		lines = append(lines, "Checking connection and model list…")
 	case setupLogin:
 		lines = append(lines, "Provider: "+model.Providers[m.setup.cursor].DisplayName, "")
-		lines = append(lines, "Lisa opens your browser to sign in with your ChatGPT account.")
+		lines = append(lines, "Likha opens your browser to sign in with your ChatGPT account.")
 		lines = append(lines, "Your browser shows a code page; approve access to continue.")
 		lines = append(lines, "")
 		lines = append(lines, "Press Enter to open the browser")
 	case setupTheme:
-		names := lisaui.ThemeNames()
+		names := likhaui.ThemeNames()
 		lines = append(lines, "Choose a color theme (applies immediately, stored for next runs):", "")
 		windowed, start := windowList(len(names), m.setup.cursor, body-len(lines))
 		for i := start; i < start+windowed; i++ {

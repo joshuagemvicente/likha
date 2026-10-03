@@ -5,7 +5,7 @@ import (
 	"unicode/utf8"
 )
 
-// EstimateInputTokens returns a local approximation of the input tokens Lisa
+// EstimateInputTokens returns a local approximation of the input tokens Likha
 // sends in messages and tool definitions. Reasoning is excluded because it is
 // not sent back to the provider. The estimate is model-independent: this
 // package has no model-specific tokenizer. The boolean is false only if the

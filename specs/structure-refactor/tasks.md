@@ -28,12 +28,12 @@ per task.
    files — `internal/app/run.go:21`, `internal/app/tui.go:23`,
    `internal/app/status_markers_test.go:10`,
    `internal/app/tui_muted_tools_test.go:10` — from
-   `lisaui "lisa/ui"` to `lisaui "lisa/internal/ui"`, **keeping the alias**:
+   `likhaui "likha/ui"` to `likhaui "likha/internal/ui"`, **keeping the alias**:
    the `ui` struct type in `internal/app` shadows a bare `ui` package
    qualifier (verified by compiler error on the alias-drop attempt).
    No other line changes.
-   Verified: `grep -rn 'lisa/ui' --include='*.go' .` → empty;
-   `go list ./...` shows `lisa/internal/ui`, no `lisa/ui`;
+   Verified: `grep -rn 'likha/ui' --include='*.go' .` → empty;
+   `go list ./...` shows `likha/internal/ui`, no `likha/ui`;
    `go build ./... && go test ./internal/app/`.
 
 3. **Retain `internal/skills` (deletion struck).** [x] DONE 2026-10-01 —
@@ -41,7 +41,7 @@ per task.
    excluded); the 4-line placeholder left in place: `custom-commands`,
    `text-transforms`, and `slash-commands` depend on the path existing
    (see spec.md Phase 1 §2 and `architecture-phase-1.md` §6).
-   Verified: `go list ./...` still shows `lisa/internal/skills`;
+   Verified: `go list ./...` still shows `likha/internal/skills`;
    `go build ./...`.
 
 4. **Rename `statusbar_test.go` → `status_view_test.go`.** [x] DONE 2026-10-01
@@ -49,7 +49,7 @@ per task.
    pre-verified). Rationale is in `context.md`: subjects are `tui.go` view
    methods, and the name finally says so. `status_markers_test.go` keeps
    its name (accurate).
-   Verified: `go test ./internal/app/ -run 'TestHeader|TestLogo|TestLisaMark|
+   Verified: `go test ./internal/app/ -run 'TestHeader|TestLogo|TestLikhaMark|
    TestContextSegment|TestStatus' -v` passes with identical test names
    (23 matched tests green).
 
@@ -111,9 +111,9 @@ per task.
 12. **T6 — form `internal/tui` and shrink `app`.** [x] DONE 2026-10-01 —
     12 UI sources + all UI tests → `internal/tui`; `NewUI` exported;
     `Version` + `logo` → `tui`; `run.go` reads `tui.Version`;
-    release.sh ldflags → `lisa/internal/tui.Version` (verified with a
+    release.sh ldflags → `likha/internal/tui.Version` (verified with a
     stamped `--version` run). `internal/app` holds only `run.go` +
-    `run_test.go`; `cmd/lisa/main.go` byte-identical. Suite + race green.
+    `run_test.go`; `cmd/likha/main.go` byte-identical. Suite + race green.
 
 13. **T7 — Phase 2 gate + docs.** [x] DONE 2026-10-01 — `go build`,
     `go vet`, `go test ./...` (11 packages), `go test -race` on

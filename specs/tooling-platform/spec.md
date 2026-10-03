@@ -5,7 +5,7 @@ implementation commitment beyond the existing tool and MCP contracts.
 
 ## Goal
 
-Make Lisa/Likha's tools predictable, safe, inspectable, and extensible enough for
+Make Likha/Likha's tools predictable, safe, inspectable, and extensible enough for
 alpha and beta users. Add the practical capabilities users expect from coding
 agents without importing another product's private runtime or shipping an
 unbounded plugin system.
@@ -164,7 +164,7 @@ Beta builds on an alpha that has passed its exit gate. It broadens capability
 without turning agent definitions into executable plugins.
 
 - **User-authored agents:** support declarative Markdown/frontmatter profiles
-  under the private Lisa state directory, with optional project-local profiles
+  under the private Likha state directory, with optional project-local profiles
   only after a trust/precedence policy is specified. Initial fields: stable
   name, description, instructions, optional compatible model, and tool
   allowlist. Reject duplicate/reserved names and malformed definitions

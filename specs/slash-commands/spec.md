@@ -7,7 +7,7 @@ resume.
 
 ## Context
 
-Lisa's prompt input currently sends everything to the model. Users of agent TUIs
+Likha's prompt input currently sends everything to the model. Users of agent TUIs
 (OpenCode, OMP, Claude Code) expect leading-slash commands for session, model,
 and application control. The features needed for a daily driver already exist
 under the surface — session listing/resume (`--sessions`/`--resume`),
@@ -30,7 +30,7 @@ the model.
 | `/models` | Open the **model selection dialog**: the provider's reported models are fetched and shown with the cursor on the live model; the numbered list is remembered for `/model <n>`. |
 | `/model <n-or-id>` | Switch the **live client** to that model (a number from the last `/models` listing, or an exact model ID) for subsequent turns. The `/model` form keeps the stored configuration untouched; applying a model **inside the dialog** (Enter) additionally stores provider+model in `config.json` (decided 2026-09-29 with the dialog integration, superseding the earlier live-only rule). |
 | `/quit` | Identical to Ctrl+D: drains pending state, never replays pending approvals, restores the terminal. |
-| `/skills` | **Placeholder** — Lisa has no skills system in any spec. Excluded from scope until a skills feature exists; reserving the name without implementing it is not useful. |
+| `/skills` | **Placeholder** — Likha has no skills system in any spec. Excluded from scope until a skills feature exists; reserving the name without implementing it is not useful. |
 | `/help` | Print the command list in the conversation view. |
 | Unknown `/word` | Visible error in the conversation view; **never sent to the model**, and the draft text is restored so nothing is lost. |
 | `//word` | Escape: the leading slash is stripped and `/word` is sent to the model as a normal prompt. |

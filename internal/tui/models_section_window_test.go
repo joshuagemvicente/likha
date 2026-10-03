@@ -14,8 +14,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/model"
-	"lisa/internal/providers"
+	"likha/internal/model"
+	"likha/internal/providers"
 )
 
 func modelsRowProvider(t *testing.T, m *ui, id string) (model.Provider, bool) {

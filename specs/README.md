@@ -1,6 +1,6 @@
-# Lisa Spec Conventions
+# Likha Spec Conventions
 
-This directory is the source of truth for Lisa's behavior and delivery. The contract is
+This directory is the source of truth for Likha's behavior and delivery. The contract is
 **spec per feature**: each feature has its own folder with tasks, context, role, checklist,
 and status, so implementation cannot drift from the plan. The overarching product contract
 stays in [v1-spec.md](v1-spec.md); feature folders refine it and never contradict it.
@@ -68,5 +68,5 @@ specs/
 | Fast `/models` open (cache + progressive render) | [models-perf/](models-perf/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
 | Additional predefined providers (Groq, xAI, Together, Mistral, Cerebras) | [additional-providers/](additional-providers/spec.md) | partially implemented; provider probes pending |
 | Providers as connection manager (auth only, no activation) | [providers-connect/](providers-connect/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
-| Web UI served from a local server (`lisa --serve`) | [web-ui/](web-ui/spec.md) | draft — awaiting review; research record in [web-ui/research.md](web-ui/research.md) |
+| Web UI served from a local server (`likha --serve`) | [web-ui/](web-ui/spec.md) | draft — awaiting review; research record in [web-ui/research.md](web-ui/research.md) |
 | Working indicator (ephemeral activity row with subtle motion) | [working-indicator/](working-indicator/spec.md) | in progress — feature tests pass; unrelated full-suite session/prompt-history failures and real-terminal walkthrough pending |

@@ -91,7 +91,7 @@ func (e *Edit) Apply() error {
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return fmt.Errorf("temporary file name: %w", err)
 	}
-	tmpName := ".lisa-edit-" + hex.EncodeToString(nonce[:])
+	tmpName := ".likha-edit-" + hex.EncodeToString(nonce[:])
 	fd, err := unix.Openat(int(parent.Fd()), tmpName, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 	if err != nil {
 		return fmt.Errorf("create temporary file for %q: %w", e.Path, err)

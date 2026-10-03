@@ -1,6 +1,6 @@
 # Checklist: First-run provider setup in the TUI
 
-- [ ] Bare `lisa` (no flags, no env, no stored config) opens setup in an interactive terminal.
+- [ ] Bare `likha` (no flags, no env, no stored config) opens setup in an interactive terminal.
 - [ ] Provider picker lists all predefined providers with base URLs.
 - [ ] Every provider prompts for a masked API key before the connection check.
 - [ ] A wrong/revoked key shows the classified connection error and allows retry.

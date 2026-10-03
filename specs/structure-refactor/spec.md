@@ -4,10 +4,10 @@
 
 ## Context
 
-Lisa's layering is correct at the edges but failing in the middle. Every leaf
+Likha's layering is correct at the edges but failing in the middle. Every leaf
 package under `internal/` (`actions`, `mcp`, `model`, `repository`, `session`,
 `update`) is cohesive, well-named, and test-colocated. The dependency
-direction is clean: only `cmd/lisa/main.go` imports `lisa/internal/app`, and
+direction is clean: only `cmd/likha/main.go` imports `likha/internal/app`, and
 `app` imports the leaves with no cycles. The one structural debt is
 concentration: `internal/app` is a single package of ~13,300 lines (17 source
 files plus 24 test files) that owns, at once, the agent tool loop and
@@ -39,7 +39,7 @@ moves between types, no signature changes, no behavior change of any kind.
 1. **`ui/` moves to `internal/ui`.** The package is consumed only by the TUI
    in four files (`run.go`, `tui.go`, `status_markers_test.go`,
    `tui_muted_tools_test.go`). After the move the import path is
-   `lisa/internal/ui` and the `lisaui` alias is **kept**: dropping it
+   `likha/internal/ui` and the `likhaui` alias is **kept**: dropping it
    collides with the `ui` struct type in `internal/app` (field declarations
    `theme ui.Theme` do not resolve — the struct name shadows the package).
    The package doc comment stays; no behavior change.
@@ -66,7 +66,7 @@ moves between types, no signature changes, no behavior change of any kind.
 Phase 1 exit gate: `go build ./...`, `go vet ./...`, `go test ./...`
 (modulo the two pre-existing logo-asset failures recorded below),
 `go test -race` on the moved-package consumer suites, all green;
-`lisa/ui` absent; total diff is file moves, import lines, and doc
+`likha/ui` absent; total diff is file moves, import lines, and doc
 reference lines — reviewers should find no function body changes.
 Pre-existing failures (in-flight user work, unrelated to this refactor):
 `TestComposerStylesAndNarrowDegradation` and
@@ -109,7 +109,7 @@ Target shape:
   `themes_modal_test.go`, `run_test.go`'s UI cases, etc.).
 - **`internal/app` shrinks to composition** — `run.go` (program
   construction, the single `tea.NewProgram` call site), agent-driven
-  wiring, and nothing else. `cmd/lisa/main.go` keeps calling into `app`;
+  wiring, and nothing else. `cmd/likha/main.go` keeps calling into `app`;
   `main.go` itself stays 11 lines.
 
 Known couplings the split must survive (called out explicitly so they are

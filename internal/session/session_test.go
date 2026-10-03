@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"lisa/internal/model"
+	"likha/internal/model"
 )
 
 func testStore(t *testing.T) (*Store, string, string) {

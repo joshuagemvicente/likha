@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"lisa/internal/model"
+	"likha/internal/model"
 )
 
 func benchSnapshot(messages int) Snapshot {

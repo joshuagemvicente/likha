@@ -17,7 +17,7 @@ import (
 	"golang.org/x/sys/unix"
 	_ "modernc.org/sqlite"
 
-	"lisa/internal/model"
+	"likha/internal/model"
 )
 
 const schemaVersion = 1

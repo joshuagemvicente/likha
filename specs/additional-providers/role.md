@@ -14,7 +14,7 @@ You are the spec author and implementer for this feature.
 - Keep Together pending until the live model-list shape and full probe are confirmed; DeepSeek requires a passing root probe plus validator/request-compatibility tests; Gemini requires thought-signature-preserving tool-call tests and a passing live probe.
 - Do not describe an unprobed row as accepted in README, v1-spec, or release notes — pending-probe marking only.
 - Keep any `parseEndpoint` relaxation minimal (empty path only) with the old rejects pinned by test; it also gates custom `--endpoint` validation.
-- `KeyEnv` follows `LISA_<NAME>_API_KEY`; no stored-config or session-table schema changes.
+- `KeyEnv` follows `LIKHA_<NAME>_API_KEY`; no stored-config or session-table schema changes.
 - Out of scope until separately specified: Fireworks (same-base OpenAI-shaped model-list route unresolved), AWS SigV4, non-OpenAI-compatible adapters, default-model selection, per-provider pricing or context-window metadata.
 
 ## Escalation

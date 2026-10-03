@@ -6,7 +6,7 @@ Code and docs this feature touches.
 
 | Path | Relevance |
 | --- | --- |
-| `internal/app/run.go` | Flag/env parsing (`--endpoint`, `--model`, `LISA_*`); provider config extends here. |
+| `internal/app/run.go` | Flag/env parsing (`--endpoint`, `--model`, `LIKHA_*`); provider config extends here. |
 | `internal/model/client.go` | The one OpenAI-compatible surface; provider list must not fork it. |
 | `internal/app/tui.go` | Connection status line, unverified warning, provider identity display. |
 | `internal/app/agent.go` | Pre-run connection check hook before dispatching tools. |
@@ -64,8 +64,8 @@ Code and docs this feature touches.
   (observed live: chat completions return HTTP 400 `MissingSessionID` without it) and an
   identifying User-Agent rather than a generic HTTP-library name.
   https://opencode.ai/docs/go/#where-can-i-use-it
-  Lisa sends its own SQLite session ID in that header for both opencode rows and sets
-  `User-Agent: lisa/<version>` on every provider request.
+  Likha sends its own SQLite session ID in that header for both opencode rows and sets
+  `User-Agent: likha/<version>` on every provider request.
 - **Live probe result (2026-09-29, user-run):** `opencode-go` completed a real session
   with the user's API key through the TUI setup flow — connection check, model picker,
   streamed responses, and agent tool usage all worked after the session-header fix.
@@ -75,7 +75,7 @@ Code and docs this feature touches.
   no credentialed compatibility probes have been run for them. Documentation evidence
   establishes route intent only, not acceptance.
 - Top agent TUIs defer failures to prompt time and validate on first use rather than
-  preflight; Lisa's startup + pre-run checks are deliberately stricter.
+  preflight; Likha's startup + pre-run checks are deliberately stricter.
   https://opencode.ai/docs/troubleshooting/
 
 ## Open items carried forward

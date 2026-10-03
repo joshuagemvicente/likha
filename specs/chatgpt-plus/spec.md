@@ -16,7 +16,7 @@ agent harnesses do this today and agree on every flow constant:
 - **OMP**: its own `openai-codex` provider with the same endpoints, client ID,
   and port.
 
-Lisa's predefined provider list (`internal/model/provider.go`) is no longer
+Likha's predefined provider list (`internal/model/provider.go`) is no longer
 BYOK-only: every key-based row carries a `KeyEnv` and the client sends one
 static Bearer key, while the `chatgpt` row carries a new `Auth: AuthOAuth`
 kind whose credential is an `OAuthCredentials` token set (`access`,
@@ -54,13 +54,13 @@ following the spec's stated preference:
    (`ChatGPTClientID = app_EMoamEEZ73f0CkXaXp7hrann`). The provider-constant
    comment in `internal/model/provider.go` documents the reuse, and
    README's "Sign in with ChatGPT (Plus/Pro)" section states the login uses
-   OpenAI's public Codex CLI client, not a Lisa-issued one. No own client ID
+   OpenAI's public Codex CLI client, not a Likha-issued one. No own client ID
    was sought.
 2. **Terms-of-service risk — resolved: document, not accept silently.**
    README's "Privacy and terms" note and the provider-constant comment state
    that using a ChatGPT subscription through a third-party harness is
    subject to OpenAI's consumer terms; the login surfaces never claim a
-   Lisa-issued client.
+   Likha-issued client.
 3. **Wire format — resolved: native Responses request/stream mapping** in a
    new `internal/model/codex.go` surface (`BuildCodexRequest`,
    `ConsumeCodexStream`), reached from `Client.Stream` whenever the client
@@ -82,8 +82,8 @@ following the spec's stated preference:
    backend; the OAuth connection check validates the login without a model
    list.
 7. **Headless escape hatch — resolved: the `--device-login` CLI flag**, not
-   an environment variable. No `LISA_CHATGPT_REFRESH_TOKEN`-style env var
-   exists; `lisa --provider chatgpt --device-login` runs the device flow
+   an environment variable. No `LIKHA_CHATGPT_REFRESH_TOKEN`-style env var
+   exists; `likha --provider chatgpt --device-login` runs the device flow
    headlessly and stores the login.
 
 ## Implementation notes (what was built)

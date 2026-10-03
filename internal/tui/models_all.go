@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"lisa/internal/model"
-	"lisa/internal/providers"
+	"likha/internal/model"
+	"likha/internal/providers"
 )
 
 // modelsSection is one configured provider's contribution to the /models
@@ -489,7 +489,7 @@ func (m *ui) applyModelRow(row modelsRow) {
 		}
 		if !ok {
 			m.status = "Error"
-			m.entries = append(m.entries, entry{role: "Error", content: row.provider.DisplayName + " has no stored sign-in; sign in during first-run setup or run lisa --provider chatgpt --device-login"})
+			m.entries = append(m.entries, entry{role: "Error", content: row.provider.DisplayName + " has no stored sign-in; sign in during first-run setup or run likha --provider chatgpt --device-login"})
 			return
 		}
 		client, err := model.NewOAuth(row.provider.BaseURL, row.model, model.ChatGPTIssuer, model.ChatGPTClientID, creds)
@@ -548,7 +548,7 @@ func (m *ui) activateModelClient(p model.Provider, client *model.Client, modelID
 	m.setActiveContextWindows(p, modelID, m.rowContextWindow(p.Name, modelID), sameProvider)
 	m.status = "Connected"
 	m.layoutWidth = 0
-	m.entries = append(m.entries, entry{role: "Lisa", content: "Model switched to " + modelID + " on " + p.DisplayName + " and stored for later runs."})
+	m.entries = append(m.entries, entry{role: "Likha", content: "Model switched to " + modelID + " on " + p.DisplayName + " and stored for later runs."})
 	cfg, err := providers.LoadStoredConfig(m.stateDir)
 	if err != nil {
 		m.entries = append(m.entries, entry{role: "Error", content: "Store model: " + err.Error()})

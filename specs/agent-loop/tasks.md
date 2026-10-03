@@ -20,7 +20,7 @@ starts.
    turn ends `done` (AC-3); a second pass asserts the round-64 notice
    (AC-4).
 3. **TUI notice rendering.** Handle the `notice` kind in the event
-   switch: append a `Lisa`-role conversation entry and leave `working`
+   switch: append a `Likha`-role conversation entry and leave `working`
    and any pending state untouched.
    *Verify:* TUI test feeding a `notice` event mid-run: entry appears,
    composer stays inert, no cancellation/pending side effects (AC-2/4

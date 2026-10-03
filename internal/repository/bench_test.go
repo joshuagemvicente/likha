@@ -11,7 +11,7 @@ import (
 func benchRepo(b *testing.B) (*Repository, string) {
 	b.Helper()
 	root := b.TempDir()
-	dirs := []string{"internal/app", "internal/model", "internal/repository", "cmd/lisa", "docs", "testdata/fixtures"}
+	dirs := []string{"internal/app", "internal/model", "internal/repository", "cmd/likha", "docs", "testdata/fixtures"}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
 			b.Fatal(err)

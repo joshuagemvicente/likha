@@ -16,7 +16,7 @@ Observable outcomes. Mirrors v1-spec FR-03/FR-15 (muted roles) and FR-17
       through on resume; same code path asserted in the rebuild test.)
 - [x] Every predefined theme renders tools legibly through the muted role
       (no hardcoded color path). (`TestToolEntriesMutedAcrossThemes` over
-      all `lisaui.ThemeNames()`.)
+      all `likhaui.ThemeNames()`.)
 
 ## Word kills and motion (FR-17 + this feature)
 

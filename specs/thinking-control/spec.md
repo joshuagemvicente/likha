@@ -5,7 +5,7 @@
 ## Context
 
 Reasoning models expose a thinking-budget lever: more thinking can trade
-latency and tokens for answer quality on hard tasks. Lisa already renders
+latency and tokens for answer quality on hard tasks. Likha already renders
 thinking-model reasoning muted in the conversation ([v1-spec.md](../v1-spec.md)
 FR-15) but has no way for the user to influence *how much* the model thinks —
 the chat-completions request body in `internal/model/client.go` carries no
@@ -16,7 +16,7 @@ The precedent is Claude Code's thinking control: plain `think`, `think hard`,
 `think harder`, and `ultrathink` keywords in a prompt allocate escalating
 thinking budgets, and `/think` exposes the same idea as an explicit command
 instead of a prompt keyword (documented in Anthropic's "Claude Code: Best
-practices for agentic coding", ultrathink = highest allocation). Lisa adopts
+practices for agentic coding", ultrathink = highest allocation). Likha adopts
 the *concept* — a per-session quality lever for reasoning models — not the
 prompt-keyword mechanism: prompts must never gain magic words (v1-spec §3:
 compatibility is behavior to verify; keyword sniffing would be invisible,
@@ -63,7 +63,7 @@ chrome, Nerd Font glyphs strictly opt-in).
    - there is **no animation, flash, or pulsing** of any kind; the badge
      appears for the duration of the streaming turn and disappears with the
      status row's normal turnover;
-   - no Nerd Font glyph in the badge unless `--nerd-fonts`/`LISA_NERD=1` is
+   - no Nerd Font glyph in the badge unless `--nerd-fonts`/`LIKHA_NERD=1` is
      on, and then only as an opt-in prefix marker, never as the sole
      carrier of the level.
 
@@ -99,7 +99,7 @@ chrome, Nerd Font glyphs strictly opt-in).
    turn error suggesting `/think off`**. Both are FR-11-conformant; (a) is
    safer against silent breakage, (b) is more honest. Do not mix stances
    across rows without documenting why. Unlisted endpoints (BYOK custom
-   URL) always follow the unprobed stance: Lisa cannot know what an
+   URL) always follow the unprobed stance: Likha cannot know what an
    arbitrary endpoint accepts.
 
 8. **Off.** `off` sends no reasoning field at all — byte-identical request

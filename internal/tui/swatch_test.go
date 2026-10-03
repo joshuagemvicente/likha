@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 // Swatches paint inline: a hex literal in an assistant message renders its

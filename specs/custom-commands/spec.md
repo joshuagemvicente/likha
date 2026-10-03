@@ -8,7 +8,7 @@ Users of agent TUIs expect to reuse their own prompt recipes as typed
 commands. The precedent is Claude Code's custom slash commands
 (`.claude/commands/*.md`: a markdown file whose filename becomes the command
 and whose body is a prompt template with `$ARGUMENTS` substituted) and OMP
-skills: both are **prompt templates, not code**. Lisa already reserves the
+skills: both are **prompt templates, not code**. Likha already reserves the
 name `/skills` in the TUI but it is inert — `internal/skills/skills.go` is an
 explicit placeholder ("`/skills` in the TUI is intentionally reserved but
 inert"), and [slash-commands/spec.md](../slash-commands/spec.md) excludes
@@ -23,7 +23,7 @@ architecture, and this feature does not introduce one. A custom command is
 markdown read from disk and expanded into conversation text. There is no
 execution, ever: no shell invocation, no scripts, no tool registration or
 allowlist changes, no code loading, no hooks. The only effect of invoking a
-custom command is that Lisa composes a prompt string and treats it exactly as
+custom command is that Likha composes a prompt string and treats it exactly as
 if the user had typed it. If this feature ever needs to run anything, it is a
 different spec contradicting v1-spec.md.
 
@@ -32,7 +32,7 @@ different spec contradicting v1-spec.md.
 - A user command is a markdown file whose name (filename without `.md`)
   becomes a slash command and whose body is a prompt template. Proposed
   locations:
-  - repository `.lisa/commands/*.md` — repo-scoped, shareable via version
+  - repository `.likha/commands/*.md` — repo-scoped, shareable via version
     control;
   - `<stateDir>/commands/*.md` — global, beside `config.json` /
     `providers.json` / `mcp.json` in the private state directory.
@@ -85,7 +85,7 @@ file is prompt text in the conversation.
    only, name from the filename.
 2. **Locations and precedence.** Repo only, state dir only, or both; if both
    exist, does the repo file win, the state file win, or is the collision an
-   error? (Tension: `.lisa/commands` inside an untrusted repository vs.
+   error? (Tension: `.likha/commands` inside an untrusted repository vs.
    treating command files as untrusted input regardless of location.)
 3. **Load timing.** Hot reload on file change vs. load once at startup (with
    `/skills` re-reading?).
@@ -110,7 +110,7 @@ file is prompt text in the conversation.
   private state directory; `/skills` lists them; an invoked command's
   template, with the typed arguments substituted, is sent as the user prompt
   and never executes anything or changes tools or configuration."
-- README command reference documents `.lisa/commands/*.md` (and the state
+- README command reference documents `.likha/commands/*.md` (and the state
   directory, per the location decision) and the untrusted-input rule.
 
 ## Acceptance criteria (draft)

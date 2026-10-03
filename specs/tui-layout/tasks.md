@@ -8,7 +8,7 @@ the order the work actually landed; phase 3 has no tasks yet (order stays
 
 1. Amended `specs/v1-spec.md` FR-12 and §7: the top-of-screen furniture on
    ≥56-col terminals is the logo block plus the status bar only; the
-   status bar carries identity with a small Lisa mark at its right end; a
+   status bar carries identity with a small Likha mark at its right end; a
    single compact identity line covers narrow terminals. Verified before
    any `header()` change.
 2. `internal/app/config.go`: `status_line.folder` and `.branch` migrated to
@@ -26,12 +26,12 @@ the order the work actually landed; phase 3 has no tasks yet (order stays
 ## Wave 2 — wiring
 
 4. `internal/app/tui.go`: `header()` reduced to zero lines at ≥56 cols and
-   one compact line (`Lisa · <repo basename>`) below; every
+   one compact line (`Likha · <repo basename>`) below; every
    `len(m.header())` consumer (bodyHeight, composer, popups, page math)
    audited against the zero-line form; the fresh-session logo entry now
    carries the bare `logo` constant only (`run.go` — the embedded
    `Repository:` line is gone).
-5. `internal/app/status_line.go`: Lisa mark moved to the bottom-right end
+5. `internal/app/status_line.go`: Likha mark moved to the bottom-right end
    of the row (first thing dropped under width pressure, ≥70-col
    threshold unchanged); `contextSegment` upgraded to
    `ctx <n>% · <used>/<window>` with the narrow bare-percentage fallback

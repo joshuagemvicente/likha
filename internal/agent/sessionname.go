@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"lisa/internal/model"
+	"likha/internal/model"
 )
 
 // nameInstruction is the user message appended to the first turn to ask the

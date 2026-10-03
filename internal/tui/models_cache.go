@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"lisa/internal/model"
+	"likha/internal/model"
 )
 
 const modelsCacheTTL = 5 * time.Minute

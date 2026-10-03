@@ -38,11 +38,11 @@ artifact_available() {
 mkdir -p "$dist"
 for os in darwin linux; do
     for arch in amd64 arm64; do
-        archive="lisa_${version}_${os}_${arch}.tar.gz"
+        archive="likha_${version}_${os}_${arch}.tar.gz"
         artifact_available "$dist/$archive" || { printf 'Release artifact already exists: %s\n' "$dist/$archive" >&2; exit 1; }
     done
 done
-manifest="lisa_${version}_checksums.txt"
+manifest="likha_${version}_checksums.txt"
 artifact_available "$dist/$manifest" || { printf 'Release artifact already exists: %s\n' "$dist/$manifest" >&2; exit 1; }
 
 staging=$(mktemp -d "$dist/.release.XXXXXXXX")
@@ -54,12 +54,12 @@ for os in darwin linux; do
     for arch in amd64 arm64; do
         target=$staging/$os-$arch
         mkdir "$target"
-        (cd "$root" && CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" GOWORK=off GOFLAGS= go build -mod=readonly -trimpath -buildvcs=false -ldflags="-s -w -X lisa/internal/tui.Version=$version" -o "$target/lisa" ./cmd/lisa)
+        (cd "$root" && CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" GOWORK=off GOFLAGS= go build -mod=readonly -trimpath -buildvcs=false -ldflags="-s -w -X likha/internal/tui.Version=$version" -o "$target/likha" ./cmd/likha)
         cp "$root/README.md" "$root/LICENSE" "$target/"
-        chmod 755 "$target/lisa"
-        archive="lisa_${version}_${os}_${arch}.tar.gz"
+        chmod 755 "$target/likha"
+        archive="likha_${version}_${os}_${arch}.tar.gz"
         # macOS tar otherwise adds AppleDouble ._ entries that its own listing hides.
-        COPYFILE_DISABLE=1 tar -czf "$staging/$archive" -C "$target" lisa README.md LICENSE
+        COPYFILE_DISABLE=1 tar -czf "$staging/$archive" -C "$target" likha README.md LICENSE
     done
 done
 (
@@ -67,7 +67,7 @@ done
     : > "$manifest"
     for os in darwin linux; do
         for arch in amd64 arm64; do
-            archive="lisa_${version}_${os}_${arch}.tar.gz"
+            archive="likha_${version}_${os}_${arch}.tar.gz"
             if [ "$checksum_tool" = sha256sum ]; then
                 sha256sum "$archive" >> "$manifest"
             else
@@ -79,7 +79,7 @@ done
 
 for os in darwin linux; do
     for arch in amd64 arm64; do
-        archive="lisa_${version}_${os}_${arch}.tar.gz"
+        archive="likha_${version}_${os}_${arch}.tar.gz"
         artifact_available "$dist/$archive" || { printf 'Release artifact already exists: %s\n' "$dist/$archive" >&2; exit 1; }
         mv "$staging/$archive" "$dist/$archive"
         printf '%s\n' "$dist/$archive"

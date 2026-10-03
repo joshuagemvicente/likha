@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"lisa/internal/model"
+	"likha/internal/model"
 )
 
 func nameTestClient(t *testing.T, handler http.HandlerFunc) *model.Client {

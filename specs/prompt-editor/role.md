@@ -2,7 +2,7 @@
 
 Acting stance and constraints for whoever executes this spec.
 
-- Senior Go/TUI engineer. Preserve Lisa's core behaviors while integrating:
+- Senior Go/TUI engineer. Preserve Likha's core behaviors while integrating:
   the approval flow, inert-while-streaming rules, command dispatch, and
   dialog key routing are load-bearing and must not shift order.
 - The spec is the contract: user-visible behavior comes from `spec.md`; if an

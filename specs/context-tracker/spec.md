@@ -4,9 +4,9 @@
 
 ## Context
 
-Lisa already has a context segment in its status bar, but it can show `ctx —`
+Likha already has a context segment in its status bar, but it can show `ctx —`
 even when the user has a useful estimate available. Today the segment depends
-on a provider-reported prompt-token count and a model ID present in Lisa's
+on a provider-reported prompt-token count and a model ID present in Likha's
 documented context-window catalog. It does not estimate the outbound request,
 and the displayed value can therefore be unavailable or lag the current
 conversation.
@@ -24,20 +24,20 @@ and FR-23 in [v1-spec.md](../v1-spec.md). It does not manage or preserve context
   reported total.
 - **Use measured usage when available.** After a request completes, the
   provider-reported input count replaces the estimate for that request. If the
-  provider omits usage, Lisa uses the estimate for that same request; it never
+  provider omits usage, Likha uses the estimate for that same request; it never
   carries an older measured count forward as though it described the current
   prompt.
 - **Estimate the actual outbound input before each request.** The estimate
-  covers the messages and tool definitions Lisa sends, including the current
+  covers the messages and tool definitions Likha sends, including the current
   prompt, steering prompts, and tool results already added to the conversation.
-  Use a model-specific tokenizer when Lisa supports one; otherwise use a local
+  Use a model-specific tokenizer when Likha supports one; otherwise use a local
   approximation. Every estimate is visibly marked with `~`.
 - **Resolve the window without guessing.** A positive user override for the
   selected provider/model takes precedence, followed by provider/model metadata,
-  then Lisa's documented model catalog. Unknown, invalid, or absent limits stay
-  unknown; Lisa never substitutes a generic default.
+  then Likha's documented model catalog. Unknown, invalid, or absent limits stay
+  unknown; Likha never substitutes a generic default.
 - **Configure an override in private state.** Advanced users set a positive
-  token count in the nested `context_windows` map in Lisa's private
+  token count in the nested `context_windows` map in Likha's private
   `config.json`, keyed first by provider ID and then model ID. For example:
   `"context_windows": {"openai": {"gpt-4.1": 1000000}}`. No TUI editor is
   added. Invalid entries are not used as a limit.
@@ -60,14 +60,14 @@ and FR-23 in [v1-spec.md](../v1-spec.md). It does not manage or preserve context
   estimation limitation must not turn an otherwise successful model response
   into an error.
 - **Recompute on resume.** The tracker is not durable session data. On resume,
-  Lisa estimates from the restored active conversation and replaces that value
+  Likha estimates from the restored active conversation and replaces that value
   with measured usage after the next completed request, if available.
 
 ## Scope boundaries
 
 - This is a display and accounting feature, not automatic compaction, a token
   budget, or a guarantee that a request will fit a provider's limits.
-- It does not change which conversation messages Lisa sends, model output
+- It does not change which conversation messages Likha sends, model output
   limits, provider selection, or session persistence semantics.
 - It does not estimate unsent composer text or accumulate billing/session
   token totals into the context count.
@@ -89,7 +89,7 @@ and FR-23 in [v1-spec.md](../v1-spec.md). It does not manage or preserve context
       malformed optional usage does not fail an otherwise valid response.
 - [ ] Model-specific tokenization is used where supported and a local fallback
       is marked approximate. The estimate includes the prompt messages and tool
-      definitions Lisa sends; it does not count generated output as input.
+      definitions Likha sends; it does not count generated output as input.
 - [ ] A configured per-provider/model limit override wins over provider
       metadata; metadata wins over the documented catalog. The override is
       stored in private `config.json` under `context_windows`, keyed by

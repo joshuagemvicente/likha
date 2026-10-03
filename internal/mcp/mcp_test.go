@@ -15,7 +15,7 @@ import (
 // server answers initialize, tools/list (one "echo" tool), and tools/call
 // (echoes the arguments back) over newline-delimited JSON-RPC.
 func TestMain(m *testing.M) {
-	if os.Getenv("LISA_FAKE_MCP") == "1" {
+	if os.Getenv("LIKHA_FAKE_MCP") == "1" {
 		runFakeMCPServer()
 		return
 	}
@@ -75,11 +75,11 @@ func fakeServerCommand(t *testing.T) ServerConfig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ServerConfig{Command: exe, Env: map[string]string{"LISA_FAKE_MCP": "1"}}
+	return ServerConfig{Command: exe, Env: map[string]string{"LIKHA_FAKE_MCP": "1"}}
 }
 
 func TestHandshakeListsToolsAndCalls(t *testing.T) {
-	client, err := Start("fake", fakeServerCommand(t), "lisa/1.2.3")
+	client, err := Start("fake", fakeServerCommand(t), "likha/1.2.3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,8 +100,8 @@ func TestHandshakeListsToolsAndCalls(t *testing.T) {
 }
 
 func TestStartRejectsBadServer(t *testing.T) {
-	cfg := ServerConfig{Command: "/nonexistent/lisa-mcp-fake"}
-	if _, err := Start("bad", cfg, "lisa/1.2.3"); err == nil {
+	cfg := ServerConfig{Command: "/nonexistent/likha-mcp-fake"}
+	if _, err := Start("bad", cfg, "likha/1.2.3"); err == nil {
 		t.Fatal("accepted a nonexistent server command")
 	}
 }
@@ -114,7 +114,7 @@ func TestLoadConfigShapes(t *testing.T) {
 	}
 	// Claude-Desktop shape parses; invalid command fails loudly.
 	path := dir + "/mcp.json"
-	if err := os.WriteFile(path, []byte(`{"mcpServers":{"echo":`+fmt.Sprintf(`{"command":"%s","args":[],"env":{"LISA_FAKE_MCP":"1"}}`, fakeExe())+`}}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{"echo":`+fmt.Sprintf(`{"command":"%s","args":[],"env":{"LIKHA_FAKE_MCP":"1"}}`, fakeExe())+`}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	servers, err := LoadConfig(dir)
@@ -144,7 +144,7 @@ func TestCallTimeout(t *testing.T) {
 	cfg.Command = "sh"
 	cfg.Args = []string{"-c", "cat > /dev/null"}
 	start := time.Now()
-	client, err := Start("silent", cfg, "lisa/1.2.3")
+	client, err := Start("silent", cfg, "likha/1.2.3")
 	elapsed := time.Since(start)
 	if err == nil {
 		// The handshake timed out (bounded) — that is the expected outcome

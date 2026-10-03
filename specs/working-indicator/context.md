@@ -72,7 +72,7 @@ behavior in [spec.md](spec.md) is the whole contract.
 
 - External: OpenCode `spinner.tsx` (compact spinner + static `⋯`
   fallback), OMP `loader.ts` + `shimmer.ts` (live working row, colored
-  sweep — Lisa's closest reference, slowed to a 120 ms tick), Claude Code
+  sweep — Likha's closest reference, slowed to a 120 ms tick), Claude Code
   `SpinnerAnimationRow.tsx` + `settings-reference`
   (`spinnerVerbs` / `prefersReducedMotion` — both deferred here).
   Cited in spec.md § Context.

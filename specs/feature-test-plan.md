@@ -1,10 +1,10 @@
-# Lisa v1: Incremental Feature and Test Plan
+# Likha v1: Incremental Feature and Test Plan
 
-This plan applies to the requirements in [v1-spec.md](v1-spec.md). A feature is integrated only when its user-visible behavior works in the application, a behavioral test checks an observable failure mode, and its smoke scenario has been run. The shared automated entry point is `go test ./...` from the Lisa project root. Go unit tests live beside the code they test; `tests/integration/` holds tests that launch the executable. Do not add skipped, always-passing, or mock-only tests to claim a feature works.
+This plan applies to the requirements in [v1-spec.md](v1-spec.md). A feature is integrated only when its user-visible behavior works in the application, a behavioral test checks an observable failure mode, and its smoke scenario has been run. The shared automated entry point is `go test ./...` from the Likha project root. Go unit tests live beside the code they test; `tests/integration/` holds tests that launch the executable. Do not add skipped, always-passing, or mock-only tests to claim a feature works.
 
 ## Feature 1 — Full-screen TUI, startup, identity, and model connection (FR-01–04, FR-12, FR-14)
 
-**Implemented:** `lisa` selects a repository, displays its identity in an alternate-screen TUI, accepts prompts, streams text from a configured `/v1` endpoint, exposes previous/next pages instead of scrolling, and cancels active runs. The model name is required; the endpoint defaults to local Ollama. Text and tool calls follow the OpenAI-compatible SSE protocol. *(Historical record: the `local` provider row was later removed — see the provider-only pivot note in CHANGELOG.md. The OpenAI-compatible surface and all smokes remain valid against hosted providers.)*
+**Implemented:** `likha` selects a repository, displays its identity in an alternate-screen TUI, accepts prompts, streams text from a configured `/v1` endpoint, exposes previous/next pages instead of scrolling, and cancels active runs. The model name is required; the endpoint defaults to local Ollama. Text and tool calls follow the OpenAI-compatible SSE protocol. *(Historical record: the `local` provider row was later removed — see the provider-only pivot note in CHANGELOG.md. The OpenAI-compatible surface and all smokes remain valid against hosted providers.)*
 
 - **Automated entry point:** `go test ./...` runs path/configuration tests, model-client streaming/fragmented-tool/error/cancellation tests using a local HTTP server, and TUI viewport, paging, resize, draft input, and stale-event tests.
 - **Observed smoke:** Launched the actual TUI against a local OpenAI-compatible protocol server; checked logo and full-screen layout, streamed long output across four pages, navigated to older pages, cancelled a stream, and submitted another prompt afterward. *(The README's real-model claim was later verified: see "Real-model walkthrough" in Feature 2 below.)*
@@ -27,7 +27,7 @@ This plan applies to the requirements in [v1-spec.md](v1-spec.md). A feature is 
 
 ## Feature 4 — SQLite session continuity (FR-10–11)
 
-- **Implemented:** Lisa stores repository-associated conversation snapshots in private SQLite state and selects sessions with `--sessions` and `--resume ID`. Cancellation and exit do not grant pending approvals. A stale concurrent save fails without replacing another process's session.
+- **Implemented:** Likha stores repository-associated conversation snapshots in private SQLite state and selects sessions with `--sessions` and `--resume ID`. Cancellation and exit do not grant pending approvals. A stale concurrent save fails without replacing another process's session.
 - **Automated entry point:** `go test ./...` exercises reopen, isolation, schema version checks, rollback, interrupted approvals, and concurrent-save conflicts. `go test -race ./...` passed locally.
 - **Observed smoke:** Exited after completed turns and resumed them in the installed macOS ARM64 binary. Exited during an edit review, resumed without executing the edit, and confirmed another repository could not load that session. Used `sqlite3 .backup` and resumed a known session from a separate restored state directory.
 

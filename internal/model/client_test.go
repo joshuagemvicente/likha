@@ -485,7 +485,7 @@ func TestStreamSendsSessionHeaderAndAgentUserAgent(t *testing.T) {
 	if sawSession != "ses_abc123" {
 		t.Fatalf("session header = %q", sawSession)
 	}
-	if sawUA != UserAgent || !strings.HasPrefix(sawUA, "lisa/") {
+	if sawUA != UserAgent || !strings.HasPrefix(sawUA, "likha/") {
 		t.Fatalf("user agent = %q, want %q", sawUA, UserAgent)
 	}
 	// A client without a session header must not send an empty one.

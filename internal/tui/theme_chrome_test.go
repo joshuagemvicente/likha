@@ -8,9 +8,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
-	"lisa/internal/agent"
-	"lisa/internal/providers"
-	"lisa/internal/session"
+	"likha/internal/agent"
+	"likha/internal/providers"
+	"likha/internal/session"
 )
 
 func TestThemeBackgroundFillsChrome(t *testing.T) {
@@ -24,7 +24,7 @@ func TestThemeBackgroundFillsChrome(t *testing.T) {
 	}
 
 	for i := 0; i < 50; i++ {
-		m.entries = append(m.entries, entry{role: "Lisa", content: "long transcript row"})
+		m.entries = append(m.entries, entry{role: "Likha", content: "long transcript row"})
 	}
 	m.layoutWidth = 0
 	m.rebuild()
@@ -74,7 +74,7 @@ func TestThemeBackgroundFillsChrome(t *testing.T) {
 
 	narrow := NewUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true, Theme: "horizon"}, t.TempDir(), nil, session.Snapshot{})
 	narrow.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
-	narrow.entries = append(narrow.entries, entry{role: "Lisa", content: "narrow header row"})
+	narrow.entries = append(narrow.entries, entry{role: "Likha", content: "narrow header row"})
 	narrow.layoutWidth = 0
 	assertThemeBackgroundCoversView(t, narrow.mainView(), narrow.width)
 }

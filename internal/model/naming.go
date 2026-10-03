@@ -1,5 +1,5 @@
 // Model display-name catalog: curated, human-readable names for the models
-// Lisa may connect to, maintained beside the context-window table in
+// Likha may connect to, maintained beside the context-window table in
 // windows.go (spec tui-layout phase 1b, resolved decision 3). Display-only:
 // slugs remain canonical in /models, stored config, and API calls. This is a
 // naming table, not a documentation source — entries whose slug is not yet

@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"lisa/internal/repository"
+	"likha/internal/repository"
 )
 
 // File references: `@path` tokens in a prompt resolve to repository files.

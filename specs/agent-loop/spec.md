@@ -38,7 +38,7 @@ harness prompt and `AGENTS.md` loader remain that spec's scope.
 
 1. **Read-only searches never show the shell-review dialog.** When the user
    asks to find or search something, the agent uses `grep`/`glob`/`read` —
-   never `run_command` — for repository inspection. Concretely: Lisa sends
+   never `run_command` — for repository inspection. Concretely: Likha sends
    a harness system message with every request whose tool contract states
    that the built-in read-only tools are the default for repository
    inspection and that `run_command` is reserved for actions only the
@@ -46,8 +46,8 @@ harness prompt and `AGENTS.md` loader remain that spec's scope.
    repository). The message is compiled into the binary, not stored in
    history, and is not user-editable in this slice.
 2. **The round checkpoint continues instead of failing.** When a turn
-   reaches the consecutive tool-round checkpoint, Lisa appends a visible
-   conversation notice (Lisa role: "Tool-round checkpoint reached;
+   reaches the consecutive tool-round checkpoint, Likha appends a visible
+   conversation notice (Likha role: "Tool-round checkpoint reached;
    continuing."), tells the model to continue in the same turn, and keeps
    the loop running. The notice recurs at each subsequent checkpoint so
    long tasks stay legible. The turn ends only when the model produces a
