@@ -103,6 +103,8 @@ restores.
   to legible plain text — backgrounds never carry meaning alone; role labels
   (`You:`/`Tool:`/…) and fg roles remain.
 
+> Superseded for the transcript by [transcript-redesign](../transcript-redesign/spec.md) (user-approved 2026-10-04): role labels are replaced by distinct block glyphs (meaning still never color-only); only the user prompt keeps a transcript band, assistant and tool blocks sit on the base canvas, request and result render as one item, and `default` gains a neutral user band.
+
 ### M4 — Inline color swatches (2026-10-01)
 
 Color literals in transcript prose preview their own color: `#4493f8` (plus

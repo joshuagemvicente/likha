@@ -51,6 +51,7 @@ boundary rule kept as the underlying word rule.
   Ctrl+O expand tool output (OMP's `app.tools.expand` is noted in research
   only), no in-tool content rendering. This spec changes color and keys, not
   content shape.
+  > Superseded for the transcript by [transcript-redesign](../transcript-redesign/spec.md) (user-approved 2026-10-04): tool items gain bounded inline previews with `ctrl+o to expand`, rendered markdown and diffs, and a blinking running dot.
 - No prompt-keyword sniffing, no new slash commands, no dialogs.
 - No key remapping/rebindable keymap layer (declined in the user confirm;
   OpenCode-style config keybinds are a separate feature if ever asked).

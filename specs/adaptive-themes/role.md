@@ -19,6 +19,7 @@ Acting stance and constraints for whoever executes this spec.
   per-speaker hue coding — one `Normal` fg, authorship carried by bands.
 - Honest-rendering rule: backgrounds never carry meaning alone; role labels
   and foreground roles survive degradation to plain text.
+  > Superseded for the transcript by [transcript-redesign](../transcript-redesign/spec.md) (user-approved 2026-10-04): block glyphs replace role labels as the non-color carrier; a blinking running dot and derived `Success`/`BgCode`/diff roles are approved.
 - Scope discipline: no new families, no palette-hue redesign, no key
   remapping, no new commands, no dialog reshaping, no terminal-background
   change watcher. M1 may ship alone; M2–M3 keep `Resolve`'s signature stable

@@ -52,6 +52,8 @@ style roles; this feature completes it and wires it into the TUI.
    base); no gradients or color floods (visual-restraint rule). The `default`
    family keeps the plain terminal look.
 
+   > Superseded for the transcript by [transcript-redesign](../transcript-redesign/spec.md) (user-approved 2026-10-04): only the user prompt keeps a band (assistant/tool on the canvas), and `default` gains a faint neutral user band.
+
 ## Functional changes (v1-spec.md)
 
 - **FR-15 (new):** The user can choose a color theme from the predefined list

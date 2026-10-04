@@ -17,6 +17,7 @@ Acting stance and constraints for whoever executes this spec.
   as features.
 - Plain-text legibility rules from FR-15 apply: no animation, no new theme
   colors, the muted role carries tools exactly as it carries reasoning.
+  > Superseded for the transcript by [transcript-redesign](../transcript-redesign/spec.md) (user-approved 2026-10-04): a blinking running dot and derived theme roles are approved; tool items render per that spec.
 - Scope discipline: no undo/redo, no key remapping layer, no tool-output
   expand/collapse, no external-editor binding, no Ctrl+R history search —
   all were offered and declined or deferred in the 2026-09-30 user

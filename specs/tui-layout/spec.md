@@ -228,6 +228,8 @@ composer, scrollbar, and dialogs render on `BgBase`; composer input uses
 `Normal` fg; degradation under limited profiles collapses bands to legible
 plain text with `You:`/`Tool:`/… labels and fg roles intact (FR-15).
 
+> Superseded for the transcript by [transcript-redesign](../transcript-redesign/spec.md) (user-approved 2026-10-04): glyphs replace the `You:`/`Tool:`/… labels; only the user prompt keeps a band.
+
 ## Post-refactor path map (verified 2026-09-30)
 
 The system-architecture and Phase 1.5 changes (see

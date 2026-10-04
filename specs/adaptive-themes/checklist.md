@@ -32,6 +32,7 @@ is ticked until the automated suite (or a named walkthrough) covers it.
 - [x] Limited-profile renders (ANSI / no-color) stay legible with content
   intact; backgrounds never carry meaning alone.
   (`TestDegradationAcrossProfiles`, `TestDegradedBandsKeepWidths`.)
+  > Superseded for the transcript by [transcript-redesign](../transcript-redesign/spec.md) (user-approved 2026-10-04): the degradation tests now assert glyphs instead of role labels.
 
 ## Inline swatches (M4)
 
