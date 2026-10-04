@@ -974,12 +974,22 @@ type streamedToolCall struct {
 	id, name, arguments strings.Builder
 }
 
+// appendPiece adds one streamed id or name piece, skipping a piece that
+// repeats the whole value accumulated so far.
+func appendPiece(value *strings.Builder, piece string) {
+	if piece == "" || piece == value.String() {
+		return
+	}
+	value.WriteString(piece)
+}
+
 func consumeStream(ctx context.Context, reader io.Reader, onText func(string), onReasoning func(string)) (Message, usageReport, error) {
 	result := Message{Role: "assistant"}
 	var lastUsage usageReport
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), maxEventLineBytes)
 	calls := make(map[int]*streamedToolCall)
+	lastCall, nextCall := -1, 0
 	var text, reasoning, data strings.Builder
 	var seenChoice, done bool
 	process := func() error {
@@ -1037,17 +1047,43 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 			}
 		}
 		for _, fragment := range delta.ToolCalls {
-			if fragment.Index == nil || *fragment.Index < 0 || fragment.Type != "" && fragment.Type != "function" {
-				return errors.New("invalid indexed function tool-call fragment")
+			// The reason names which rule the provider broke so a router's
+			// upstream quirk is diagnosable from the transcript alone.
+			if fragment.Type != "" && fragment.Type != "function" {
+				kind := fragment.Type
+				if len(kind) > 32 {
+					kind = kind[:32]
+				}
+				return fmt.Errorf("invalid indexed function tool-call fragment: type %q is not \"function\"", kind)
 			}
-			call := calls[*fragment.Index]
+			var index int
+			switch {
+			case fragment.Index != nil && *fragment.Index < 0:
+				return fmt.Errorf("invalid indexed function tool-call fragment: negative index %d", *fragment.Index)
+			case fragment.Index != nil:
+				index = *fragment.Index
+			case fragment.ID != "" && (lastCall < 0 || calls[lastCall].id.String() != fragment.ID):
+				// Some OpenAI-compatible gateways (and routers relaying such
+				// upstreams) omit the index; a new call id opens the next call.
+				index = nextCall
+			case lastCall >= 0:
+				// No index and no new id: a continuation of the latest call.
+				index = lastCall
+			default:
+				return fmt.Errorf("invalid indexed function tool-call fragment: the provider omitted both the index and the call id (name present: %t)", fragment.Function != nil && fragment.Function.Name != "")
+			}
+			call := calls[index]
 			if call == nil {
 				call = &streamedToolCall{}
-				calls[*fragment.Index] = call
+				calls[index] = call
 			}
-			call.id.WriteString(fragment.ID)
+			lastCall = index
+			nextCall = max(nextCall, index+1)
+			// Gateways that repeat the full id or name on every chunk must not
+			// double it; genuinely split pieces still concatenate.
+			appendPiece(&call.id, fragment.ID)
 			if fragment.Function != nil {
-				call.name.WriteString(fragment.Function.Name)
+				appendPiece(&call.name, fragment.Function.Name)
 				call.arguments.WriteString(fragment.Function.Arguments)
 			}
 		}

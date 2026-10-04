@@ -150,7 +150,7 @@ func TestStreamFailures(t *testing.T) {
 			sendEvents(w, `{"choices":`)
 		}, "malformed"},
 		{"missing structured index", func(w http.ResponseWriter, _ *http.Request) {
-			sendEvents(w, `{"choices":[{"delta":{"tool_calls":[{"id":"x","function":{"name":"read","arguments":"{}"}}]}}]}`, `[DONE]`)
+			sendEvents(w, `{"choices":[{"delta":{"tool_calls":[{"function":{"name":"read","arguments":"{}"}}]}}]}`, `[DONE]`)
 		}, "indexed"},
 		{"incomplete tool call", func(w http.ResponseWriter, _ *http.Request) {
 			sendEvents(w, `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","function":{"name":"read","arguments":"{"}}]}}]}`, `[DONE]`)
