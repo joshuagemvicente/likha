@@ -33,6 +33,11 @@ type Theme struct {
 	BgCode       lipgloss.Style // code block / inline code background (bg only)
 	BgDiffAdd    lipgloss.Style // added diff line background (bg only)
 	BgDiffRemove lipgloss.Style // removed diff line background (bg only)
+
+	// Terminal16 marks the default family, whose foregrounds stay on the
+	// terminal's 16-color palette: code highlighting maps token kinds to
+	// ANSI colors there instead of deriving them from theme roles.
+	Terminal16 bool
 }
 
 // defaultTheme keeps Likha's original look: a single calm accent on a plain
@@ -55,6 +60,7 @@ func defaultTheme() Theme {
 		BgCode:       lipgloss.NewStyle().Background(defaultBgCode()),
 		BgDiffAdd:    lipgloss.NewStyle().Background(defaultBgDiff(standardGreenDark, standardGreenLight)),
 		BgDiffRemove: lipgloss.NewStyle().Background(defaultBgDiff(standardRedDark, standardRedLight)),
+		Terminal16:   true,
 	}
 }
 

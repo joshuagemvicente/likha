@@ -86,9 +86,12 @@ type ui struct {
 	lines              []string
 	lineStyles         []lipgloss.Style
 	lineSpans          [][]likhaui.Swatch
-	lineActivity       []bool      // marks the ephemeral activity row for render-time sweep styling
-	lineRuns           [][]lineRun // styled runs per tool row (status dot, bold name); nil elsewhere
-	entryLines         []int       // first layout line of each entry, recorded by rebuild for focus/scroll math
+	lineActivity       []bool                             // marks the ephemeral activity row for render-time sweep styling
+	lineRuns           [][]lineRun                        // styled runs per tool and markdown row (status dot, bold name, markdown spans); nil elsewhere
+	entryLines         []int                              // first layout line of each entry, recorded by rebuild for focus/scroll math
+	markdownCache      map[markdownCacheKey]markdownEntry // assistant rows from the last layout, reused while unchanged
+	highlightCache     map[highlightKey]highlightResult   // code highlights from the last layout, reused across widths and themes
+	highlightPending   bool                               // the last layout left code plain for want of highlight budget
 	streamBuf          strings.Builder
 	reasoningBuf       strings.Builder
 	reasoningStream    int
@@ -1073,6 +1076,11 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.caretTyped = false
 		} else {
 			m.caretOn = !m.caretOn
+		}
+		if m.highlightPending {
+			// Code left plain by the layout's highlight budget: lay out
+			// again to highlight the next batch.
+			m.layoutWidth = 0
 		}
 		return m, blinkCaret()
 	case activityTickMsg:

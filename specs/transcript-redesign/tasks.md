@@ -58,20 +58,20 @@ slice starts.
 
 ## S2 — Markdown
 
-11. **Dependencies.** Add `github.com/yuin/goldmark` and
+11. **Dependencies.** [x] DONE 2026-10-04 — goldmark v1.8.6 + chroma v2.24.1 (newest chroma keeping `go 1.24.0`; v2.25+ needs Go 1.25/1.26); regexp2 v1.12.0 transitive. — Add `github.com/yuin/goldmark` and
     `github.com/alecthomas/chroma/v2`. Verify: `go mod tidy`, build, license
     note in CHANGELOG.
-12. **Renderer.** goldmark AST → styled, width-aware rows per § Markdown
+12. **Renderer.** [x] DONE 2026-10-04 — `internal/markdown` (goldmark GFM tables/strikethrough/tasklist) + `internal/tui/markdown_render.go`; per-entry cache; chunked parsing above 8 KiB with a 100 ms parse budget; nesting caps (24 block / 32 inline) after a stack-overflow finding; escape-injection matrix through `View()` found nothing. Known cost: a resize re-renders every answer (~2.7× plain); lazy visible-page layout deferred. — goldmark AST → styled, width-aware rows per § Markdown
     (headings, emphasis, inline code, code panels, lists, quotes, links,
     tables with fallback, rule, images, literal HTML); streaming-safe for
     unclosed fences; per-entry render cache keyed by content, width, theme,
     and glyph set. Verify: golden render tests per element at 40/80 columns;
     escape-sequence injection test; overflow invariants.
-13. **Highlighting.** Chroma lexer from the fence info string only; style
+13. **Highlighting.** [x] DONE 2026-10-04 — `internal/highlight` (chroma, fence info only, 32 KiB cap, 100 ms per-token deadline); keywords Accent, strings Warning, comments Muted italic, others Normal on `BgCode`; `default` → ANSI 5/2/8; per-layout 40 ms budget newest-first with deferred re-highlight. — Chroma lexer from the fence info string only; style
     generated from the active theme (`default` → ANSI 16); unknown languages
     plain. Verify: highlight tests across 3 families and `default`; no-color
     profile drops colors but keeps text.
-14. **Docs + commit S2.** Full checks; commit; user walkthrough.
+14. **Docs + commit S2.** [x] docs + commit DONE 2026-10-04; [ ] user walkthrough pending — Full checks; commit; user walkthrough.
 
 ## S3 — Live surfaces
 

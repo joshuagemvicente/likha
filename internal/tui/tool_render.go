@@ -31,12 +31,17 @@ const legacyRequestPrefix = "Request: "
 // style at render time; the row's style still paints the rest and the
 // padding. blink marks a running status dot, blanked on the off phase of the
 // activity tick. Offsets address the unfitted row: fit only pads tool rows,
-// whose text is escaped before layout.
+// whose text is escaped before layout. style is shared: markdown rows hold
+// thousands of runs over a handful of styles, and a lipgloss.Style is over
+// half a kilobyte.
 type lineRun struct {
 	start, end int
-	style      lipgloss.Style
+	style      *lipgloss.Style
 	blink      bool
 }
+
+// shared returns s as a run style.
+func shared(s lipgloss.Style) *lipgloss.Style { return &s }
 
 // toolRow is one laid-out row of a tool item.
 type toolRow struct {
@@ -215,9 +220,9 @@ func (m *ui) toolItemRows(index int, plan toolItemPlan, focused bool, width int)
 	}
 	text := gutter + header
 	rows := []toolRow{{text: text, style: on(m.theme.Normal), runs: []lineRun{
-		{start: 0, end: glyphEnd, style: dot, blink: live && !focused},
-		{start: textStart, end: nameEnd, style: on(m.theme.Normal).Bold(true)},
-		{start: nameEnd, end: utf8.RuneCountInString(text), style: on(m.theme.Normal)},
+		{start: 0, end: glyphEnd, style: shared(dot), blink: live && !focused},
+		{start: textStart, end: nameEnd, style: shared(on(m.theme.Normal).Bold(true))},
+		{start: nameEnd, end: utf8.RuneCountInString(text), style: shared(on(m.theme.Normal))},
 	}}}
 
 	summary, preview, more := toolSummary(record, g.Ellipsis)

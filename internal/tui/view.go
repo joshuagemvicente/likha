@@ -84,6 +84,8 @@ func (m *ui) rebuild() {
 	}
 	// Tool rows carry styled runs (status dot, bold name) instead of
 	// swatches: color literals in tool output are data, not prose.
+	// Assistant markdown rows use the same path; their prose swatches are
+	// already merged into the runs (markdownToRows).
 	addTool := func(rows []toolRow) {
 		for _, row := range rows {
 			m.lines = append(m.lines, row.text)
@@ -113,8 +115,18 @@ func (m *ui) rebuild() {
 		}
 		first := false
 		m.entryLines = make([]int, len(m.entries))
+		md := m.newMarkdownLayout()
 		plan := m.toolItemPlan()
 		focused, hasFocus := m.focusedToolItem(plan)
+		// Lay assistant answers out newest first, so the highlight budget
+		// goes to the answers nearest the screen; the loop below then finds
+		// every one of them in this layout's cache.
+		for index := len(m.entries) - 1; index >= 0; index-- {
+			if e := m.entries[index]; e.role == "Assistant" && !plan.absorbed[index] {
+				glyph, _, _ := m.transcriptBlock(e)
+				m.assistantRows(md, e.content, glyph, width, index == m.streaming)
+			}
+		}
 		for index, e := range m.entries {
 			if plan.absorbed[index] {
 				// A legacy result renders inside its request's item.
@@ -171,6 +183,12 @@ func (m *ui) rebuild() {
 			// prose word-wraps under the text column, and only user prompts
 			// sit on a band, padded by one band row above and below.
 			glyph, style, band := m.transcriptBlock(e)
+			if e.role == "Assistant" {
+				// Assistant text, streaming included, renders as markdown
+				// (spec transcript-redesign § Assistant text).
+				addTool(m.assistantRows(md, e.content, glyph, width, index == m.streaming))
+				continue
+			}
 			content := e.content
 			if e.role == "Queued" {
 				// The user's words, not yet sent: the word says so without
@@ -196,6 +214,9 @@ func (m *ui) rebuild() {
 				add([]string{""}, style)
 			}
 		}
+		// Keep only this layout's rendered entries and code highlights:
+		// edits, theme changes, and resizes leave nothing stale behind.
+		m.commitMarkdownLayout(md)
 		m.layoutWidth = m.width
 	}
 }
