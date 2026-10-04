@@ -184,9 +184,75 @@ func (m *ui) handleToolsCommand(arg string) tea.Cmd {
 	}
 }
 
-func (m *ui) recordToolResult(index int, call model.ToolCall, result tools.Result) {
+// startToolItem opens a call's single transcript item at tool_start (spec
+// transcript-redesign § Persistence): one Tool entry plus one record with
+// status running — queued for explore tasks until accepted. The result
+// updates both in place, so new sessions store one entry per call. An event
+// without a call keeps a plain row.
+func (m *ui) startToolItem(text string, call *model.ToolCall) {
+	m.entries = append(m.entries, entry{role: "Tool", content: text})
+	if call == nil {
+		return
+	}
+	record := session.ToolRecord{EntryIndex: len(m.entries) - 1, CallID: call.ID, Name: call.Name, Arguments: call.Arguments, Status: "running"}
+	if call.Name == "task" {
+		record.SourceKind, record.SourceTool = "builtin", "task"
+		record.Status, record.Content = "queued", "Awaiting explore task acceptance"
+	}
+	m.toolRecords = append(m.toolRecords, record)
+	if call.Name == "task" {
+		if profile := taskProfileFromArguments(call.Arguments); profile != "" {
+			if content, ok := m.taskRowContentForProfile(call.ID, profile); ok {
+				m.toolRecords[len(m.toolRecords)-1].Content = content
+			}
+		}
+	}
+	m.trackToolCall(call.ID, true)
+}
+
+// trackToolCall notes a call this run shows as an item; live calls still
+// await their result.
+func (m *ui) trackToolCall(callID string, live bool) {
+	if callID == "" {
+		return
+	}
+	if m.runToolCalls == nil {
+		m.runToolCalls = make(map[string]bool)
+	}
+	m.runToolCalls[callID] = true
+	if !live {
+		delete(m.liveToolCalls, callID)
+		return
+	}
+	if m.liveToolCalls == nil {
+		m.liveToolCalls = make(map[string]bool)
+	}
+	m.liveToolCalls[callID] = true
+}
+
+// liveToolRecord finds the record a live call's result updates, or -1. Only
+// this run's started calls qualify, and the newest wins, so a provider that
+// reuses call IDs across rounds or turns never rewrites an older item.
+func (m *ui) liveToolRecord(callID string) int {
+	if callID == "" || !m.liveToolCalls[callID] {
+		return -1
+	}
+	for i := len(m.toolRecords) - 1; i >= 0; i-- {
+		record := m.toolRecords[i]
+		if record.CallID == callID && record.EntryIndex >= 0 && record.EntryIndex < len(m.entries) && m.entries[record.EntryIndex].role == "Tool" {
+			return i
+		}
+	}
+	return -1
+}
+
+// recordToolResult settles a call's item: the record started at tool_start
+// takes the result's status, source, and content in place, and the entry
+// keeps the result text as before. A result whose start never reached the
+// UI gets an item of its own.
+func (m *ui) recordToolResult(call model.ToolCall, result tools.Result, text string) {
 	record := session.ToolRecord{
-		EntryIndex: index, CallID: call.ID, Name: call.Name, Arguments: call.Arguments,
+		CallID: call.ID, Name: call.Name, Arguments: call.Arguments,
 		SourceKind: result.Source.Kind, Server: result.Source.Server, SourceTool: result.Source.Tool,
 		Status: string(result.Status), Content: result.Content, Truncated: result.Truncated,
 		Warnings: append([]string(nil), result.Warnings...), ArtifactID: result.ArtifactID,
@@ -199,19 +265,90 @@ func (m *ui) recordToolResult(index int, call model.ToolCall, result tools.Resul
 		if json.Unmarshal([]byte(result.Content), &outcome) == nil {
 			record.TaskID = outcome.TaskID
 		}
-		for i := len(m.toolRecords) - 1; i >= 0; i-- {
-			if m.toolRecords[i].CallID == call.ID && m.toolRecords[i].Name == "task" && m.toolRecords[i].TaskID == record.TaskID {
-				m.toolRecords[i].Status = record.Status
-				break
-			}
-		}
 	}
 	if call.Name == "plan_update" {
 		// An accepted replace mirrors into the snapshot; refusals and
 		// persistence failures keep the previous plan untouched.
 		m.syncPlanFromCall(call.Arguments, result.Status == tools.Succeeded)
 	}
-	m.toolRecords = append(m.toolRecords, record)
+	if at := m.liveToolRecord(call.ID); at >= 0 {
+		previous := m.toolRecords[at]
+		record.EntryIndex = previous.EntryIndex
+		if record.TaskID == "" {
+			record.TaskID = previous.TaskID
+		}
+		m.toolRecords[at] = record
+		m.entries[record.EntryIndex].content = text
+	} else {
+		m.entries = append(m.entries, entry{role: "Tool", content: text})
+		record.EntryIndex = len(m.entries) - 1
+		m.toolRecords = append(m.toolRecords, record)
+	}
+	m.trackToolCall(call.ID, false)
+	if m.approvalCall == call.ID {
+		m.approvalCall = ""
+	}
+}
+
+// unexecutedToolContent is the history text for a call a cancelled run never
+// executed (agent appendUnexecuted).
+const unexecutedToolContent = "Error: action not executed; run interrupted"
+
+// recordUnexecutedCalls gives each call of this turn that a cancelled run
+// never started an item of its own, so an interrupted round still shows
+// every call it asked for. Calls that already have an item are not
+// repeated; the entry keeps the history text it always stored.
+func (m *ui) recordUnexecutedCalls(history []model.Message) {
+	if m.priorLen <= len(history) {
+		history = history[m.priorLen:]
+	}
+	calls := make(map[string]model.ToolCall)
+	for _, message := range history {
+		for _, call := range message.ToolCalls {
+			calls[call.ID] = call
+		}
+	}
+	for _, message := range history {
+		if message.Role != "tool" || message.Content != unexecutedToolContent || m.runToolCalls[message.ToolCallID] {
+			continue
+		}
+		m.entries = append(m.entries, entry{role: "Tool", content: message.Content})
+		call, ok := calls[message.ToolCallID]
+		if !ok || message.ToolCallID == "" {
+			continue
+		}
+		m.toolRecords = append(m.toolRecords, session.ToolRecord{EntryIndex: len(m.entries) - 1, CallID: call.ID, Name: call.Name,
+			Arguments: call.Arguments, Status: string(tools.Cancelled), Content: message.Content})
+		m.trackToolCall(call.ID, false)
+	}
+}
+
+// markAwaitingApproval moves the call under review to "awaiting approval".
+// Approvals come only from calls that run alone (mutating tools never join a
+// parallel read group), so the newest live running call is the one asking.
+func (m *ui) markAwaitingApproval() {
+	m.approvalCall = ""
+	for i := len(m.toolRecords) - 1; i >= 0; i-- {
+		record := &m.toolRecords[i]
+		if m.liveToolCalls[record.CallID] && record.Name != "task" && record.Status == "running" {
+			record.Status = "awaiting approval"
+			m.approvalCall = record.CallID
+			return
+		}
+	}
+}
+
+// resumeAfterApproval returns the reviewed call to running once the user has
+// answered, and restarts the dot's blink that the review paused.
+func (m *ui) resumeAfterApproval() tea.Cmd {
+	if at := m.liveToolRecord(m.approvalCall); at >= 0 && m.toolRecords[at].Status == "awaiting approval" {
+		m.toolRecords[at].Status = "running"
+	}
+	m.approvalCall = ""
+	if !m.working {
+		return nil
+	}
+	return m.armActivityTick()
 }
 
 func (m *ui) adjustToolRecordsAfterRemoval(index int) {

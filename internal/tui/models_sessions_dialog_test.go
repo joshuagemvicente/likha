@@ -326,7 +326,9 @@ func TestSessionsDialogBlocksPromptInput(t *testing.T) {
 // full intensity.
 func TestDialogDimsBackground(t *testing.T) {
 	forceANSI(t)
-	m := NewUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true, Theme: "default"}, t.TempDir(), nil, session.Snapshot{})
+	// The minimal composer keeps the box-row match ("│ " … " │") unique to
+	// the dialog: the rounded composer's own edges would match it too.
+	m := NewUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true, Theme: "default", ComposerStyle: "minimal"}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/themes")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -371,7 +373,7 @@ func TestDialogKeepsBaseContentBesideBox(t *testing.T) {
 	if !m.dialog.open {
 		t.Fatal("dialog did not open")
 	}
-	if !strings.Contains(m.View(), "You: hello world") {
+	if !strings.Contains(m.View(), "> hello world") {
 		t.Fatalf("base content wiped behind the dialog: %q", m.View())
 	}
 }

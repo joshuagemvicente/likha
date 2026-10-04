@@ -29,6 +29,7 @@ type Connection struct {
 	ContextWindowOverrides map[string]map[string]int64 // user overrides by canonical provider and model ID
 	ModelMetadataObserver  ModelMetadataObserver       // optional opt-in diagnostics for model-list metadata
 	Nerd                   bool                        // user opted into Nerd Font markers
+	ASCII                  bool                        // user selected the plain-ASCII block glyph set
 	Mcp                    *mcp.McpManager
 }
 

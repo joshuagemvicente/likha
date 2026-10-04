@@ -596,62 +596,6 @@ func toolPermissionLabel(tool tools.CatalogEntry) string {
 	return strings.Join(permissions, "; ") + "."
 }
 
-// RenderToolSummary is content only: rebuild retains the existing muted Tool
-// band and prefix. Execution status is deliberately separate from clipping.
-func RenderToolSummary(record session.ToolRecord) string {
-	name := toolShortText(record.Name, 48)
-	if name == "" {
-		name = "tool"
-	}
-	source := toolShortText(toolSourceLabel(tools.Source{Kind: record.SourceKind, Server: record.Server, Tool: record.SourceTool}), 64)
-	status := toolShortText(record.Status, 32)
-	if status == "" {
-		status = "unknown status"
-	}
-	parts := []string{name}
-	if record.Status == string(tools.Refused) && strings.Contains(record.Content, "rejected by user") {
-		// Keep the user's decision early and intact instead of burying it
-		// after a long target/source where wrapping can obscure the outcome.
-		parts = append(parts, "rejected by user")
-	}
-	parts = append(parts, status, "["+source+"]")
-	if target := toolArgumentSummary(record.Arguments); target != "" {
-		parts = append(parts, target)
-	}
-	if preview := toolShortText(record.Content, 96); preview != "" {
-		parts = append(parts, preview)
-	} else {
-		parts = append(parts, "no textual output")
-	}
-	if record.Truncated {
-		parts = append(parts, "preview clipped")
-	}
-	if record.ArtifactID != "" {
-		parts = append(parts, "retained output")
-	}
-	if len(record.Warnings) > 0 {
-		parts = append(parts, fmt.Sprintf("%d warning(s)", len(record.Warnings)))
-	}
-	return strings.Join(parts, " · ")
-}
-
-func toolArgumentSummary(arguments string) string {
-	var fields map[string]json.RawMessage
-	if json.Unmarshal([]byte(arguments), &fields) != nil {
-		return toolShortText(arguments, 72)
-	}
-	for _, key := range []string{"command", "path", "file_path", "paths", "pattern", "artifact_id", "query", "url"} {
-		if value, ok := fields[key]; ok {
-			var text string
-			if json.Unmarshal(value, &text) != nil {
-				text = string(value)
-			}
-			return key + ": " + toolShortText(text, 72)
-		}
-	}
-	return toolShortText(arguments, 72)
-}
-
 // toolShortText makes control characters visible before bounding display cells.
 // It never strips an escape prefix and accidentally executes its remaining tail.
 func toolShortText(text string, width int) string {
@@ -675,31 +619,25 @@ func toolShortText(text string, width int) string {
 	return strings.TrimRight(fit(left, max(0, width-1)), " ") + "…"
 }
 
+// toolRecordAt is the record a tool item renders: its own, or for a legacy
+// request item the record of the result folded into it (toolItemPlan).
 func (m *ui) toolRecordAt(index int) (session.ToolRecord, bool) {
 	if index < 0 || index >= len(m.entries) || m.entries[index].role != "Tool" {
 		return session.ToolRecord{}, false
 	}
-	for i := len(m.toolRecords) - 1; i >= 0; i-- {
-		if m.toolRecords[i].EntryIndex == index {
-			return m.toolRecords[i], true
-		}
+	if r := m.toolItemPlan().record[index]; r >= 0 {
+		return m.toolRecords[r], true
 	}
 	return session.ToolRecord{}, false
 }
 
-// toolEntryContent leaves all legacy rows byte-for-byte intact. Only attributed
-// results use compact summaries; the inspector still has their full Content.
-func (m *ui) toolEntryContent(index int, fallback string) string {
-	if record, ok := m.toolRecordAt(index); ok {
-		return RenderToolSummary(record)
-	}
-	return fallback
-}
-
+// inspectableToolEntries lists tool items, one per call: a legacy result
+// folded into its request is not a stop of its own.
 func (m *ui) inspectableToolEntries() []int {
+	plan := m.toolItemPlan()
 	var indices []int
 	for i, entry := range m.entries {
-		if entry.role == "Tool" {
+		if entry.role == "Tool" && !plan.absorbed[i] {
 			indices = append(indices, i)
 		}
 	}
@@ -707,27 +645,38 @@ func (m *ui) inspectableToolEntries() []int {
 }
 
 func (m *ui) focusedToolEntry() (int, bool) {
+	return m.focusedToolItem(m.toolItemPlan())
+}
+
+// focusedToolItem resolves focus against a plan. Call identity follows the
+// record when rows shift; among items sharing a call ID (providers that
+// reuse IDs across rounds) the one nearest the last focused row wins.
+func (m *ui) focusedToolItem(plan toolItemPlan) (int, bool) {
 	state := &m.toolInspector
 	if !state.focused || state.sessionID != m.snapshot.ID {
 		return 0, false
 	}
 	if state.focusedCall != "" {
-		for _, record := range m.toolRecords {
-			if record.CallID == state.focusedCall && record.EntryIndex >= 0 && record.EntryIndex < len(m.entries) && m.entries[record.EntryIndex].role == "Tool" {
-				return record.EntryIndex, true
+		best := -1
+		for i, r := range plan.record {
+			if r < 0 || plan.absorbed[i] || m.toolRecords[r].CallID != state.focusedCall {
+				continue
+			}
+			if best < 0 || abs(i-state.focusedEntry) < abs(best-state.focusedEntry) {
+				best = i
 			}
 		}
-		return 0, false
+		return best, best >= 0
 	}
 	index := state.focusedEntry
-	return index, index >= 0 && index < len(m.entries) && m.entries[index].role == "Tool"
+	return index, index >= 0 && index < len(m.entries) && m.entries[index].role == "Tool" && !plan.absorbed[index]
 }
 
-// toolEntryFocused is a leaf hook for rebuild's selected-row treatment. Keeping
-// it separate from toolEntryContent preserves legacy Tool content and styling.
-func (m *ui) toolEntryFocused(index int) bool {
-	focused, ok := m.focusedToolEntry()
-	return ok && focused == index
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 func (m *ui) setToolEntryFocus(index int) {
@@ -796,41 +745,15 @@ func (m *ui) firstVisibleToolEntry(indices []int) int {
 	return indices[len(indices)-1]
 }
 
-// This mirrors rebuild's plain line accounting only; it never touches approval
-// coverage. Coordinator additions to transcript layout should keep it in sync.
+// toolEntryStartLine is the first layout line of an entry as rebuild laid it
+// out (the user band's top padding row included), so focus and scroll math
+// can never drift from the rendered rows. It never touches approval coverage.
 func (m *ui) toolEntryStartLine(index int) int {
-	width, count := contentWidth(m.width), 0
-	for _, header := range m.header() {
-		if runewidth.StringWidth(header) > m.width {
-			count += len(wrap(header, width))
-		}
+	m.rebuild()
+	if index >= 0 && index < len(m.entryLines) {
+		return m.entryLines[index]
 	}
-	first := false
-	for i, entry := range m.entries {
-		if entry.role == "Logo" && m.width < 56 {
-			continue
-		}
-		if first {
-			count++
-		}
-		first = true
-		if i == index {
-			return count
-		}
-		switch entry.role {
-		case "Logo":
-			for _, line := range strings.Split(entry.content, "\n") {
-				count += len(wrap(line, width))
-			}
-		case "Working":
-			count += len(wrap(activitySpinner(m.activityFrame)+" "+workingLabel, width))
-		case "Tool":
-			count += len(wrap(entry.role+": "+m.toolEntryContent(i, entry.content), width))
-		default:
-			count += len(wrap(entry.role+": "+entry.content, width))
-		}
-	}
-	return count
+	return 0
 }
 
 func (m *ui) toolResultInspectionLines() []toolInspectionLine {
@@ -847,6 +770,11 @@ func (m *ui) toolResultInspectionLines() []toolInspectionLine {
 		add("Status and source were not recorded. This text is historical, not proof of a new execution or permission grant.", m.theme.Muted)
 		add("", m.theme.Base)
 		add(m.entries[index].content, m.theme.Muted)
+		if partner := m.toolItemPlan().partner[index]; partner >= 0 {
+			// The legacy result folded into this request's item.
+			add("", m.theme.Base)
+			add(m.entries[partner].content, m.theme.Muted)
+		}
 		return lines
 	}
 	add(record.Name, m.theme.Title)

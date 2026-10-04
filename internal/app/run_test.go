@@ -93,10 +93,32 @@ func TestRunHelpDoesNotRequireRepository(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Usage: likha") || stderr.Len() != 0 {
 		t.Fatalf("stdout = %q, stderr = %q", stdout.String(), stderr.String())
 	}
-	for _, expected := range []string{"--provider", "--api-key", "--model", "--endpoint", "--sessions", "--resume", "--debug-models", "LIKHA_DEBUG_MODELS", "--version", "LIKHA_STATE_DIR", "Providers", "BYOK"} {
+	for _, expected := range []string{"--provider", "--api-key", "--model", "--endpoint", "--sessions", "--resume", "--debug-models", "LIKHA_DEBUG_MODELS", "--ascii", "LIKHA_ASCII", "--version", "LIKHA_STATE_DIR", "Providers", "BYOK"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Fatalf("help is missing %q: %q", expected, stdout.String())
 		}
+	}
+}
+
+func TestASCIIFlagAndEnvironment(t *testing.T) {
+	t.Setenv("LIKHA_ASCII", "")
+	if asciiGlyphs(false) {
+		t.Fatal("Unicode glyphs must be the default")
+	}
+	if !asciiGlyphs(true) {
+		t.Fatal("--ascii must select the ASCII glyph set")
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"--ascii", "--version"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("--ascii must parse: exit code = %d, stderr = %q", code, stderr.String())
+	}
+	t.Setenv("LIKHA_ASCII", "1")
+	if !asciiGlyphs(false) {
+		t.Fatal("LIKHA_ASCII=1 must select the ASCII glyph set")
+	}
+	t.Setenv("LIKHA_ASCII", "0")
+	if asciiGlyphs(false) {
+		t.Fatal("LIKHA_ASCII other than 1 must keep Unicode")
 	}
 }
 

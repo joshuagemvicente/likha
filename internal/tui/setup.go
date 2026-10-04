@@ -281,7 +281,7 @@ func (m *ui) finishSetup(modelID string) tea.Cmd {
 	m.modelName = modelID
 	m.conn = providers.Connection{
 		Provider: p.DisplayName, ProviderCanonical: p.Name, Verified: true,
-		Theme: m.themeName, Nerd: m.conn.Nerd, ComposerStyle: m.composerStyle,
+		Theme: m.themeName, Nerd: m.conn.Nerd, ASCII: m.conn.ASCII, ComposerStyle: m.composerStyle,
 		ContextWindows: m.setup.contextWindows, ContextWindowOverrides: m.conn.ContextWindowOverrides,
 		ModelMetadataObserver: m.conn.ModelMetadataObserver,
 	}

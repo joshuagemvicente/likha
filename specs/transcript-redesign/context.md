@@ -7,7 +7,7 @@ Code, tests, and docs this feature touches (verified 2026-10-04).
 - `internal/tui/view.go` — `entry` (:16), `rebuild()` role→style switch
   (:143-162), the `role+": "` label (:177), `wrap()` (:465), `mainView`
   assembly (:218-275), `withBase` (:360), swatches (:328).
-- `internal/tui/tools_view.go` — `RenderToolSummary` (:601-636),
+- `internal/tui/tools_view.go` — `RenderToolSummary` (:601-636; removed in S1, tool items now render from `tool_render.go` and `tool_items.go`),
   `toolEntryContent` (:692), `inspectableToolEntries` (:698), focus/scroll
   (:780-790), `toolEntryStartLine` (:828-830, duplicates the label
   arithmetic), inspector (:837+), key handling (:161-235).

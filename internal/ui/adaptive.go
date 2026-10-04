@@ -38,10 +38,93 @@ const (
 	// than the conversation bands so selection stays obvious next to
 	// them.
 	bandSelectionRatio = 0.12
+
+	// bandCodeRatio backs BgCode: fenced code panels and inline code sit on
+	// the base canvas with a barely-there accent tint.
+	bandCodeRatio = 0.06
+
+	// bandDiffRatio backs BgDiffAdd / BgDiffRemove: the success green and
+	// the error color mixed toward base, strong enough to read as add or
+	// remove next to plain rows (the sign column still carries meaning).
+	bandDiffRatio = 0.15
 )
 
-// bandKey names one band background: family, band ("user", "tool", "model")
-// and variant (light true = light terminal).
+// The default family leaves the canvas and foregrounds on the terminal
+// palette, so its tints mix toward a reference canvas per variant instead
+// of a family base: a typical dark terminal (xterm 234) and white. The user
+// band is a faint neutral gray (dark ~8% toward white, light ~6% toward
+// black), the code tint a quieter step of the same, and the diff tints the
+// standard green/red at bandDiffRatio.
+const (
+	defaultDarkCanvas  = "#1c1c1c"
+	defaultLightCanvas = "#ffffff"
+
+	defaultUserDarkRatio  = 0.08
+	defaultUserLightRatio = 0.06
+	defaultCodeDarkRatio  = 0.06
+	defaultCodeLightRatio = 0.04
+)
+
+// Standard success/error hues (xterm 256 greens and reds) for palettes
+// without a family green, and for the default family's diff tints.
+const (
+	standardGreenDark  = "#5faf5f"
+	standardGreenLight = "#008700"
+	standardRedDark    = "#d75f5f"
+	standardRedLight   = "#af0000"
+)
+
+// defaultBgUser is the default family's neutral user band.
+func defaultBgUser() lipgloss.AdaptiveColor {
+	return bandColor(mix("#000000", defaultLightCanvas, defaultUserLightRatio),
+		mix("#ffffff", defaultDarkCanvas, defaultUserDarkRatio))
+}
+
+// defaultBgCode is the default family's neutral code tint.
+func defaultBgCode() lipgloss.AdaptiveColor {
+	return bandColor(mix("#000000", defaultLightCanvas, defaultCodeLightRatio),
+		mix("#ffffff", defaultDarkCanvas, defaultCodeDarkRatio))
+}
+
+// defaultBgDiff is one default-family diff tint from a dark/light hue pair.
+func defaultBgDiff(darkFG, lightFG string) lipgloss.AdaptiveColor {
+	return bandColor(mix(lightFG, defaultLightCanvas, bandDiffRatio),
+		mix(darkFG, defaultDarkCanvas, bandDiffRatio))
+}
+
+// successFG picks one variant's Success foreground: the family green when
+// the palette defines one, else the standard green for the variant. A
+// candidate that fails the contrast gate on the variant's base steps toward
+// the text color (or the opposite pole) until it passes; every shipped
+// palette passes as-is (see the matrix test), so the steps never fire today.
+func successFG(p palette, light bool) string {
+	green := p.green
+	if green == "" {
+		green = standardGreenDark
+		if light {
+			green = standardGreenLight
+		}
+	}
+	if p.base == "" || legible(green, p.base) {
+		return green
+	}
+	toward := p.text
+	if toward == "" {
+		toward = "#ffffff"
+		if light {
+			toward = "#000000"
+		}
+	}
+	for step := 1; step <= 10; step++ {
+		if c := mix(toward, green, float64(step)/10); legible(c, p.base) {
+			return c
+		}
+	}
+	return toward
+}
+
+// bandKey names one band background: family, band ("user", "tool", "model",
+// "selection", "code", "diff-add", "diff-remove") and variant (light true = light terminal).
 type bandKey struct {
 	family string
 	band   string

@@ -1,13 +1,17 @@
 package tui
 
 import (
-	"likha/internal/providers"
 	"strings"
 
 	"github.com/mattn/go-runewidth"
+
+	"likha/internal/providers"
+	likhaui "likha/internal/ui"
 )
 
-var composerStyles = []string{"minimal", "bordered", "borderless", "chatter"}
+// composerStyles lists the chooser's styles; the first entry is the default
+// for users with no saved choice (transcript-redesign § Composer).
+var composerStyles = []string{"rounded", "minimal", "bordered", "borderless", "chatter"}
 
 func validComposerStyle(style string) string {
 	for _, available := range composerStyles {
@@ -15,7 +19,56 @@ func validComposerStyle(style string) string {
 			return style
 		}
 	}
-	return "minimal"
+	return composerStyles[0]
+}
+
+// composerPrompt is the rounded style's prompt glyph; wrapped rows indent by
+// its width so continuation text lines up under the first row's text.
+const composerPrompt = "> "
+
+// roundedBoxRunes returns the composer's corners and edges (the rounded and
+// bordered boxes and the minimal rule) from the block glyph set, the plain
+// set when ascii is set.
+func roundedBoxRunes(ascii bool) (topLeft, topRight, bottomLeft, bottomRight, horizontal, vertical string) {
+	g := likhaui.BlockGlyphSet(ascii)
+	return g.TopLeft, g.TopRight, g.BottomLeft, g.BottomRight, g.Horizontal, g.Vertical
+}
+
+// composerASCII reports whether the composer draws the ASCII box: the
+// --ascii / LIKHA_ASCII block-glyph selection carried on the connection.
+func (m *ui) composerASCII() bool {
+	return m.conn.ASCII
+}
+
+// composerLayout resolves the style the composer actually draws at the
+// current width, the rows it reserves besides the input (fixed), and the
+// width left for input text. Narrow terminals degrade the boxed and prefixed
+// styles to minimal without changing the saved selection.
+func (m *ui) composerLayout() (style string, fixed, inputWidth int) {
+	style = m.composerStyle
+	if style == "" {
+		style = composerStyles[0]
+	}
+	if m.width <= minWidth && (style == "rounded" || style == "bordered" || style == "chatter") {
+		style = "minimal"
+	}
+	inputWidth = m.width
+	switch style {
+	case "minimal":
+		fixed = 2 // separator and rule above input
+	case "bordered":
+		fixed = 3       // separator and top/bottom edges around input
+		inputWidth -= 4 // │ + one space of inset on each side
+	case "rounded":
+		fixed = 3                                               // separator and top/bottom edges around input
+		inputWidth -= 4 + runewidth.StringWidth(composerPrompt) // edges, insets, and prompt
+	case "chatter":
+		fixed = 1 // separator above input
+		inputWidth -= runewidth.StringWidth("You › ")
+	default:
+		fixed = 1 // borderless: separator above input
+	}
+	return style, fixed, max(1, inputWidth)
 }
 
 // composerLines reserves its own viewport rows; a long draft shows its editable
@@ -27,27 +80,7 @@ func (m *ui) composerLines() []string {
 		return m.reviewActionLines()
 	}
 	width := m.width
-	style := m.composerStyle
-	if width <= minWidth && (style == "bordered" || style == "chatter") {
-		style = "minimal"
-	}
-	if style == "" {
-		style = "minimal"
-	}
-	fixed := 1 // borderless/chatter: separator above input
-	if style == "minimal" {
-		fixed = 2 // separator and rule above input
-	} else if style == "bordered" {
-		fixed = 3 // separator and top/bottom edges around input
-	}
-	inputWidth := width
-	if style == "bordered" {
-		inputWidth -= 4 // │ + one space of inset on each side
-	}
-	if style == "chatter" {
-		inputWidth -= runewidth.StringWidth("You › ")
-	}
-	inputWidth = max(1, inputWidth)
+	style, fixed, inputWidth := m.composerLayout()
 	text := string(m.input)
 	placeholder := len(m.input) == 0
 	caret := ""
@@ -82,16 +115,21 @@ func (m *ui) composerLines() []string {
 	}
 	input := wrap(text, inputWidth)
 	limit := max(1, m.height-len(m.header())-m.statusLineHeight()-len(m.mentionLines())-len(m.commandLines())-1-fixed)
+	hidden := 0 // leading wrapped rows scrolled off above the editable tail
 	if len(input) > limit {
-		input = input[len(input)-limit:]
+		hidden = len(input) - limit
+		input = input[hidden:]
 	}
 	rows := make([]string, 0, len(input)+fixed)
 	gap := m.theme.Base.Render(fit("", width))
 	rows = append(rows, gap)
+	topLeft, topRight, bottomLeft, bottomRight, horizontal, vertical := roundedBoxRunes(m.composerASCII())
 	if style == "minimal" {
-		rows = append(rows, withBase(m.theme.Border, m.theme.Base).Render(strings.Repeat("─", width)))
+		rows = append(rows, withBase(m.theme.Border, m.theme.Base).Render(strings.Repeat(horizontal, width)))
 	} else if style == "bordered" {
-		rows = append(rows, withBase(m.theme.Border, m.theme.Base).Render("╭"+strings.Repeat("─", width-2)+"╮"))
+		rows = append(rows, withBase(m.theme.Border, m.theme.Base).Render(topLeft+strings.Repeat(horizontal, width-2)+topRight))
+	} else if style == "rounded" {
+		rows = append(rows, withBase(m.theme.Border, m.theme.Base).Render(topLeft+strings.Repeat(horizontal, width-2)+topRight))
 	}
 	for i, line := range input {
 		switch style {
@@ -101,7 +139,20 @@ func (m *ui) composerLines() []string {
 				inner = withBase(m.theme.Muted, m.theme.Base).Render(fit(line, width-4))
 			}
 			border := withBase(m.theme.Border, m.theme.Base)
-			rows = append(rows, border.Render("│ ")+inner+border.Render(" │"))
+			rows = append(rows, border.Render(vertical+" ")+inner+border.Render(" "+vertical))
+		case "rounded":
+			// The prompt glyph marks the draft's first row; wrapped rows
+			// continue under the text column, inside the box.
+			prompt := strings.Repeat(" ", runewidth.StringWidth(composerPrompt))
+			if i == 0 && hidden == 0 {
+				prompt = composerPrompt
+			}
+			inner := withBase(m.theme.Normal, m.theme.Base).Render(fit(line, inputWidth))
+			if placeholder {
+				inner = withBase(m.theme.Muted, m.theme.Base).Render(fit(line, inputWidth))
+			}
+			border := withBase(m.theme.Border, m.theme.Base)
+			rows = append(rows, border.Render(vertical+" ")+withBase(m.theme.Normal, m.theme.Base).Render(prompt)+inner+border.Render(" "+vertical))
 		case "chatter":
 			prefix := "      "
 			if i == 0 {
@@ -121,7 +172,9 @@ func (m *ui) composerLines() []string {
 		}
 	}
 	if style == "bordered" {
-		rows = append(rows, withBase(m.theme.Border, m.theme.Base).Render("╰"+strings.Repeat("─", width-2)+"╯"))
+		rows = append(rows, withBase(m.theme.Border, m.theme.Base).Render(bottomLeft+strings.Repeat(horizontal, width-2)+bottomRight))
+	} else if style == "rounded" {
+		rows = append(rows, withBase(m.theme.Border, m.theme.Base).Render(bottomLeft+strings.Repeat(horizontal, width-2)+bottomRight))
 	}
 	return rows
 }

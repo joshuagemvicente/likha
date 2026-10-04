@@ -12,9 +12,10 @@ import (
 	likhaui "likha/internal/ui"
 )
 
-// M3 band roles (specs/adaptive-themes M3): rebuild wires each role to its
-// fg-on-band style, default stays plain, and limited profiles degrade to
-// legible plain text with labels and content intact.
+// Band roles (specs/adaptive-themes M3, superseded in part by
+// transcript-redesign): rebuild wires each block to its glyph and fg-on-canvas
+// style, only the user prompt carries a band (default included), and limited
+// profiles degrade to legible plain text with glyphs and content intact.
 
 func bandsTestUI(t *testing.T) *ui {
 	t.Helper()
@@ -77,16 +78,20 @@ func TestBandRolesAcrossThemes(t *testing.T) {
 			continue
 		}
 		m, theme := rebuildRoles(t, name)
+		// Glyph-language blocks (transcript-redesign § Backgrounds): only the
+		// user prompt (and its queued form) sits on a band; assistant, tool,
+		// error, and notice blocks sit on the base canvas.
 		cases := []struct {
 			prefix string
 			fg     lipgloss.TerminalColor
 			bg     lipgloss.TerminalColor
 		}{
-			{"You:", theme.Normal.GetForeground(), theme.BgUser.GetBackground()},
-			{"Assistant:", theme.Normal.GetForeground(), theme.BgModel.GetBackground()},
-			{"Tool:", theme.Muted.GetForeground(), theme.BgTool.GetBackground()},
-			{"Error:", theme.Error.GetForeground(), theme.Base.GetBackground()},
-			{"Queued:", theme.Muted.GetForeground(), theme.BgUser.GetBackground()},
+			{"> hello", theme.Normal.GetForeground(), theme.BgUser.GetBackground()},
+			{"⏺ hi there", theme.Normal.GetForeground(), theme.Base.GetBackground()},
+			{"⏺ listing files", theme.Muted.GetForeground(), theme.Base.GetBackground()},
+			{"✗ boom", theme.Error.GetForeground(), theme.Base.GetBackground()},
+			{"> queued · queued prompt", theme.Muted.GetForeground(), theme.BgUser.GetBackground()},
+			{"ℹ plain prose", theme.Muted.GetForeground(), theme.Base.GetBackground()},
 		}
 		for _, tc := range cases {
 			idx, line := roleLine(m, tc.prefix)
@@ -100,27 +105,31 @@ func TestBandRolesAcrossThemes(t *testing.T) {
 			if bg := colorName(got.GetBackground()); bg != colorName(tc.bg) {
 				t.Fatalf("theme %s: %s bg %v, want %v (line %q)", name, tc.prefix, bg, colorName(tc.bg), line)
 			}
+			// The user band spans the prompt block plus one padding row
+			// above and below; canvas blocks get no padding rows.
+			if tc.bg == theme.BgUser.GetBackground() {
+				for _, pad := range []int{idx - 1, idx + 1} {
+					if m.lines[pad] != "" || colorName(m.lineStyles[pad].GetBackground()) != colorName(tc.bg) {
+						t.Fatalf("theme %s: %s band padding row %d = %q bg %v, want blank on BgUser", name, tc.prefix, pad, m.lines[pad], colorName(m.lineStyles[pad].GetBackground()))
+					}
+				}
+			} else if bg := colorName(m.lineStyles[idx-1].GetBackground()); bg == colorName(theme.BgUser.GetBackground()) {
+				t.Fatalf("theme %s: %s is preceded by a band row", name, tc.prefix)
+			}
 		}
 		// Reasoning stays flat: same fg as Muted, no background.
-		idx, line := roleLine(m, "Reasoning:")
+		idx, line := roleLine(m, "✻ thinking")
 		if idx < 0 {
 			t.Fatalf("theme %s: Reasoning line missing", name)
 		}
-		if got := m.lineStyles[idx]; got.Value() != theme.Muted.Value() {
+		if got := m.lineStyles[idx]; colorName(got.GetForeground()) != colorName(theme.Muted.GetForeground()) {
 			t.Fatalf("theme %s: Reasoning style %v, want Muted %v", name, got, theme.Muted)
 		}
 		if _, ok := m.lineStyles[idx].GetBackground().(lipgloss.NoColor); !ok {
 			t.Fatalf("theme %s: Reasoning must carry no band, got bg %v (line %q)", name, m.lineStyles[idx].GetBackground(), line)
 		}
-		// Likha/system keeps the canvas: no bespoke band.
-		likhaIdx, _ := roleLine(m, "Likha:")
-		if likhaIdx < 0 {
-			t.Fatalf("theme %s: Likha line missing", name)
-		}
-		if bg := colorName(m.lineStyles[likhaIdx].GetBackground()); bg != colorName(theme.Base.GetBackground()) {
-			t.Fatalf("theme %s: Likha bg %v, want canvas %v", name, bg, colorName(theme.Base.GetBackground()))
-		}
-		// Bands are real for non-default families.
+		// Bands stay defined for non-default families (dialogs and
+		// compatibility), even though only BgUser paints the transcript.
 		if got := theme.BgUserBG(); got == "" {
 			t.Fatalf("theme %s: BgUser band empty", name)
 		}
@@ -159,22 +168,31 @@ func TestLogoOnCanvasAcrossThemes(t *testing.T) {
 	}
 }
 
-func TestDefaultBandsAreNoOps(t *testing.T) {
+// TestDefaultBandOnlyOnUserPrompt: the default family keeps the plain
+// terminal look everywhere except the user prompt, which gets a faint
+// neutral band (transcript-redesign § Backgrounds); tool and model bands stay
+// terminal default and no other transcript row paints a background.
+func TestDefaultBandOnlyOnUserPrompt(t *testing.T) {
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
 	m, theme := rebuildRoles(t, "default")
-	if theme.BgUserBG() != "" || theme.BgToolBG() != "" || theme.BgModelBG() != "" {
-		t.Fatalf("default bands must stay terminal default: %q %q %q",
-			theme.BgUserBG(), theme.BgToolBG(), theme.BgModelBG())
+	if theme.BgUserBG() == "" {
+		t.Fatal("default must carry a neutral user band")
+	}
+	if theme.BgToolBG() != "" || theme.BgModelBG() != "" {
+		t.Fatalf("default tool/model bands must stay terminal default: %q %q", theme.BgToolBG(), theme.BgModelBG())
 	}
 	plain := lipgloss.NewStyle()
-	for _, prefix := range []string{"You:", "Assistant:", "Tool:", "Likha:"} {
+	for _, prefix := range []string{"⏺ hi there", "⏺ listing files", "ℹ plain prose"} {
 		idx, line := roleLine(m, prefix)
 		if idx < 0 {
 			t.Fatalf("default: %s line missing", prefix)
 		}
 		got := m.lineStyles[idx]
-		if prefix == "Assistant:" || prefix == "You:" {
-			// Normal is unset for default, so prose stays plain.
-			if got.Value() != plain.Value() {
+		if prefix == "⏺ hi there" {
+			// Normal is unset for default, so assistant prose stays plain.
+			if got.GetForeground() != plain.GetForeground() {
 				t.Fatalf("default: %s style %v, want plain (line %q)", prefix, got, line)
 			}
 		}
@@ -182,9 +200,34 @@ func TestDefaultBandsAreNoOps(t *testing.T) {
 			t.Fatalf("default: %s must paint no background, got %v (line %q)", prefix, got.GetBackground(), line)
 		}
 	}
-	view := m.View()
-	if strings.Contains(view, "48;2") || strings.Contains(view, "48;5") {
-		t.Fatalf("default view must not paint a background: %q", view[:min(120, len(view))])
+	user, line := roleLine(m, "> hello")
+	if user < 0 {
+		t.Fatalf("default: user line missing: %q", m.lines)
+	}
+	if bg := colorName(m.lineStyles[user].GetBackground()); bg != colorName(theme.BgUser.GetBackground()) {
+		t.Fatalf("default: user prompt bg %v, want BgUser (line %q)", bg, line)
+	}
+	// Only user-band rows (the prompt plus its padding, and the queued
+	// prompt) paint a background in the rendered transcript.
+	rows := strings.Split(m.View(), "\n")
+	checked, bandRows := 0, 0
+	for i := range m.bodyHeight() {
+		at := m.scroll + i
+		if at >= len(m.lines) {
+			break
+		}
+		banded := colorName(m.lineStyles[at].GetBackground()) == colorName(theme.BgUser.GetBackground())
+		painted := strings.Contains(rows[i], "48;2") || strings.Contains(rows[i], "48;5")
+		if banded != painted {
+			t.Fatalf("default: row %d %q painted=%t, want %t: %q", i, m.lines[at], painted, banded, rows[i])
+		}
+		checked++
+		if banded {
+			bandRows++
+		}
+	}
+	if checked < 10 || bandRows < 3 {
+		t.Fatalf("default: checked %d transcript rows, %d on the band", checked, bandRows)
 	}
 }
 
@@ -197,9 +240,18 @@ func TestDegradationAcrossProfiles(t *testing.T) {
 			for _, name := range likhaui.ThemeNames() {
 				m, _ := rebuildRoles(t, name)
 				view := m.View()
-				for _, want := range []string{"You: hello", "Assistant: hi there", "Tool: listing files", "Reasoning: thinking", "Error: boom", "Likha: plain prose"} {
+				// Glyphs and words survive every profile: block identity
+				// never rides on color alone.
+				for _, want := range []string{"> hello", "⏺ hi there", "⏺ listing files", "✻ thinking", "✗ boom", "> queued · queued prompt", "ℹ plain prose"} {
 					if !strings.Contains(stripANSI(view), want) {
 						t.Fatalf("profile %v theme %s: content %q lost in %q", profile, name, want, stripANSI(view)[:min(200, len(stripANSI(view)))])
+					}
+				}
+				for _, row := range strings.Split(stripANSI(view), "\n") {
+					for _, label := range []string{"You:", "Assistant:", "Tool:", "Reasoning:", "Likha:", "Error:", "Agent:", "Queued:"} {
+						if strings.HasPrefix(row, label) {
+							t.Fatalf("profile %v theme %s: row keeps role label %q: %q", profile, name, label, row)
+						}
 					}
 				}
 			}

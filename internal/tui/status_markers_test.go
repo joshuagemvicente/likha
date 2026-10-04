@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"likha/internal/agent"
 	"likha/internal/providers"
 	"likha/internal/session"
@@ -60,7 +59,7 @@ func TestNerdMarkersOnlyWithOptIn(t *testing.T) {
 }
 
 // Error entries are the one colored prose role (themes spec): the rebuilt
-// Error line carries the theme's Error style while ordinary roles stay plain.
+// "✗" line carries the theme's Error style while "ℹ" notices stay muted.
 func TestErrorEntriesRenderThemeError(t *testing.T) {
 	for _, name := range likhaui.ThemeNames() {
 		theme := likhaui.Resolve(name, true)
@@ -71,24 +70,24 @@ func TestErrorEntriesRenderThemeError(t *testing.T) {
 		m.layoutWidth = 0
 		forceANSI(t)
 		_ = m.View()
-		plain := lipgloss.NewStyle()
-		var errIdx, plainIdx = -1, -1
+		var errIdx, noticeIdx = -1, -1
 		for i, line := range m.lines {
 			switch {
-			case strings.HasPrefix(line, "Error:"):
+			case strings.HasPrefix(line, "✗ "):
 				errIdx = i
-			case strings.HasPrefix(line, "Likha:"):
-				plainIdx = i
+			case strings.HasPrefix(line, "ℹ "):
+				noticeIdx = i
 			}
 		}
-		if errIdx < 0 || plainIdx < 0 {
-			t.Fatalf("theme %s: layout missing roles: %q", name, m.lines)
+		if errIdx < 0 || noticeIdx < 0 {
+			t.Fatalf("theme %s: layout missing blocks: %q", name, m.lines)
 		}
-		if got := m.lineStyles[errIdx]; got.Value() != theme.Error.Value() {
+		if got := m.lineStyles[errIdx]; colorName(got.GetForeground()) != colorName(theme.Error.GetForeground()) {
 			t.Fatalf("theme %s: Error style %v, want theme Error %v", name, got, theme.Error)
 		}
-		if got := m.lineStyles[plainIdx]; got.Value() != plain.Value() {
-			t.Fatalf("theme %s: prose style %v, want plain", name, got)
+		// Likha notices read muted under their own glyph, never in Error.
+		if got := m.lineStyles[noticeIdx]; colorName(got.GetForeground()) != colorName(theme.Muted.GetForeground()) {
+			t.Fatalf("theme %s: notice style %v, want Muted", name, got)
 		}
 	}
 }

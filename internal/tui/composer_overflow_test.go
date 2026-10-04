@@ -178,3 +178,126 @@ func TestComposerBarDecisionFocusAndGate(t *testing.T) {
 		}
 	}
 }
+
+// TestRoundedComposerBoxAcrossWidths pins the rounded box: full-width edges,
+// the "> " prompt on the draft's first row, wrapped rows indented under the
+// text column inside the box, and no row wider than the terminal.
+func TestRoundedComposerBoxAcrossWidths(t *testing.T) {
+	for _, width := range []int{41, 60, 80, 120} {
+		m := overflowUI(t, "rounded", width, 24)
+		m.input = []rune(strings.Repeat("word ", 60))
+		m.edit.caret = len(m.input)
+		m.caretTyped = true
+		style, fixed, inputWidth := m.composerLayout()
+		if style != "rounded" || fixed != 3 || inputWidth != width-6 {
+			t.Fatalf("width %d: layout = %s/%d/%d, want rounded/3/%d", width, style, fixed, inputWidth, width-6)
+		}
+		rows := m.composerLines()
+		plain := make([]string, len(rows))
+		for i, row := range rows {
+			plain[i] = stripANSI(row)
+			if w := plainWidth(row); w != width {
+				t.Fatalf("width %d: row %d width %d, want %d: %q", width, i, w, width, plain[i])
+			}
+		}
+		if len(rows) < 5 || strings.TrimSpace(plain[0]) != "" {
+			t.Fatalf("width %d: want gap, top edge, wrapped input, bottom edge: %q", width, plain)
+		}
+		if plain[1] != "╭"+strings.Repeat("─", width-2)+"╮" || plain[len(plain)-1] != "╰"+strings.Repeat("─", width-2)+"╯" {
+			t.Fatalf("width %d: rounded edges wrong: %q / %q", width, plain[1], plain[len(plain)-1])
+		}
+		if !strings.HasPrefix(plain[2], "│ > word") || !strings.HasSuffix(plain[2], " │") {
+			t.Fatalf("width %d: first input row = %q, want prompt inside the box", width, plain[2])
+		}
+		for i := 3; i < len(plain)-1; i++ {
+			if !strings.HasPrefix(plain[i], "│   ") || strings.HasPrefix(plain[i], "│   >") || !strings.HasSuffix(plain[i], " │") {
+				t.Fatalf("width %d: continuation row %d = %q, want 2-cell indent inside the box", width, i, plain[i])
+			}
+		}
+		if !strings.Contains(strings.Join(plain, "\n"), "█") {
+			t.Fatalf("width %d: caret missing: %q", width, plain)
+		}
+		assertViewport(t, m.View(), width, 24)
+	}
+}
+
+func TestRoundedComposerPlaceholderAndBorderRole(t *testing.T) {
+	forceANSI(t)
+	m := overflowUI(t, "rounded", 80, 24)
+	m.caretOn = false
+	rows := m.composerLines()
+	if got := stripANSI(rows[2]); !strings.HasPrefix(got, "│ > Ask Likha… // escapes a slash") {
+		t.Fatalf("placeholder row = %q", got)
+	}
+	border := withBase(m.theme.Border, m.theme.Base)
+	if !strings.Contains(rows[1], border.Render("╭"+strings.Repeat("─", 78)+"╮")) {
+		t.Fatalf("top edge not in the Border role: %q", rows[1])
+	}
+	if !strings.Contains(rows[2], border.Render("│ ")) || !strings.Contains(rows[2], withBase(m.theme.Muted, m.theme.Base).Render(fit("Ask Likha… // escapes a slash", 74))) {
+		t.Fatalf("placeholder not muted inside a Border box: %q", rows[2])
+	}
+	m.working = true
+	if got := stripANSI(m.composerLines()[2]); !strings.HasPrefix(got, "│ > Type to queue…") {
+		t.Fatalf("working placeholder row = %q", got)
+	}
+}
+
+func TestRoundedComposerFallsBackToMinimalAtMinWidth(t *testing.T) {
+	m := overflowUI(t, "rounded", 40, 12)
+	minimal := overflowUI(t, "minimal", 40, 12)
+	for _, draft := range []string{"", strings.Repeat("narrow ", 30)} {
+		m.input, minimal.input = []rune(draft), []rune(draft)
+		m.edit.caret, minimal.edit.caret = len(m.input), len(minimal.input)
+		if got, want := strings.Join(m.composerLines(), "\n"), strings.Join(minimal.composerLines(), "\n"); got != want {
+			t.Fatalf("rounded at 40 cols = %q, want minimal %q", stripANSI(got), stripANSI(want))
+		}
+		if style, fixed, inputWidth := m.composerLayout(); style != "minimal" || fixed != 2 || inputWidth != 40 {
+			t.Fatalf("layout at 40 cols = %s/%d/%d, want minimal/2/40", style, fixed, inputWidth)
+		}
+	}
+	if m.composerStyle != "rounded" {
+		t.Fatalf("narrow fallback changed the selection to %q", m.composerStyle)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 41, Height: 12})
+	if style, _, _ := m.composerLayout(); style != "rounded" {
+		t.Fatalf("41 cols resolved %q, want rounded", style)
+	}
+}
+
+func TestRoundedComposerTailHidesPromptOnContinuation(t *testing.T) {
+	m := overflowUI(t, "rounded", 60, 12)
+	m.input = []rune(strings.Repeat("tail ", 400))
+	m.edit.caret = len(m.input)
+	rows := m.composerLines()
+	for i, row := range rows[2 : len(rows)-1] {
+		if strings.HasPrefix(stripANSI(row), "│ > ") {
+			t.Fatalf("scrolled tail row %d shows the first-row prompt: %q", i, stripANSI(row))
+		}
+	}
+	assertViewport(t, m.View(), 60, 12)
+}
+
+func TestRoundedComposerReviewBarUnchanged(t *testing.T) {
+	for _, width := range []int{40, 80} {
+		rounded := overflowUI(t, "rounded", width, 24)
+		minimal := overflowUI(t, "minimal", width, 24)
+		for _, m := range []*ui{rounded, minimal} {
+			m.pending = &agent.ApprovalRequest{Kind: "edit"}
+			m.reviewSeen = []bool{false}
+		}
+		if got, want := strings.Join(rounded.composerLines(), "\n"), strings.Join(minimal.composerLines(), "\n"); got != want {
+			t.Fatalf("width %d: rounded review bar differs: %q vs %q", width, stripANSI(got), stripANSI(want))
+		}
+	}
+}
+
+func TestRoundedBoxRunesSets(t *testing.T) {
+	tl, tr, bl, br, h, v := roundedBoxRunes(false)
+	if tl+tr+bl+br+h+v != "╭╮╰╯─│" {
+		t.Fatalf("unicode box = %q", tl+tr+bl+br+h+v)
+	}
+	tl, tr, bl, br, h, v = roundedBoxRunes(true)
+	if tl+tr+bl+br+h+v != "++++-|" {
+		t.Fatalf("ascii box = %q", tl+tr+bl+br+h+v)
+	}
+}

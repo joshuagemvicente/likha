@@ -34,6 +34,10 @@ func TestComposerStylesAndNarrowDegradation(t *testing.T) {
 			if !strings.Contains(wide[style], "\n─") {
 				t.Fatalf("minimal rule missing: %q", wide[style])
 			}
+		case "rounded":
+			if !strings.Contains(wide[style], "╭") || !strings.Contains(wide[style], "╯") || (!strings.Contains(wide[style], "│ > Ask Likha") && !strings.Contains(wide[style], "│ > █Ask Likha")) {
+				t.Fatalf("rounded outline or prompt missing: %q", wide[style])
+			}
 		case "bordered":
 			if !strings.Contains(wide[style], "╭") || !strings.Contains(wide[style], "╰") || (!strings.Contains(wide[style], "│ Ask Likha") && !strings.Contains(wide[style], "│ █Ask Likha")) {
 				t.Fatalf("bordered outline missing: %q", wide[style])
@@ -54,7 +58,7 @@ func TestComposerStylesAndNarrowDegradation(t *testing.T) {
 		}
 		m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
 		assertViewport(t, m.View(), 40, 12)
-		if style == "bordered" || style == "chatter" {
+		if style == "rounded" || style == "bordered" || style == "chatter" {
 			minimal := composerTestUI(t, "minimal", 40, 12)
 			if got, want := strings.Join(m.composerLines(), "\n"), strings.Join(minimal.composerLines(), "\n"); got != want || m.composerStyle != style {
 				t.Fatalf("%s at 40 cols should display minimal without changing selection", style)
@@ -159,10 +163,10 @@ func TestComposerChooserFiltersCancelsAndPersists(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	if !m.dialog.open || m.dialog.kind != dialogComposer || m.dialog.cursor != 0 || !strings.Contains(m.View(), "Composer selection") {
-		t.Fatalf("chooser did not start at active minimal style: %q", m.View())
+		t.Fatalf("chooser did not start at active default rounded style: %q", m.View())
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("chatt")})
-	if len(m.dialogMatches()) != 1 || m.dialog.query != "chatt" || m.composerStyle != "minimal" {
+	if len(m.dialogMatches()) != 1 || m.dialog.query != "chatt" || m.composerStyle != "rounded" {
 		t.Fatal("filter changed the active style or missed chatter")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // clear filter, not selection
@@ -170,7 +174,7 @@ func TestComposerChooserFiltersCancelsAndPersists(t *testing.T) {
 		t.Fatal("first Escape did not clear filter")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // cancel
-	if m.dialog.open || m.composerStyle != "minimal" {
+	if m.dialog.open || m.composerStyle != "rounded" {
 		t.Fatal("second Escape applied a selection")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
@@ -183,7 +187,7 @@ func TestComposerChooserFiltersCancelsAndPersists(t *testing.T) {
 	reopened := NewUI("/sample", nil, nil, cfg.Model, providers.Connection{Provider: "OpenAI", ComposerStyle: cfg.Composer.Style}, stateDir, nil, session.Snapshot{})
 	reopened.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	reopened.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
-	if reopened.dialog.cursor != 3 || !strings.Contains(reopened.View(), "> chatter (current)") {
+	if reopened.dialog.cursor != 4 || !strings.Contains(reopened.View(), "> chatter (current)") {
 		t.Fatal("persisted selection did not reopen on chatter")
 	}
 	reopened.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -240,5 +244,36 @@ func TestComposerNarrowFooterShowsCancellation(t *testing.T) {
 	hints := strings.Split(m.View(), "\n")[11]
 	if !strings.Contains(hints, "Cancelling") || !strings.Contains(hints, "^C") {
 		t.Fatalf("cancellation state or key missing at 40 columns: %q", hints)
+	}
+}
+
+func TestComposerDefaultStyleIsRoundedAndSavedChoicesHonored(t *testing.T) {
+	for saved, want := range map[string]string{"": "rounded", "future-style": "rounded", "minimal": "minimal", "bordered": "bordered", "borderless": "borderless", "chatter": "chatter", "rounded": "rounded"} {
+		m := composerTestUI(t, saved, 100, 24)
+		if m.composerStyle != want {
+			t.Fatalf("saved style %q resolved to %q, want %q", saved, m.composerStyle, want)
+		}
+	}
+	m := composerTestUI(t, "", 100, 24)
+	if got := stripANSI(strings.Join(m.composerLines(), "\n")); !strings.Contains(got, "╭") || !strings.Contains(got, "│ > ") {
+		t.Fatalf("default composer is not the rounded box: %q", got)
+	}
+}
+
+// Under --ascii every composer style draws plain ASCII edges, including the
+// minimal rule the rounded style falls back to at 40 columns.
+func TestComposerASCIIEdgesEveryStyle(t *testing.T) {
+	for _, style := range composerStyles {
+		for _, width := range []int{40, 80} {
+			m := NewUI("/sample", nil, nil, "local", providers.Connection{Provider: "Local", Verified: true, ComposerStyle: style, ASCII: true}, t.TempDir(), nil, session.Snapshot{})
+			m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+			got := stripANSI(strings.Join(m.composerLines(), "\n"))
+			if strings.ContainsAny(got, "╭╮╰╯─│") {
+				t.Fatalf("%s at %d draws box-drawing runes under ASCII: %q", style, width, got)
+			}
+			if drawn, _, _ := m.composerLayout(); drawn == "minimal" && !strings.Contains(got, strings.Repeat("-", width)) {
+				t.Fatalf("%s at %d lacks the ASCII rule: %q", style, width, got)
+			}
+		}
 	}
 }

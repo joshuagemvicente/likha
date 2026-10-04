@@ -146,16 +146,7 @@ func (m *ui) commandLines() []string {
 	if !m.commandPopup.open {
 		return nil
 	}
-	style := m.composerStyle
-	if m.width <= minWidth && (style == "bordered" || style == "chatter") {
-		style = "minimal"
-	}
-	fixed := 1 // one blank line above every composer
-	if style == "minimal" {
-		fixed = 2
-	} else if style == "bordered" {
-		fixed = 3
-	}
+	_, fixed, _ := m.composerLayout()
 	available := max(0, m.height-len(m.header())-m.statusLineHeight()-fixed-1-1)
 	if available == 0 {
 		return nil

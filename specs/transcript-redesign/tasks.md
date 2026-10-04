@@ -18,42 +18,42 @@ slice starts.
 
 ## S1 — Blocks
 
-2. **Block glyph set.** `internal/ui` gains a block-glyph set (Unicode +
+2. **Block glyph set.** [x] DONE 2026-10-04 — `ui.BlockGlyphSet`, `--ascii`/`LIKHA_ASCII` via `Connection.ASCII`; `TestBlockGlyphSets`, `TestASCIIFlagAndEnvironment`. — `internal/ui` gains a block-glyph set (Unicode +
    ASCII) beside the status glyphs; `--ascii` / `LIKHA_ASCII=1` selects it,
    persisted like `--nerd-fonts`, listed in `--help`. Verify: unit test of
    both sets; flag/env parsing test.
-3. **Theme roles.** Add `Accent`, `Success`, `BgCode`, `BgDiffAdd`,
+3. **Theme roles.** [x] DONE 2026-10-04 — `Accent`, `Success` (family green; standard green for habamax/rose-pine/night-owl/monokai/horizon), `BgCode`, `BgDiffAdd/Remove`, neutral `default` `BgUser`; contrast matrix extended; overrides: zero. Deviation: `default` `Accent` is ANSI 12 because `default` `Border` has no color. — Add `Accent`, `Success`, `BgCode`, `BgDiffAdd`,
    `BgDiffRemove`; give `default` a neutral `BgUser`. Verify: contrast matrix
    test extended to the new roles across all families × variants; overrides
    (if any) recorded here.
-4. **Block model in `rebuild()`.** Replace the `role+": "` label with a
+4. **Block model in `rebuild()`.** [x] DONE 2026-10-04 — glyph gutters, user band + padding rows, notices/errors, legacy `Agent` as `ℹ`; `toolEntryStartLine` reads `entryLines`; approved label assertions rewritten (honesty review: none weakened, several strengthened). — Replace the `role+": "` label with a
    glyph gutter and hanging indent per block kind; user band covers the
    prompt block plus one padding row above/below; assistant/notices on base;
    errors `✗`, notices `ℹ`; legacy `Agent` entries as `ℹ`. Remove the
    duplicated label arithmetic in `toolEntryStartLine`. Verify: rewritten
    band/degradation tests assert glyphs and backgrounds; the approved ~22
    label assertions updated; no others weakened.
-5. **Word wrap.** New transcript wrapper: word boundaries, hard break for
+5. **Word wrap.** [x] DONE 2026-10-04 — `wrapHanging` + 12 tests; overflow invariants at 40/60/80/120. — New transcript wrapper: word boundaries, hard break for
    over-wide tokens, hanging indent, control-rune escaping and swatches
    preserved. Verify: wrap tests (CJK/emoji widths, long tokens, indents) and
    the overflow invariants at 40/60/80/120 columns.
-6. **Single tool item.** Record `tool_start` as a `ToolRecord` (status
+6. **Single tool item.** [x] DONE 2026-10-04 — `tool_start` records, result updates by call ID, `tool_items.go`/`tool_render.go`, legacy merge + header-only requests; stale running records render `Interrupted` (`TestStaleRunningCallStaysInterruptedInLaterRuns`). — Record `tool_start` as a `ToolRecord` (status
    `running`); results update it by call ID; render header (display name +
    formatted args), status dot, `⎿` summary, and preview caps (0 search, 3
    others) with `… +N lines (ctrl+o to expand)`; legacy request/result pairs
    merge; unmatched legacy requests render header-only. Verify: per-tool
    header/summary table tests; legacy session fixture renders; persisted
    session for a new run stores one entry per call.
-7. **Status dot + blink.** Dot color by status; blink on the existing
+7. **Status dot + blink.** [x] DONE 2026-10-04 — dot by status on the working tick; outcome words in no-color. — Dot color by status; blink on the existing
    working tick; static when not animating. Verify: render tests per status
    in color and no-color profiles (words carry outcome).
-8. **Focus.** Tab/Shift+Tab one stop per tool item; selection tint + `›`
+8. **Focus.** [x] DONE 2026-10-04 — one Tab stop per call, selection tint + `›`, inspector unchanged. — Tab/Shift+Tab one stop per tool item; selection tint + `›`
    gutter; Enter/Ctrl+O opens the existing inspector. Verify: focus cycle
    and inspector tests updated.
-9. **Rounded composer.** New `rounded` style as default; `minimal` fallback
+9. **Rounded composer.** [x] DONE 2026-10-04 — default `rounded`, `minimal` ≤ 40 cols, ASCII edges for every style (`TestComposerASCIIEdgesEveryStyle`). — New `rounded` style as default; `minimal` fallback
    at ≤ 40 columns; existing styles and saved choices honored. Verify:
    composer overflow and style tests.
-10. **Docs + commit S1.** README/CHANGELOG/`--help`. Full checks; commit;
+10. **Docs + commit S1.** [x] docs + commit DONE 2026-10-04; [ ] user walkthrough pending — README/CHANGELOG/`--help`. Full checks; commit;
     user walkthrough.
 
 ## S2 — Markdown

@@ -10,8 +10,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mattn/go-runewidth"
-
 	"github.com/charmbracelet/lipgloss"
 
 	"likha/internal/agent"
@@ -73,6 +71,7 @@ type ui struct {
 	client             *model.Client
 	theme              likhaui.Theme
 	glyphs             likhaui.Glyphs
+	blocks             likhaui.BlockGlyphs // transcript block glyphs; ASCII under --ascii / LIKHA_ASCII
 	themeName          string
 	composerStyle      string
 	width, height      int
@@ -87,7 +86,9 @@ type ui struct {
 	lines              []string
 	lineStyles         []lipgloss.Style
 	lineSpans          [][]likhaui.Swatch
-	lineActivity       []bool // marks the ephemeral activity row for render-time sweep styling
+	lineActivity       []bool      // marks the ephemeral activity row for render-time sweep styling
+	lineRuns           [][]lineRun // styled runs per tool row (status dot, bold name); nil elsewhere
+	entryLines         []int       // first layout line of each entry, recorded by rebuild for focus/scroll math
 	streamBuf          strings.Builder
 	reasoningBuf       strings.Builder
 	reasoningStream    int
@@ -111,7 +112,7 @@ type ui struct {
 	promptHistory      promptHistory
 	queue              []string       // steering prompts typed while a run is active; UI mirror of the delivery channel
 	steer              chan string    // the active turn's steering input; nil while idle
-	priorLen           int            // m.history length at the active turn's start; reconcile baseline
+	priorLen           int            // m.history length at the active run's start (turn or compaction); reconcile baseline
 	turnSent           map[string]int // steer deliveries the UI processed this turn, by text
 	store              *session.Store
 	snapshot           session.Snapshot
@@ -162,6 +163,10 @@ type ui struct {
 	toolCatalogGen        uint64
 	toolInspector         toolInspectionState
 	toolRecords           []session.ToolRecord
+	liveToolCalls         map[string]bool // this run's started calls still awaiting a result
+	runToolCalls          map[string]bool // every call this run showed as a tool item
+	approvalCall          string          // live call whose record reads "awaiting approval"
+	activityArmed         uint64          // activityGeneration+1 of the tick in flight; 0 = none
 	outputs               *tooloutput.Store
 	agentInspector        agentInspectionState
 	taskRecords           []explore.Record
@@ -194,7 +199,7 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 	if conn.Nerd {
 		glyphs = likhaui.NerdGlyphs()
 	}
-	m := &ui{root: root, repo: repo, client: client, modelName: name, conn: conn, stateDir: stateDir, store: store, snapshot: snapshot, history: snapshot.History, promptHistory: newPromptHistory(restoredPromptHistory(snapshot)), following: true, caretOn: true, streaming: -1, activity: -1, status: "Connected", mode: modeMain, theme: theme, glyphs: glyphs, themeName: themeName, composerStyle: validComposerStyle(conn.ComposerStyle), statusLineOpts: conn.StatusLine, started: time.Now(), freshSession: len(snapshot.Entries) == 0}
+	m := &ui{root: root, repo: repo, client: client, modelName: name, conn: conn, stateDir: stateDir, store: store, snapshot: snapshot, history: snapshot.History, promptHistory: newPromptHistory(restoredPromptHistory(snapshot)), following: true, caretOn: true, streaming: -1, activity: -1, status: "Connected", mode: modeMain, theme: theme, glyphs: glyphs, blocks: likhaui.BlockGlyphSet(conn.ASCII), themeName: themeName, composerStyle: validComposerStyle(conn.ComposerStyle), statusLineOpts: conn.StatusLine, started: time.Now(), freshSession: len(snapshot.Entries) == 0}
 	m.restoreTaskRecords()
 	m.restorePlan()
 	m.refreshProfileCatalog()
@@ -347,7 +352,18 @@ func (m *ui) hideActivity() {
 }
 
 func (m *ui) activityTickCmd() tea.Cmd {
+	m.activityArmed = m.activityGeneration + 1
 	return activityTick(m.runID, m.activityGeneration)
+}
+
+// armActivityTick starts the activity tick for running tool dots unless a
+// tick for the current generation is already in flight. hideActivity bumps
+// the generation, so the Working row's retired clock never counts.
+func (m *ui) armActivityTick() tea.Cmd {
+	if m.activityArmed == m.activityGeneration+1 || !m.toolBlinking() {
+		return nil
+	}
+	return m.activityTickCmd()
 }
 
 // startTurn submits a user prompt to the model and enters the working state.
@@ -391,6 +407,7 @@ func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
 	m.abandon = make(chan struct{})
 	m.runID++
 	m.taskRuntime = nil
+	m.liveToolCalls, m.runToolCalls, m.approvalCall = nil, nil, ""
 	m.resetAgentInspection()
 	runID := m.runID
 	events := m.events
@@ -519,6 +536,11 @@ func (m *ui) startCompaction(focus string) tea.Cmd {
 	m.showActivity()
 	m.input = nil
 	m.edit.endCaret(m.input)
+	// The run starts at the current history: a cancelled compaction carries
+	// no turn of its own, so the end-of-run backstops (unexecuted calls,
+	// queue reconcile) must not revisit the previous turn.
+	m.priorLen = len(m.history)
+	m.turnSent = nil
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.events = make(chan agent.TurnEvent, 64)
@@ -817,6 +839,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			m.pending = v.Approval
+			m.markAwaitingApproval()
 			m.resetToolInspection()
 			m.resetAgentInspection()
 			m.scroll = 0 // review starts at the top of the proposal screen
@@ -830,17 +853,12 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.hideActivity()
 			m.streamBuf.Reset()
 			m.streaming = -1
-			m.entries = append(m.entries, entry{role: "Tool", content: v.Text})
-			if v.Kind == "tool_start" && v.ToolCall != nil && v.ToolCall.Name == "task" {
-				m.toolRecords = append(m.toolRecords, session.ToolRecord{EntryIndex: len(m.entries) - 1, CallID: v.ToolCall.ID, Name: "task", Arguments: v.ToolCall.Arguments, SourceKind: "builtin", SourceTool: "task", Status: "queued", Content: "Awaiting explore task acceptance"})
-				if profile := taskProfileFromArguments(v.ToolCall.Arguments); profile != "" {
-					if content, ok := m.taskRowContentForProfile(v.ToolCall.ID, profile); ok {
-						m.toolRecords[len(m.toolRecords)-1].Content = content
-					}
-				}
-			}
-			if v.Kind == "tool_result" && v.ToolCall != nil && v.ToolResult != nil {
-				m.recordToolResult(len(m.entries)-1, *v.ToolCall, *v.ToolResult)
+			if v.Kind == "tool_start" {
+				m.startToolItem(v.Text, v.ToolCall)
+			} else if v.ToolCall != nil && v.ToolResult != nil {
+				m.recordToolResult(*v.ToolCall, *v.ToolResult, v.Text)
+			} else {
+				m.entries = append(m.entries, entry{role: "Tool", content: v.Text})
 			}
 			if m.cancelling {
 				m.status = "Cancelling"
@@ -858,6 +876,14 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.working && !m.cancelling && m.pending == nil {
 					m.showActivity()
 					return m, tea.Batch(waitEvent(m.events), m.activityTickCmd())
+				}
+			}
+			if v.Kind == "tool_start" && m.working && m.pending == nil {
+				// The running dot blinks on the activity tick, which would
+				// otherwise stop with the Working row it just replaced.
+				if tick := m.armActivityTick(); tick != nil {
+					m.layoutWidth = 0
+					return m, tea.Batch(waitEvent(m.events), tick)
 				}
 			}
 		case "notice":
@@ -936,12 +962,9 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.streaming = -1
 			if m.cancelling {
-				for _, message := range v.History {
-					if message.Role == "tool" && message.Content == "Error: action not executed; run interrupted" {
-						m.entries = append(m.entries, entry{role: "Tool", content: message.Content})
-					}
-				}
+				m.recordUnexecutedCalls(v.History)
 			}
+			m.liveToolCalls, m.runToolCalls, m.approvalCall = nil, nil, ""
 			if m.cancelling {
 				m.status = "Cancelled"
 				m.entries = append(m.entries, entry{role: "Likha", content: "Run cancelled; no further tools will execute. Approved shell commands may leave detached processes running."})
@@ -1055,7 +1078,10 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case activityTickMsg:
 		// Ticks are scoped to both the run and the current activity interval.
 		// Handoffs, re-arms, cancellation, and reviews invalidate old clocks.
-		if v.runID != m.runID || v.generation != m.activityGeneration || !m.working || m.pending != nil || !m.hasActivity() {
+		if v.runID != m.runID || v.generation != m.activityGeneration || !m.working || m.pending != nil || !m.hasActivity() && !m.toolBlinking() {
+			if m.activityArmed == v.generation+1 {
+				m.activityArmed = 0 // this clock stopped; a later handoff may re-arm
+			}
 			return m, nil
 		}
 		m.activityFrame++
@@ -1256,7 +1282,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reviewFocus = focusApprove
 					m.jumpBottom()
 					m.layoutWidth = 0
-					return m, nil
+					return m, m.resumeAfterApproval()
 				}
 				m.pending.Reply <- false
 				m.status = "Rejected"
@@ -1265,7 +1291,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.reviewFocus = focusApprove
 				m.jumpBottom()
 				m.layoutWidth = 0
-				return m, nil
+				return m, m.resumeAfterApproval()
 			}
 		}
 		// Composer arrows are history/caret navigation only after overlays
@@ -1548,21 +1574,8 @@ func recognizedCommand(prompt string) bool {
 // composerInputWidth is the usable width of the text area, matching the
 // composer style's insets so vertical caret moves track the rendered wraps.
 func (m *ui) composerInputWidth() int {
-	style := m.composerStyle
-	if style == "" {
-		style = "minimal"
-	}
-	if m.width <= minWidth && (style == "bordered" || style == "chatter") {
-		style = "minimal"
-	}
-	width := m.width
-	switch style {
-	case "bordered":
-		width -= 4
-	case "chatter":
-		width -= runewidth.StringWidth("You › ")
-	}
-	return max(1, width)
+	_, _, width := m.composerLayout()
+	return width
 }
 
 // navigatePromptHistory gives the composer the usual two-step edge behavior:

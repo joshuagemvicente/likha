@@ -55,6 +55,8 @@ Options:
                     headlessly and store the login; no TUI or repository needed.
   --debug-models    Log model IDs and context metadata to
                     model-metadata.log (also LIKHA_DEBUG_MODELS=1).
+  --ascii           Draw transcript block glyphs and the composer box in plain
+                    ASCII instead of Unicode (also LIKHA_ASCII=1).
   --version         Print the build version and exit.
   --help            Print this help and exit.
 
@@ -64,9 +66,9 @@ ChatGPT signs in through your browser at first run instead of using an API
 key; the login is stored for later runs.
 
 Environment: LIKHA_MODEL, LIKHA_ENDPOINT, LIKHA_PROVIDER, LIKHA_API_KEY,
-LIKHA_DEBUG_MODELS, LIKHA_STATE_DIR (private storage directory; default is the
-OS user configuration directory's "likha" child). Each provider also accepts
-its own LIKHA_<NAME>_API_KEY (see the provider list above).
+LIKHA_DEBUG_MODELS, LIKHA_ASCII, LIKHA_STATE_DIR (private storage directory;
+default is the OS user configuration directory's "likha" child). Each provider
+also accepts its own LIKHA_<NAME>_API_KEY (see the provider list above).
 
 Examples:
   likha ~/projects/app                                        # first-run setup
@@ -157,6 +159,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	resumeID := flags.String("resume", "", "resume a previous session ID")
 	themeFlag := flags.String("theme", os.Getenv("LIKHA_THEME"), "color theme (see --help list; stored in config.json when set)")
 	nerdFlag := flags.Bool("nerd-fonts", os.Getenv("LIKHA_NERD") == "1", "use Nerd Font glyphs for status markers")
+	asciiFlag := flags.Bool("ascii", os.Getenv("LIKHA_ASCII") == "1", "draw transcript block glyphs and the composer box in plain ASCII")
 	debugModels := flags.Bool("debug-models", os.Getenv("LIKHA_DEBUG_MODELS") == "1", "log connected model metadata to the private state directory")
 	showVersion := flags.Bool("version", false, "print the build version")
 	deviceLogin := flags.Bool("device-login", false, "sign in to the selected OAuth provider headlessly and store the login")
@@ -375,13 +378,19 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		Provider: display, ProviderCanonical: selected.Name, Verified: verified, Err: startupErr,
 		Setup: setupNeeded, Theme: themeName, ComposerStyle: composerStyle, StatusLine: statusLine,
 		ContextWindows: contextWindows, ContextWindowOverrides: stored.ContextWindows, ModelMetadataObserver: metadataObserver,
-		Nerd: *nerdFlag || os.Getenv("LIKHA_NERD") == "1", Mcp: mcpServers,
+		Nerd: *nerdFlag || os.Getenv("LIKHA_NERD") == "1", ASCII: asciiGlyphs(*asciiFlag), Mcp: mcpServers,
 	}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(stderr, "likha: terminal: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+// asciiGlyphs reports whether the plain-ASCII block glyph set applies: the
+// --ascii flag or LIKHA_ASCII=1, mirroring --nerd-fonts / LIKHA_NERD.
+func asciiGlyphs(flagValue bool) bool {
+	return flagValue || os.Getenv("LIKHA_ASCII") == "1"
 }
 
 // resolveModel returns the model to use. An explicit name wins. Without one, a

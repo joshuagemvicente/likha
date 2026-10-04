@@ -147,12 +147,52 @@ func TestContrastMatrix(t *testing.T) {
 		}
 	}
 
+	// Transcript redesign roles: Success on base; Normal on the code and
+	// diff tints; Accent (inline code, keywords) on the code tint.
+	for name, fam := range families {
+		for _, variant := range []struct {
+			label string
+			light bool
+			pal   palette
+		}{
+			{"dark", false, fam.dark},
+			{"light", true, fam.light},
+		} {
+			p := variant.pal
+			green := successFG(p, variant.light)
+			if !legible(green, p.base) {
+				t.Errorf("%s/%s: success %q on base %q illegible", name, variant.label, green, p.base)
+			}
+			tints := []struct {
+				band  string
+				fg    string
+				ratio float64
+			}{
+				{"code", p.accent, bandCodeRatio},
+				{"diff-add", green, bandDiffRatio},
+				{"diff-remove", p.err, bandDiffRatio},
+			}
+			for _, tn := range tints {
+				tint := bandBG(bandKey{family: name, band: tn.band, light: variant.light},
+					mix(tn.fg, p.base, tn.ratio))
+				if !legible(p.text, tint) {
+					t.Errorf("%s/%s: text %q on %s tint %q (ratio %.2f) illegible (needs override)",
+						name, variant.label, p.text, tn.band, tint, tn.ratio)
+				}
+				if tn.band == "code" && !legible(p.accent, tint) {
+					t.Errorf("%s/%s: accent %q on code tint %q illegible (needs override)",
+						name, variant.label, p.accent, tint)
+				}
+			}
+		}
+	}
+
 	for key := range bandOverrides {
 		if _, ok := families[key.family]; !ok {
 			t.Errorf("override names unknown family %q", key.family)
 		}
 		switch key.band {
-		case "user", "tool", "model":
+		case "user", "tool", "model", "selection", "code", "diff-add", "diff-remove":
 		default:
 			t.Errorf("override names unknown band %q", key.band)
 		}
@@ -173,6 +213,7 @@ func TestRolesCarryBothVariants(t *testing.T) {
 		"Warning":  func(th Theme) lipgloss.Style { return th.Warning },
 		"Error":    func(th Theme) lipgloss.Style { return th.Error },
 		"Muted":    func(th Theme) lipgloss.Style { return th.Muted },
+		"Accent":   func(th Theme) lipgloss.Style { return th.Accent },
 	}
 	slots := map[string]func(p palette) string{
 		"Title":    func(p palette) string { return p.accent },
@@ -183,6 +224,7 @@ func TestRolesCarryBothVariants(t *testing.T) {
 		"Warning":  func(p palette) string { return p.warning },
 		"Error":    func(p palette) string { return p.err },
 		"Muted":    func(p palette) string { return p.dim },
+		"Accent":   func(p palette) string { return p.accent },
 	}
 	for _, name := range ThemeNames() {
 		if name == "default" {
@@ -204,6 +246,34 @@ func TestRolesCarryBothVariants(t *testing.T) {
 			}
 			if !strings.EqualFold(wantDark, wantLight) && strings.EqualFold(ac.Light, ac.Dark) {
 				t.Fatalf("%s/%s: Light == Dark but family defines two variants", name, role)
+			}
+		}
+		succ, ok := theme.Success.GetForeground().(lipgloss.AdaptiveColor)
+		if !ok {
+			t.Fatalf("%s/Success: foreground is %T, want AdaptiveColor", name, theme.Success.GetForeground())
+		}
+		greenDark, greenLight := successFG(fam.dark, false), successFG(fam.light, true)
+		if succ.Dark != greenDark || succ.Light != greenLight {
+			t.Fatalf("%s/Success: got %+v, want dark %q light %q", name, succ, greenDark, greenLight)
+		}
+		tints := map[string]struct {
+			style           lipgloss.Style
+			darkFG, lightFG string
+			ratio           float64
+		}{
+			"BgCode":       {theme.BgCode, fam.dark.accent, fam.light.accent, bandCodeRatio},
+			"BgDiffAdd":    {theme.BgDiffAdd, greenDark, greenLight, bandDiffRatio},
+			"BgDiffRemove": {theme.BgDiffRemove, fam.dark.err, fam.light.err, bandDiffRatio},
+		}
+		for role, tn := range tints {
+			ac, ok := tn.style.GetBackground().(lipgloss.AdaptiveColor)
+			if !ok {
+				t.Fatalf("%s/%s: background is %T, want AdaptiveColor", name, role, tn.style.GetBackground())
+			}
+			wantDark := mix(tn.darkFG, fam.dark.base, tn.ratio)
+			wantLight := mix(tn.lightFG, fam.light.base, tn.ratio)
+			if ac.Dark != wantDark || ac.Light != wantLight {
+				t.Fatalf("%s/%s: got %+v, want dark %q light %q", name, role, ac, wantDark, wantLight)
 			}
 		}
 		bg, ok := theme.Base.GetBackground().(lipgloss.AdaptiveColor)

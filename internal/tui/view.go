@@ -58,6 +58,8 @@ func (m *ui) rebuild() {
 	m.lineStyles = m.lineStyles[:0]
 	m.lineSpans = m.lineSpans[:0]
 	m.lineActivity = m.lineActivity[:0]
+	m.lineRuns = m.lineRuns[:0]
+	m.entryLines = nil
 	// add appends display lines, the style each one renders with, and the
 	// inline color spans painted over it at render time. Logo art and the
 	// review proposal body skip detection: spans there would paint ASCII
@@ -68,6 +70,7 @@ func (m *ui) rebuild() {
 			m.lineStyles = append(m.lineStyles, style)
 			m.lineSpans = append(m.lineSpans, nil)
 			m.lineActivity = append(m.lineActivity, false)
+			m.lineRuns = append(m.lineRuns, nil)
 		}
 	}
 	addSwatches := func(lines []string, style lipgloss.Style) {
@@ -76,6 +79,18 @@ func (m *ui) rebuild() {
 			m.lineStyles = append(m.lineStyles, style)
 			m.lineSpans = append(m.lineSpans, likhaui.FindSwatches(line))
 			m.lineActivity = append(m.lineActivity, false)
+			m.lineRuns = append(m.lineRuns, nil)
+		}
+	}
+	// Tool rows carry styled runs (status dot, bold name) instead of
+	// swatches: color literals in tool output are data, not prose.
+	addTool := func(rows []toolRow) {
+		for _, row := range rows {
+			m.lines = append(m.lines, row.text)
+			m.lineStyles = append(m.lineStyles, row.style)
+			m.lineSpans = append(m.lineSpans, nil)
+			m.lineActivity = append(m.lineActivity, false)
+			m.lineRuns = append(m.lineRuns, row.runs)
 		}
 	}
 	width := contentWidth(m.width)
@@ -97,7 +112,15 @@ func (m *ui) rebuild() {
 			}
 		}
 		first := false
+		m.entryLines = make([]int, len(m.entries))
+		plan := m.toolItemPlan()
+		focused, hasFocus := m.focusedToolItem(plan)
 		for index, e := range m.entries {
+			if plan.absorbed[index] {
+				// A legacy result renders inside its request's item.
+				m.entryLines[index] = m.entryLines[plan.owner[index]]
+				continue
+			}
 			if e.role == "Logo" {
 				// Startup block: raw pre-formatted logo lines, never
 				// re-wrapped. The block is fixed-width ASCII, but a line wider
@@ -105,6 +128,7 @@ func (m *ui) rebuild() {
 				// lines skip fit()), so over-wide lines hard-wrap to content
 				// width. A no-op for the current logo; it keeps the one raw
 				// render path provably safe if the art is ever retraced.
+				m.entryLines[index] = len(m.lines)
 				if m.width < 56 {
 					continue
 				}
@@ -112,6 +136,7 @@ func (m *ui) rebuild() {
 					add([]string{""}, plain)
 				}
 				first = true
+				m.entryLines[index] = len(m.lines)
 				for _, line := range strings.Split(e.content, "\n") {
 					if runewidth.StringWidth(line) <= width {
 						add([]string{line}, withBase(m.theme.Title, m.theme.Base))
@@ -125,6 +150,7 @@ func (m *ui) rebuild() {
 				add([]string{""}, withBase(plain, m.theme.Base))
 			}
 			first = true
+			m.entryLines[index] = len(m.lines)
 			if e.role == "Working" {
 				plainText := activitySpinner(m.activityFrame) + " " + workingLabel
 				for i, line := range wrap(plainText, width) {
@@ -132,33 +158,27 @@ func (m *ui) rebuild() {
 					m.lineStyles = append(m.lineStyles, m.theme.Muted)
 					m.lineSpans = append(m.lineSpans, nil)
 					m.lineActivity = append(m.lineActivity, i == 0)
+					m.lineRuns = append(m.lineRuns, nil)
 				}
 				continue
 			}
-			// Full-surface bands: authorship shows in the background, not in
-			// prose hue floods — You/Assistant prose adopts Normal fg on their
-			// band, Tool shares one Muted-on-BgTool band (activity and result
-			// stay distinct in prefix text), Reasoning stays Muted flat, and
-			// failures signal by Error fg on the bare canvas.
-			style := withBase(m.theme.Normal, m.theme.BgUser)
-			switch {
-			case e.role == "Assistant":
-				style = withBase(m.theme.Normal, m.theme.BgModel)
-			case e.role == "Reasoning":
-				// The quietest layer carries no band: foreground-muted only.
-				style = m.theme.Muted
-			case e.role == "Tool":
-				style = withBase(m.theme.Muted, m.theme.BgTool)
-			case e.role == "Error":
-				style = withBase(m.theme.Error, m.theme.Base)
-			case e.role == "Queued":
-				// Queued prompts sit on the user band but muted: they are the
-				// user's words, not yet sent.
-				style = withBase(m.theme.Muted, m.theme.BgUser)
-			case e.role != "You":
-				// Likha/system and any future prose role keep their existing
-				// look on the canvas.
-				style = withBase(plain, m.theme.Base)
+			if e.role == "Tool" {
+				addTool(m.toolItemRows(index, plan, hasFocus && focused == index, width))
+				continue
+			}
+			// Glyph-language blocks (spec transcript-redesign § Glyph
+			// language): a glyph in a two-cell gutter carries the block kind,
+			// prose word-wraps under the text column, and only user prompts
+			// sit on a band, padded by one band row above and below.
+			glyph, style, band := m.transcriptBlock(e)
+			content := e.content
+			if e.role == "Queued" {
+				// The user's words, not yet sent: the word says so without
+				// relying on the muted color.
+				content = "queued · " + content
+			}
+			if band {
+				add([]string{""}, style)
 			}
 			// Inline swatches: color literals paint their own background
 			// (with a contrast-picked foreground) over whatever band would
@@ -167,16 +187,45 @@ func (m *ui) rebuild() {
 			// boundary: widths pre- and post-swatch are identical because the
 			// decoration is visual only — no text is added, removed, or
 			// reordered, only SGR spans wrap existing cells.
-			content := e.content
-			if e.role == "Tool" {
-				content = m.toolEntryContent(index, content)
-				if m.toolEntryFocused(index) {
-					style = withBase(m.theme.Selected, m.theme.BgTool)
-				}
+			gutter := glyph + " "
+			indent := runewidth.StringWidth(gutter)
+			rows := wrapHanging(content, width, indent, indent)
+			rows[0] = gutter + rows[0]
+			addSwatches(rows, style)
+			if band {
+				add([]string{""}, style)
 			}
-			addSwatches(wrap(e.role+": "+content, width), style)
 		}
 		m.layoutWidth = m.width
+	}
+}
+
+// transcriptBlock maps an entry to its block in the glyph language (spec
+// transcript-redesign § Glyph language, § Backgrounds): the gutter glyph,
+// the style every row of the block renders with, and whether the block sits
+// on the user band. Meaning rides on the glyph, never on color alone; only
+// user prompts carry a band, and everything else sits on the base canvas.
+// Tool entries lay out as tool items instead (toolItemRows).
+func (m *ui) transcriptBlock(e entry) (glyph string, style lipgloss.Style, band bool) {
+	g := m.blocks
+	switch e.role {
+	case "You":
+		return g.User, withBase(m.theme.Normal, m.theme.BgUser), true
+	case "Queued":
+		// Queued prompts keep the user band but read muted: they are the
+		// user's words, not yet sent.
+		return g.User, withBase(m.theme.Muted, m.theme.BgUser), true
+	case "Assistant":
+		return g.Assistant, withBase(m.theme.Normal, m.theme.Base), false
+	case "Reasoning":
+		// The quietest layer: foreground-muted only, no band.
+		return g.Thought, m.theme.Muted, false
+	case "Error":
+		return g.Error, withBase(m.theme.Error, m.theme.Base), false
+	default:
+		// Likha notices, legacy Agent lines, and any future prose role read
+		// as muted notices on the canvas.
+		return g.Notice, withBase(m.theme.Muted, m.theme.Base), false
 	}
 }
 
@@ -237,10 +286,12 @@ func (m *ui) mainView() string {
 		}
 	}
 	start := m.scroll
+	blinkOff := m.toolBlinkOff()
 	for i := range body {
 		line := ""
 		style := m.theme.Base
 		var spans []likhaui.Swatch
+		var runs []lineRun
 		if start+i < len(m.lines) {
 			line = m.lines[start+i]
 			if start+i < len(m.lineStyles) {
@@ -248,6 +299,9 @@ func (m *ui) mainView() string {
 			}
 			if start+i < len(m.lineSpans) {
 				spans = m.lineSpans[start+i]
+			}
+			if start+i < len(m.lineRuns) {
+				runs = m.lineRuns[start+i]
 			}
 		}
 		// Style the padded line: foreground on padding spaces is invisible,
@@ -260,6 +314,10 @@ func (m *ui) mainView() string {
 			muted := withBase(m.theme.Muted, m.theme.Base)
 			accent := withBase(m.theme.Title, m.theme.Base)
 			rows = append(rows, renderActivityRow(fitted, line, m.activityFrame, muted, accent))
+			continue
+		}
+		if len(runs) > 0 {
+			rows = append(rows, renderRuns(style, runs, fitted, blinkOff))
 			continue
 		}
 		rows = append(rows, renderSwatches(style, spans, fitted))
