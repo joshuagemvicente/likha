@@ -27,7 +27,7 @@ the user's agreement and updates to its acceptance guide.
 | Retained output | Five MiB per call, 50 MiB per session, private session-linked artifacts; no automatic context injection |
 | Output lifetime | Persist with session; explicit clear and session deletion remove artifacts; missing output never triggers rerun |
 | Checklist | At most 32 steps; persist with session; restored state grants no permissions/restart |
-| Web search | One explicitly configured search backend: `brave`, `tavily`, `exa`, or `duckduckgo` (revised 2026-10-04 by user approval — OpenCode-style pluggable providers); no vendor/shell fallback; at most 10 results |
+| Web search | One configured search backend: `brave`, `tavily`, `exa`, or `duckduckgo` (revised 2026-10-04 by user approval — OpenCode-style pluggable providers); enabled search with no backend named uses keyless `duckduckgo` (revised 2026-10-04 by user approval — keys only when the user opts into a keyed backend); no vendor/shell fallback, including from a keyed backend missing its key; at most 10 results |
 | Web fetch | Explicitly enabled unauthenticated public HTTPS, local text/HTML/Markdown conversion; two MiB received-body cap |
 | Web timeout | 30 seconds for network/processing after consent; pending consent remains cancellable |
 | Redirects | At most five for fetch; validate address/origin on every hop; new origin needs its own grant; search credentials never follow redirects |

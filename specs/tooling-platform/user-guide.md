@@ -133,9 +133,11 @@ files using the same private-state rules as provider credentials.
 
 In `tools.json`, enable only the web tools you want. `web.search.backend`
 selects exactly one search backend: `brave`, `tavily`, `exa`, or `duckduckgo`
-(phase 5). Any other value, `enabled: true` with no backend, or a malformed
-`tools.json` is a visible config error that disables both `web_search` and
-`web_fetch`. Pick one:
+(phase 5). With `enabled: true` and no backend, search uses the keyless
+`duckduckgo` default, so no key is needed unless you choose a keyed backend; a
+keyed backend without its key stays unavailable and never falls back to
+DuckDuckGo. Any other value or a malformed `tools.json` is a visible config
+error that disables both `web_search` and `web_fetch`. Pick one:
 
 ```json
 {"web":{"search":{"enabled":true,"backend":"brave"},"fetch":{"enabled":true}}}

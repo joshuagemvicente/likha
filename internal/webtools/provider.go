@@ -30,6 +30,10 @@ const (
 // existing backend changes and no vendor fallback is introduced.
 var SupportedBackends = []string{braveBackend, tavilyBackend, exaBackend, duckduckgoBackend}
 
+// DefaultBackend is used when web.search.enabled is true and no backend is
+// named. It needs no key; keyed backends are opt-in by naming them.
+const DefaultBackend = duckduckgoBackend
+
 // supportedBackend reports whether the named search backend is listed in
 // SupportedBackends.
 func supportedBackend(backend string) bool {

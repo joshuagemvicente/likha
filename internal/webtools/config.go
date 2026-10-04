@@ -51,8 +51,9 @@ type FetchConfig struct {
 // LoadConfig reads <stateDir>/tools.json shaped
 // {"web":{"search":{"enabled":true,"backend":"brave"},"fetch":{"enabled":true}}}.
 // A missing file returns the zero Config with a nil error (unconfigured, tools
-// disabled). Malformed JSON or an unsupported backend returns an error naming
-// the problem; the caller disables the affected web tools and reports it.
+// disabled). Enabled search with no backend uses DefaultBackend (keyless
+// DuckDuckGo). Malformed JSON or an unsupported backend returns an error
+// naming the problem; the caller disables both web tools and reports it.
 func LoadConfig(stateDir string) (Config, error) {
 	var config Config
 	if strings.TrimSpace(stateDir) == "" {
@@ -100,8 +101,9 @@ func LoadConfig(stateDir string) (Config, error) {
 	}
 	if config.Search.Backend == "" {
 		if config.Search.Enabled {
-			return config, fmt.Errorf("%s: web.search.enabled requires web.search.backend (one of: %s)",
-				configFileName, strings.Join(SupportedBackends, ", "))
+			// Search works without a key unless the user opts into a keyed
+			// backend: an enabled section with no backend means DuckDuckGo.
+			config.Search.Backend = DefaultBackend
 		}
 	} else if !supportedBackend(config.Search.Backend) {
 		return config, fmt.Errorf("%s: web.search.backend %q is not supported; supported backends are: %s",

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Web search needs no key by default:** with `web.search.enabled: true` and no `backend`, `web_search` uses keyless DuckDuckGo (previously a config error). Brave, Tavily, and Exa remain opt-in by naming them; a named keyed backend without its key stays unavailable and never falls back. The default path was live-checked on 2026-10-04 (three ranked results through the real adapter); the consent dialog walkthrough is pending.
+
+- **Streamed tool calls without an `index` are accepted:** some OpenAI-compatible gateways and routers (seen on Dialagram's `nexum-router`) omit the per-fragment `index`, which failed the turn with "invalid indexed function tool-call fragment". A fragment without an index now opens a new call when it carries a new call id and otherwise continues the latest call; ids or names repeated on every chunk are no longer doubled. Fragments that have neither an index nor an id, or a non-`function` type, are still rejected, and the error now names which rule the provider broke. Not yet live-verified against the router.
+
 - **`/sessions` can delete a session** (Ctrl+D on the highlighted row): a two-step confirmation precedes deletion. Deleting removes the session row together with its plan, task, and journal rows, and removes the session's private tool-output directory when that cleanup succeeds; if cleanup fails, the session is still deleted and the leftover output is reported as an error. Deletion is refused while a run or review is active, and deleting the current session continues in a fresh one. Checks pass; the interactive walkthrough is pending.
 
 - **`/agents` shows per-task timing:** each task row now reads `wait Xs · active Ys`, separating queue wait from active run time (narrow widths show only the active figure; records saved before this release show `not recorded` with elapsed time). Checks pass; the interactive walkthrough is pending.

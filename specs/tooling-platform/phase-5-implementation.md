@@ -190,3 +190,27 @@ enum, per-provider disclosure, backend-switch consent note).
 - Hosted-provider structured-tool probe (release gate) — user-run.
 - Brave/Tavily/Exa happy paths — need keys.
 - Published-binary probe — no published release exists yet.
+
+## Follow-up fixes (2026-10-04, user-approved)
+
+- **Streamed tool calls without `index`.** The user hit "invalid indexed
+  function tool-call fragment" twice on Dialagram `nexum-router` (session
+  history: the same session's other parallel-tool rounds succeeded, consistent
+  with the router choosing upstreams per request). The parser now accepts
+  index-less fragments (a new call id opens the next call; otherwise it
+  continues the latest call), stops doubling ids/names repeated on every
+  chunk, still rejects fragments with neither index nor id and non-`function`
+  types, and names the broken rule in the error. The existing "missing
+  structured index" test input was changed (with user approval) to the
+  still-rejected no-index/no-id shape. A temporary harness (deleted) checked
+  Gemini-style whole calls, repeated ids, continuations, mixed indexed and
+  index-less, repeated id+name with an index, and both rejections. **Live
+  confirmation against the router is pending** (user-run capture:
+  `scratchpad/capture_toolcalls.py`).
+- **Keyless DuckDuckGo default.** `web.search.enabled: true` with no backend
+  now resolves to `duckduckgo` instead of a config error (`decisions.md` web
+  search row revised by user approval). A named keyed backend without its key
+  stays unavailable — no fallback. The generic `/tools` unavailable reason now
+  points at `tools.json` and the transcript. Verified headlessly: config
+  resolution for default/explicit/disabled/invalid, plus one live default
+  search (3 ranked go.dev results, ~1 s).

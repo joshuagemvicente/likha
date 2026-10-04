@@ -14,8 +14,12 @@ private `<stateDir>/tools.json`:
 {"web":{"search":{"enabled":true,"backend":"brave"},"fetch":{"enabled":true}}}
 ```
 
-`backend` accepts exactly `"brave"`, `"tavily"`, `"exa"`, or `"duckduckgo"`;
-any other value disables the affected web tools with a visible error. Exactly
+`backend` accepts exactly `"brave"`, `"tavily"`, `"exa"`, or `"duckduckgo"`.
+When `search.enabled` is true and `backend` is omitted or empty, the backend is
+`duckduckgo` (keyless default, revised 2026-10-04 by user approval); keyed
+backends are opt-in by naming them. Any other value disables both web tools
+with a visible error. A named keyed backend without its key stays unavailable;
+it never falls back to DuckDuckGo. Exactly
 one backend is configured and used at a time; there is no fallback to another
 vendor, ever, on failure, rate limiting, or misconfiguration.
 
