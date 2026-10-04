@@ -356,7 +356,12 @@ func (m *ui) toolEditDiff(record session.ToolRecord, maxLines int) (transcript.D
 	default:
 		return transcript.DiffSummary{}, false
 	}
-	key := editDiffKey{name: record.Name, arguments: record.Arguments, diff: record.Diff, lines: maxLines}
+	key := editDiffKey{name: record.Name, arguments: record.Arguments, diff: record.Diff}
+	if maxLines != transcript.DefaultDiffLines {
+		// Zero marks the default cap, so readers that only know the
+		// collapsed rendering keep finding its summary.
+		key.lines = maxLines
+	}
 	summary, ok := m.editDiffCache[key]
 	if !ok {
 		var files []transcript.FileDiff
