@@ -12,7 +12,7 @@ reasoning, opt-in Nerd Font icons). Supersedes, by user approval on
 | Role labels (`You:`/`Assistant:`/`Tool:`/…) must remain; backgrounds never carry meaning alone | adaptive-themes M3 + role.md + checklist; tui-layout FR-15 note | Every block carries a **distinct non-color glyph** (§ Glyph language); backgrounds still never carry meaning alone |
 | Assistant on `BgModel`, Tool on `BgTool`, request/result told apart by prefix text | adaptive-themes M3, themes decision 6, tui-layout phase 3 | Only the user prompt has a band; assistant and tools sit on the base canvas; request + result are **one item** |
 | `default` family keeps the plain terminal look (bands are no-ops) | themes decision 6, adaptive-themes | `default` gets a faint neutral user band |
-| No animation; no new theme colors; no tool-output collapse/expand; no in-tool content rendering | tool-rendering-terminal-keys Non-goals + role.md; adaptive-themes role.md | A blinking running dot, derived success/diff tints, bounded inline previews with `ctrl+o to expand`, rendered markdown and diffs (all defined below) |
+| No animation; no new theme colors; no tool-output collapse/expand; no in-tool content rendering | tool-rendering-terminal-keys Non-goals + role.md; adaptive-themes role.md | A blinking running dot, derived success/diff tints, bounded inline previews that Enter expands and collapses in place (Ctrl+O still opens the inspector), rendered markdown and diffs (all defined below) |
 
 Everything not listed above stays in force: minimum size 40×12 and the
 narrow-width breakpoints, the status line, the inspector, paging, the review
@@ -135,7 +135,8 @@ One item per tool call, replacing the separate request and result entries:
   tick; static `Muted` when animation is unavailable) while queued, awaiting
   approval, or running; green (`Success`) on success; `Error` on failed,
   refused, cancelled, or limited. Awaiting approval shows `⎿  Awaiting
-  approval`.
+  approval`; an `ask_user` call whose question is open shows `⎿  Awaiting
+  answer`, and returns to running (with the Working row) once answered.
 - **Result line (`⎿`):** a summary that states the outcome in words:
 
   | Tool / outcome | Summary |
@@ -153,10 +154,16 @@ One item per tool call, replacing the separate request and result entries:
 
 - **Preview:** read, run_command, web_fetch, web_search, and MCP/other tools
   show up to **3** lines of output under the summary (indented to the `⎿`
-  text column), then `… +N lines (ctrl+o to expand)`. Search tools show none.
+  text column), then `… +N lines (enter to expand · ctrl+o to inspect)`.
+  Search tools show none.
+- **Inline expand:** Enter on the focused item expands its output in place
+  (up to **200** lines, then `… +N lines (ctrl+o to inspect)`) and Enter
+  again collapses it; an expanded item ends with `(enter to collapse)`.
+  Expansion keys on the call ID, lives in the view only, and is never
+  persisted. Enter on an item with nothing hidden opens the inspector.
 - **Inspector:** raw JSON arguments, provenance (`[Likha built-in]`, MCP
   server), warnings, retained-output paging, and full output stay in the
-  existing inspector (Enter / Ctrl+O on the focused item), unchanged.
+  existing inspector (Ctrl+O on the focused item), unchanged.
 - **Focus:** Tab / Shift+Tab cycle tool items (one stop per call, not per
   request/result). The focused item's rows get the selection tint and a `›`
   in the gutter.
@@ -174,7 +181,8 @@ One item per tool call, replacing the separate request and result entries:
 - Summary: `Updated path with N additions and M removals` (multi-file:
   `Updated 3 files with …`; create: `Created path (N lines)`).
 - Up to **10** diff lines inline: line number, `+`/`-` sign, text, on
-  `BgDiffAdd` / `BgDiffRemove`; then `… +N lines (ctrl+o to expand)`.
+  `BgDiffAdd` / `BgDiffRemove`; then `… +N lines (enter to expand · ctrl+o
+  to inspect)`; expanded inline, up to 200 diff lines.
   Multi-file shows the first file's lines and names the rest.
 - The sign column carries add/remove without color. Pending edit reviews keep
   the existing review surface.
@@ -316,8 +324,8 @@ longer painted behind transcript blocks.
    follow § Tool items; preview line caps hold (0 for search, 3 for others,
    10 diff lines).
 5. Tab visits each tool item once and each collapsed thought marker once;
-   Enter/Ctrl+O on a tool opens the existing inspector; Enter on a thought
-   marker toggles it.
+   Enter on a tool toggles its output inline and Ctrl+O opens the existing
+   inspector; Enter on a thought marker toggles it.
 6. An explore task shows exactly one transcript item with a live `⎿` line and
    a settle line; no `Agent:` lines are produced.
 7. Markdown elements in § Markdown render as specified; fenced code with a

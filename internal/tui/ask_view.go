@@ -248,8 +248,8 @@ func (m *ui) closeAsk() {
 // with exactly-once semantics, and only then invokes the reply. respond
 // happens synchronously inside Update (mirroring the approval Reply send),
 // so an unanswered model call blocks the UI here by design.
-func (m *ui) answerAsk(note string, answer tools.AskAnswer) {
-	reply := m.ask.committed
+func (m *ui) answerAsk(note string, answer tools.AskAnswer) tea.Cmd {
+	reply, callID := m.ask.committed, m.ask.callID
 	m.entries = append(m.entries, entry{role: "Likha", content: note})
 	m.jumpBottom()
 	m.layoutWidth = 0
@@ -261,9 +261,17 @@ func (m *ui) answerAsk(note string, answer tools.AskAnswer) {
 	} else {
 		m.status = "Answer sent"
 	}
+	m.setLiveToolStatus(callID, "awaiting answer", "running")
 	if reply != nil {
 		reply(answer)
 	}
+	// The tool resumes with the answer: Working… returns until its result
+	// lands, so the transcript never looks parked on the question.
+	if !m.working {
+		return nil
+	}
+	m.showActivity()
+	return m.activityTickCmd()
 }
 
 // askInterruptedNote records an unanswered request as interrupted (FR-30):
@@ -347,18 +355,16 @@ func (m *ui) handleAskKey(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 				// An empty text answer is not an answer; nothing submits.
 				return true, nil
 			}
-			m.answerAsk("ask answered (text): "+m.ask.text, tools.AskAnswer{Text: m.ask.text})
-			return true, nil
+			return true, m.answerAsk("ask answered (text): "+m.ask.text, tools.AskAnswer{Text: m.ask.text})
 		}
 		if m.ask.selected < 0 || m.ask.selected >= len(m.ask.options) {
 			return true, nil
 		}
 		chosen := m.ask.options[m.ask.selected]
-		m.answerAsk("ask answered (choice): "+chosen, tools.AskAnswer{Text: chosen})
+		return true, m.answerAsk("ask answered (choice): "+chosen, tools.AskAnswer{Text: chosen})
 	case "ctrl+s":
 		// Skip is a refused/unanswered result, never an empty success.
-		m.answerAsk("question skipped", tools.AskAnswer{Skipped: true})
-		return true, nil
+		return true, m.answerAsk("question skipped", tools.AskAnswer{Skipped: true})
 	case "backspace", "ctrl+h":
 		if m.ask.textMode() {
 			if runes := []rune(m.ask.text); len(runes) > 0 {

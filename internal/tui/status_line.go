@@ -103,9 +103,9 @@ func (m *ui) statusHints(page, pages int, narrow bool) []string {
 	}
 	if m.toolInspector.focused {
 		if m.working {
-			return []string{m.toolInspectionHelp() + " · Ctrl+C cancel", position + " Tab · ^O inspect · ^C cancel", "Tab · ^O inspect · ^C cancel"}
+			return []string{m.toolInspectionHelp() + " · Ctrl+C cancel", position + " Tab · Enter expand · ^O inspect · ^C cancel", "Tab · ^O inspect · ^C cancel"}
 		}
-		return []string{m.toolInspectionHelp(), position + " Tab · ^O inspect · Back unfocus", "Tab · ^O inspect · Back unfocus"}
+		return []string{m.toolInspectionHelp(), position + " Tab · Enter expand · ^O inspect · Back unfocus", "Tab · ^O inspect · Back unfocus"}
 	}
 	if narrow {
 		if m.working {
@@ -125,6 +125,9 @@ func (m *ui) statusHints(page, pages int, narrow bool) []string {
 		queued := ""
 		if n := len(m.queue); n > 0 {
 			queued = fmt.Sprintf("%d queued", n) + " · "
+		}
+		if m.cancelling {
+			return []string{state + " · " + queued + position + " · Esc again to force stop", state + " · " + queued + position + " · Esc force stop", position + " · Esc force stop"}
 		}
 		return []string{state + " · " + queued + position + " · PgUp/PgDn · Ctrl+C cancel", state + " · " + queued + position + " · PgUp/PgDn ^C", position + " · PgUp/PgDn ^C"}
 	}

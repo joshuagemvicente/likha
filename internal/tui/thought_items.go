@@ -102,6 +102,7 @@ func (m *ui) closeReasoning() {
 func (m *ui) resetThoughts() {
 	m.thoughtDurations = nil
 	m.thoughtExpanded = nil
+	m.toolExpanded = nil
 	m.reasoningStarted = time.Time{}
 	m.turnStarted = time.Time{}
 	m.turnModel = ""

@@ -71,8 +71,11 @@ func (m *ui) toolRunOptions(runID uint64) agent.RunOptions {
 	// The ask broker blocks the tool handler, never the UI loop: the reply
 	// channel has room for exactly one send and the run context terminates
 	// the wait when the run is cancelled.
-	if m.events != nil && runID != 0 {
-		options.Ask = m.askBroker(runID)
+	// Both brokers capture this run's channel here, on the UI goroutine:
+	// tool goroutines must never read m.events, which the next run replaces.
+	events := m.events
+	if events != nil && runID != 0 {
+		options.Ask = m.askBroker(events, runID)
 	}
 	advert, load := m.skillCatalog()
 	options.SkillAdvert = advert
@@ -80,7 +83,7 @@ func (m *ui) toolRunOptions(runID uint64) agent.RunOptions {
 	taskAgents, taskProfiles := m.profileRunInputs()
 	options.TaskAgents = taskAgents
 	options.TaskProfiles = taskProfiles
-	search, fetch, webIssues := m.webHooks()
+	search, fetch, webIssues := m.webHooks(events, runID)
 	for _, issue := range webIssues {
 		m.entries = append(m.entries, entry{role: "Likha", content: issue})
 	}
@@ -91,7 +94,7 @@ func (m *ui) toolRunOptions(runID uint64) agent.RunOptions {
 
 // askBroker pairs one ask_user call with a single UI reply. Send delivery is
 // blocking because the events channel is the FIFO the working UI drains.
-func (m *ui) askBroker(runID uint64) func(context.Context, string, tools.AskRequest) (tools.AskAnswer, error) {
+func (m *ui) askBroker(events chan<- agent.TurnEvent, runID uint64) func(context.Context, string, tools.AskRequest) (tools.AskAnswer, error) {
 	return func(ctx context.Context, callID string, req tools.AskRequest) (tools.AskAnswer, error) {
 		reply := make(chan tools.AskAnswer, 1)
 		id := fmt.Sprintf("ask_%d_%d", runID, atomic.AddUint64(&m.askSequence, 1))
@@ -99,7 +102,7 @@ func (m *ui) askBroker(runID uint64) func(context.Context, string, tools.AskRequ
 			ID: id, CallID: callID, Request: req, Reply: reply,
 		}}
 		select {
-		case m.events <- ev:
+		case events <- ev:
 		case <-ctx.Done():
 			return tools.AskAnswer{}, ctx.Err()
 		}
@@ -344,6 +347,32 @@ func (m *ui) markAwaitingApproval() {
 		if m.liveToolCalls[record.CallID] && record.Name != "task" && record.Status == "running" {
 			record.Status = "awaiting approval"
 			m.approvalCall = record.CallID
+			return
+		}
+	}
+}
+
+// markAwaitingAnswer moves the ask_user call whose question is now open to
+// "awaiting answer". A dropped question never opened, so it stays running.
+func (m *ui) markAwaitingAnswer(callID string) {
+	if !m.ask.pending || m.ask.callID != callID {
+		return
+	}
+	m.setLiveToolStatus(callID, "running", "awaiting answer")
+}
+
+// setLiveToolStatus moves this run's live call from one transient status to
+// another; a call that already settled or moved on is left alone.
+func (m *ui) setLiveToolStatus(callID, from, to string) {
+	if callID == "" || !m.liveToolCalls[callID] {
+		return
+	}
+	for i := len(m.toolRecords) - 1; i >= 0; i-- {
+		if record := &m.toolRecords[i]; record.CallID == callID {
+			if record.Status == from {
+				record.Status = to
+				m.layoutWidth = 0
+			}
 			return
 		}
 	}

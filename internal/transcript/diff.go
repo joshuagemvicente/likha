@@ -40,7 +40,7 @@ type FileDiff struct {
 //     it to the row width.
 //   - Lines are up to maxLines changed lines of the first file.
 //   - More counts the first file's changed lines beyond Lines, for
-//     "… +N lines (ctrl+o to expand)".
+//     "… +N lines (enter to expand · ctrl+o to inspect)".
 //   - OtherFiles names the remaining files of a multi-file edit (flattened
 //     like Summary), in review order.
 //   - Created reports a single-file edit that created its file (the

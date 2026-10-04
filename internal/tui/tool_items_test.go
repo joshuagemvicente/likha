@@ -223,7 +223,7 @@ func TestToolSummary(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			summary, preview, more := toolSummary(tc.record, "…")
+			summary, preview, more := toolSummary(tc.record, "…", toolPreviewLines)
 			if summary != tc.summary {
 				t.Fatalf("summary = %q, want %q", summary, tc.summary)
 			}
@@ -241,12 +241,12 @@ func TestToolSummary(t *testing.T) {
 func TestToolSummaryPreviewCaps(t *testing.T) {
 	body := strings.Repeat("line\n", 50)
 	for _, name := range []string{"grep", "glob"} {
-		if _, preview, more := toolSummary(session.ToolRecord{Name: name, Status: "succeeded", Content: body}, "…"); preview != nil || more != 0 {
+		if _, preview, more := toolSummary(session.ToolRecord{Name: name, Status: "succeeded", Content: body}, "…", toolPreviewLines); preview != nil || more != 0 {
 			t.Fatalf("%s preview = %q (+%d), want none", name, preview, more)
 		}
 	}
 	for _, name := range []string{"read", "run_command", "read_output", "custom"} {
-		_, preview, more := toolSummary(session.ToolRecord{Name: name, Status: "succeeded", Content: body}, "…")
+		_, preview, more := toolSummary(session.ToolRecord{Name: name, Status: "succeeded", Content: body}, "…", toolPreviewLines)
 		if len(preview) != toolPreviewLines || more != 47 {
 			t.Fatalf("%s preview %d lines (+%d), want 3 (+47)", name, len(preview), more)
 		}
@@ -255,7 +255,7 @@ func TestToolSummaryPreviewCaps(t *testing.T) {
 
 func TestToolSummaryReasonIsOneBoundedRow(t *testing.T) {
 	reason := strings.Repeat("very long reason ", 100) + "\nsecond line"
-	summary, _, _ := toolSummary(session.ToolRecord{Name: "read", Status: "failed", Content: "Error: " + reason}, "…")
+	summary, _, _ := toolSummary(session.ToolRecord{Name: "read", Status: "failed", Content: "Error: " + reason}, "…", toolPreviewLines)
 	if strings.Contains(summary, "\n") || runewidth.StringWidth(summary) > toolSummaryCells {
 		t.Fatalf("summary not one bounded row: %d cells", runewidth.StringWidth(summary))
 	}
@@ -277,10 +277,10 @@ func TestToolFormattingCutsUseCallerEllipsis(t *testing.T) {
 		"backend": toolRecordHeader(session.ToolRecord{Name: "web_search", Arguments: `{"query":"` + long + `"}`, Content: `{"backend":"brave","hits":[]}`}, "..."),
 	}
 	for _, status := range []string{"failed", "refused", "cancelled"} {
-		summary, _, _ := toolSummary(session.ToolRecord{Name: "web_fetch", Status: status, Content: "Error: " + reason}, "...")
+		summary, _, _ := toolSummary(session.ToolRecord{Name: "web_fetch", Status: status, Content: "Error: " + reason}, "...", toolPreviewLines)
 		cuts[status] = summary
 	}
-	cuts["success"], _, _ = toolSummary(session.ToolRecord{Name: "ask_user", Status: "succeeded", Content: `{"answer":"` + reason + `"}`}, "...")
+	cuts["success"], _, _ = toolSummary(session.ToolRecord{Name: "ask_user", Status: "succeeded", Content: `{"answer":"` + reason + `"}`}, "...", toolPreviewLines)
 	for name, text := range cuts {
 		if strings.Contains(text, "…") || !strings.Contains(text, "...") {
 			t.Fatalf("%s cut = %q, want only the ASCII ellipsis", name, text)

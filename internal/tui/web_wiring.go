@@ -15,7 +15,7 @@ import (
 // visible issue entry and stays disabled for repository work. The configured
 // backend (web.search.backend) selects both the key source and the search
 // path; consent copy is per backend via webtools.BackendPrivacyCopy.
-func (m *ui) webHooks() (
+func (m *ui) webHooks(events chan<- agent.TurnEvent, runID uint64) (
 	func(context.Context, webtools.SearchRequest) (webtools.SearchOutcome, error),
 	func(context.Context, webtools.FetchRequest) (webtools.FetchOutcome, error),
 	[]string,
@@ -53,7 +53,7 @@ func (m *ui) webHooks() (
 					return webtools.SearchWithBackend(ctx, backend, key, req)
 				}
 				bound := &agent.ConsentRequest{Kind: reqScope.Kind, Backend: reqScope.Backend, Query: req.Query, Privacy: webtools.BackendPrivacyCopy(backend)}
-				allowed, err := m.requestConsent(ctx, bound)
+				allowed, err := m.requestConsent(ctx, events, runID, bound)
 				if err != nil {
 					return webtools.SearchOutcome{}, err
 				}
@@ -66,7 +66,7 @@ func (m *ui) webHooks() (
 	}
 	if config.Fetch.Enabled {
 		fetch = func(ctx context.Context, req webtools.FetchRequest) (webtools.FetchOutcome, error) {
-			return webtools.Fetch(ctx, m.fetchConsent(), req)
+			return webtools.Fetch(ctx, m.fetchConsent(events, runID), req)
 		}
 	}
 	return search, fetch, issues
@@ -108,7 +108,7 @@ func fetchPrivacyCopy() string {
 
 // fetchConsent is the per-origin consent hook webtools.Fetch invokes for the
 // canonicalized original and each redirect origin before any connection.
-func (m *ui) fetchConsent() func(context.Context, webtools.ConsentScope) (bool, error) {
+func (m *ui) fetchConsent(events chan<- agent.TurnEvent, runID uint64) func(context.Context, webtools.ConsentScope) (bool, error) {
 	return func(ctx context.Context, scope webtools.ConsentScope) (bool, error) {
 		reqScope := &agent.ConsentRequest{Kind: scope.Kind, Origin: scope.Origin}
 		if m.webGranted(reqScope.ScopeKey()) {
@@ -118,7 +118,7 @@ func (m *ui) fetchConsent() func(context.Context, webtools.ConsentScope) (bool, 
 			Kind: scope.Kind, Backend: scope.Backend, Query: scope.Query,
 			Origin: scope.Origin, URL: scope.URL, Privacy: fetchPrivacyCopy(),
 		}
-		allowed, err := m.requestConsent(ctx, bound)
+		allowed, err := m.requestConsent(ctx, events, runID, bound)
 		if err != nil {
 			return false, err
 		}

@@ -24,12 +24,12 @@ type consentState struct {
 // requestConsent blocks the calling tool goroutine on one consent decision.
 // It mirrors the ask broker: the events channel carries the request, the UI
 // replies at most once.
-func (m *ui) requestConsent(ctx context.Context, req *agent.ConsentRequest) (bool, error) {
+func (m *ui) requestConsent(ctx context.Context, events chan<- agent.TurnEvent, runID uint64, req *agent.ConsentRequest) (bool, error) {
 	if req == nil || req.Reply == nil {
 		return false, errors.New("web consent requires a reply channel")
 	}
 	select {
-	case m.events <- agent.TurnEvent{RunID: m.runID, Kind: "consent", Consent: req}:
+	case events <- agent.TurnEvent{RunID: runID, Kind: "consent", Consent: req}:
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}

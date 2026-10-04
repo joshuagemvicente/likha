@@ -257,9 +257,9 @@ func TestToolPreviewCaps(t *testing.T) {
 	}{
 		{"grep", `{"pattern":"line"}`, "grep: line; returned=9; x\n" + strings.Repeat("a.go:1: line\n", 9), 0, ""},
 		{"glob", `{"pattern":"*.go"}`, "glob: *.go; returned=9; x\n" + long, 0, ""},
-		{"read", `{"path":"a.go"}`, long, 3, "     … +6 lines (ctrl+o to expand)"},
-		{"run_command", `{"command":"ls"}`, "Exit status: 0\n" + long, 3, "     … +6 lines (ctrl+o to expand)"},
-		{"mcp__gh__search__1", `{"q":"x"}`, long, 3, "     … +6 lines (ctrl+o to expand)"},
+		{"read", `{"path":"a.go"}`, long, 3, "     … +6 lines (enter to expand · ctrl+o to inspect)"},
+		{"run_command", `{"command":"ls"}`, "Exit status: 0\n" + long, 3, "     … +6 lines (enter to expand · ctrl+o to inspect)"},
+		{"mcp__gh__search__1", `{"q":"x"}`, long, 3, "     … +6 lines (enter to expand · ctrl+o to inspect)"},
 	}
 	for _, tc := range cases {
 		m := toolItemTestUI(t, 80)
@@ -286,7 +286,7 @@ func TestToolPreviewCaps(t *testing.T) {
 	call := startCall(m, "c", "read", `{"path":"a.go"}`)
 	finishCall(m, call, tools.Result{Status: tools.Succeeded, Content: long})
 	rows := itemRows(m, len(m.entries)-2)
-	if rows[0] != "* Read(a.go)" || rows[1] != "  L  Read 9 lines" || rows[len(rows)-1] != "     ... +6 lines (ctrl+o to expand)" {
+	if rows[0] != "* Read(a.go)" || rows[1] != "  L  Read 9 lines" || rows[len(rows)-1] != "     ... +6 lines (enter to expand · ctrl+o to inspect)" {
 		t.Fatalf("ascii rows %q", rows)
 	}
 }
@@ -480,7 +480,7 @@ func TestRunningDotBlinksOnlyWhileLive(t *testing.T) {
 	if record, _ := m.toolRecordAt(index); record.Status != "awaiting approval" {
 		t.Fatalf("approval left status %q", record.Status)
 	}
-	if summary, _, _ := toolSummary(m.toolRecords[0], "…"); summary != "Awaiting approval" {
+	if summary, _, _ := toolSummary(m.toolRecords[0], "…", toolPreviewLines); summary != "Awaiting approval" {
 		t.Fatalf("approval summary %q", summary)
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})

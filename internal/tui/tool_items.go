@@ -30,6 +30,9 @@ const (
 
 const (
 	toolPreviewLines = 3
+	// toolExpandedLines bounds an item expanded inline (Enter on a focused
+	// item); anything longer stays in the full-screen inspector.
+	toolExpandedLines = 200
 	// toolHeaderArgCells bounds the formatted argument text before width
 	// fitting, so a multi-megabyte command never reaches the renderer whole.
 	toolHeaderArgCells   = 512
@@ -44,7 +47,7 @@ const (
 // completed, and interrupted map too.
 func toolStatusKind(status string) int {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "queued", "awaiting approval", "awaiting_approval", "awaiting-approval", "running", "waiting-for-child":
+	case "queued", "awaiting approval", "awaiting_approval", "awaiting-approval", "awaiting answer", "running", "waiting-for-child":
 		return toolStatusRunning
 	case string(tools.Succeeded), "completed":
 		return toolStatusSuccess
@@ -381,8 +384,8 @@ func toolClipCells(text string, width int, ellipsis string) string {
 
 // toolSummary is the ⎿ line plus bounded preview rows. An empty summary means
 // no ⎿ line (unknown status, such as an unmatched legacy request). more counts
-// output lines beyond the preview for `… +N lines (ctrl+o to expand)`.
-func toolSummary(record session.ToolRecord, ellipsis string) (summary string, preview []string, more int) {
+// output lines beyond the preview for `… +N lines (enter to expand · ctrl+o to inspect)`.
+func toolSummary(record session.ToolRecord, ellipsis string, limit int) (summary string, preview []string, more int) {
 	status := strings.ToLower(strings.TrimSpace(record.Status))
 	switch toolStatusKind(status) {
 	case toolStatusUnknown:
@@ -395,6 +398,8 @@ func toolSummary(record session.ToolRecord, ellipsis string) (summary string, pr
 			return "Running", nil, 0
 		case "waiting-for-child":
 			return "Waiting for subtasks", nil, 0
+		case "awaiting answer":
+			return "Awaiting answer", nil, 0
 		}
 		return "Awaiting approval", nil, 0
 	}
@@ -414,13 +419,13 @@ func toolSummary(record session.ToolRecord, ellipsis string) (summary string, pr
 	case string(tools.Failed):
 		if record.Name == "run_command" {
 			if code, output, ok := toolExitStatus(record.Content); ok && code != 0 {
-				preview, more = toolPreview(output)
+				preview, more = toolPreview(output, limit)
 				return "Failed: exit status " + strconv.Itoa(code), preview, more
 			}
 		}
 		return toolClipCells("Failed: "+toolFailureReason(record, ellipsis), toolSummaryCells, ellipsis), nil, 0
 	}
-	summary, preview, more = toolSuccessSummary(record, ellipsis)
+	summary, preview, more = toolSuccessSummary(record, ellipsis, limit)
 	return toolClipCells(summary+toolSummarySuffix(record), toolSummaryCells, ellipsis), preview, more
 }
 
@@ -439,10 +444,10 @@ func toolSummarySuffix(record session.ToolRecord) string {
 
 // toolSuccessSummary covers succeeded and limited records. Counts come from
 // the stored content only; nothing is re-read or re-run to compute them.
-func toolSuccessSummary(record session.ToolRecord, ellipsis string) (string, []string, int) {
+func toolSuccessSummary(record session.ToolRecord, ellipsis string, limit int) (string, []string, int) {
 	content := record.Content
 	if record.SourceKind == "mcp" {
-		return toolGenericSummary(content)
+		return toolGenericSummary(content, limit)
 	}
 	switch record.Name {
 	case "grep":
@@ -463,7 +468,7 @@ func toolSuccessSummary(record session.ToolRecord, ellipsis string) (string, []s
 	case "read":
 		if strings.HasPrefix(content, "read directory ") {
 			_, body, _ := strings.Cut(content, "\n")
-			preview, more := toolPreview(body)
+			preview, more := toolPreview(body, limit)
 			return "Listed " + toolCount(toolLineCount(body), "entry", "entries"), preview, more
 		}
 		if first, body, _ := strings.Cut(content, "\n"); strings.HasPrefix(first, "read file ") && strings.Contains(first, "; selected=") {
@@ -471,11 +476,11 @@ func toolSuccessSummary(record session.ToolRecord, ellipsis string) (string, []s
 			// rows; it is neither counted nor previewed.
 			content = body
 		}
-		preview, more := toolPreview(content)
+		preview, more := toolPreview(content, limit)
 		return "Read " + toolCount(toolLineCount(content), "line", "lines"), preview, more
 	case "run_command":
 		code, output, ok := toolExitStatus(content)
-		preview, more := toolPreview(output)
+		preview, more := toolPreview(output, limit)
 		if !ok {
 			return "Done", preview, more
 		}
@@ -484,17 +489,17 @@ func toolSuccessSummary(record session.ToolRecord, ellipsis string) (string, []s
 		}
 		return "Exit 0", preview, more
 	case "web_fetch":
-		return toolWebFetchSummary(content, ellipsis)
+		return toolWebFetchSummary(content, ellipsis, limit)
 	case "web_search":
 		search := toolWebSearchContent(content)
 		if search.Hits == nil {
-			return toolGenericSummary(content)
+			return toolGenericSummary(content, limit)
 		}
 		titles := make([]string, 0, len(search.Hits))
 		for _, hit := range search.Hits {
 			titles = append(titles, toolHeaderText(hit.Title, ellipsis))
 		}
-		preview, more := toolPreview(strings.Join(titles, "\n"))
+		preview, more := toolPreview(strings.Join(titles, "\n"), limit)
 		summary := toolCount(len(search.Hits), "result", "results")
 		if search.Backend != "" {
 			summary += " from " + toolHeaderText(search.Backend, ellipsis)
@@ -505,7 +510,7 @@ func toolSuccessSummary(record session.ToolRecord, ellipsis string) (string, []s
 			Findings *string `json:"findings"`
 		}
 		if json.Unmarshal([]byte(content), &outcome) == nil && outcome.Findings != nil {
-			preview, more := toolPreview(*outcome.Findings)
+			preview, more := toolPreview(*outcome.Findings, limit)
 			return "Done", preview, more
 		}
 	case "ask_user":
@@ -533,15 +538,15 @@ func toolSuccessSummary(record session.ToolRecord, ellipsis string) (string, []s
 		if strings.HasPrefix(content, "Loaded skill '") {
 			name, _, _ := strings.Cut(strings.TrimPrefix(content, "Loaded skill '"), "'")
 			_, body, _ := strings.Cut(content, "\n\n")
-			preview, more := toolPreview(body)
+			preview, more := toolPreview(body, limit)
 			return "Loaded skill " + toolHeaderText(name, ellipsis), preview, more
 		}
 	}
-	return toolGenericSummary(content)
+	return toolGenericSummary(content, limit)
 }
 
-func toolGenericSummary(content string) (string, []string, int) {
-	preview, more := toolPreview(content)
+func toolGenericSummary(content string, limit int) (string, []string, int) {
+	preview, more := toolPreview(content, limit)
 	if len(preview) == 0 {
 		return "Done · no output", nil, 0
 	}
@@ -551,12 +556,12 @@ func toolGenericSummary(content string) (string, []string, int) {
 // toolPreview takes the first lines of output with surrounding blank lines
 // dropped; rows are untrusted text the renderer escapes and truncates. Tabs
 // expand to spaces so they never show as escaped control runes.
-func toolPreview(text string) ([]string, int) {
+func toolPreview(text string, limit int) ([]string, int) {
 	lines := toolOutputLines(text)
-	if len(lines) <= toolPreviewLines {
+	if len(lines) <= limit {
 		return lines, 0
 	}
-	return lines[:toolPreviewLines], len(lines) - toolPreviewLines
+	return lines[:limit], len(lines) - limit
 }
 
 func toolOutputLines(text string) []string {
@@ -655,7 +660,7 @@ func toolExitStatus(content string) (code int, output string, ok bool) {
 	return code, rest, true
 }
 
-func toolWebFetchSummary(content, ellipsis string) (string, []string, int) {
+func toolWebFetchSummary(content, ellipsis string, limit int) (string, []string, int) {
 	_, body, _ := strings.Cut(content, "\n")
 	var outcome struct {
 		RequestedURL string  `json:"requested_url"`
@@ -664,7 +669,7 @@ func toolWebFetchSummary(content, ellipsis string) (string, []string, int) {
 		Content      *string `json:"content"`
 	}
 	if json.Unmarshal([]byte(body), &outcome) != nil || outcome.Content == nil {
-		return toolGenericSummary(content)
+		return toolGenericSummary(content, limit)
 	}
 	host := ""
 	for _, raw := range []string{outcome.Origin, outcome.FinalURL, outcome.RequestedURL} {
@@ -677,7 +682,7 @@ func toolWebFetchSummary(content, ellipsis string) (string, []string, int) {
 	if host != "" {
 		summary += " from " + toolHeaderText(host, ellipsis)
 	}
-	preview, more := toolPreview(*outcome.Content)
+	preview, more := toolPreview(*outcome.Content, limit)
 	return summary, preview, more
 }
 

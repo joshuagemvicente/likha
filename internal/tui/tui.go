@@ -205,10 +205,11 @@ type ui struct {
 	reasoningStarted time.Time        // open block's start; zero when none
 	thoughtDurations map[int]time.Duration
 	thoughtExpanded  map[int]bool
-	turnStarted      time.Time // current user turn's start; zero outside one (and for compaction)
-	turnModel        string    // model the current user turn runs on
-	turnThoughtBase  int       // reasoning ordinal of the current turn's first block
-	turnToolItems    int       // top-level tool items the current turn opened
+	toolExpanded     map[string]bool // tool items expanded inline, by call ID; never persisted
+	turnStarted      time.Time       // current user turn's start; zero outside one (and for compaction)
+	turnModel        string          // model the current user turn runs on
+	turnThoughtBase  int             // reasoning ordinal of the current turn's first block
+	turnToolItems    int             // top-level tool items the current turn opened
 }
 
 // dialogMatches documents the shared selection-dialog filter: a
@@ -465,6 +466,279 @@ func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
 		})
 	}()
 	return tea.Batch(waitEvent(events), m.activityTickCmd())
+}
+
+// applyTurnEvent folds one event of the live run into the view. The caller
+// owns re-arming the event read; a returned command is extra work only.
+func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
+	switch v.Kind {
+	case "task_runtime":
+		m.taskRuntime = v.TaskRuntime
+	case "task":
+		if v.Task != nil {
+			m.acceptTaskRecord(*v.Task)
+		}
+	case "tool_checkpoint":
+		m.history = v.History
+		m.persist()
+	case "ask":
+		// One blocking ask_user broker waits on the reply channel; this
+		// opens the interactive question. The reply has room for one
+		// send, exactly once, and stale duplicates are dropped here.
+		// The UI keeps draining events while the question is open: the
+		// run must still deliver its tool_result, text and terminal
+		// event after the answer, or after a cancel.
+		m.hideActivity()
+		if v.Ask == nil {
+			return nil
+		}
+		ask := v.Ask
+		m.openAskQuestion(ask.Request, ask.ID, ask.CallID, func(answer tools.AskAnswer) {
+			select {
+			case ask.Reply <- answer:
+			default:
+			}
+		})
+		m.markAwaitingAnswer(ask.CallID)
+		return nil
+	case "consent":
+		m.openConsent(v.Consent)
+		return nil
+	case "context":
+		// Each stream replaces the displayed context state. An unknown
+		// measurement intentionally clears any value from the prior turn.
+		m.contextTokens = v.ContextTokens
+		m.contextSeen = v.ContextKnown
+		m.contextEstimated = v.ContextEstimated
+	case "reasoning":
+		// Thinking output from a reasoning model; rendered muted and
+		// closed as soon as the first real content delta arrives. Deltas
+		// after content started are dropped so thinking cannot be
+		// mistaken for the answer.
+		m.hideActivity()
+		if m.streaming >= 0 {
+			return nil
+		}
+		if m.reasoningStream < 0 {
+			m.openReasoning()
+		}
+		m.reasoningBuf.WriteString(v.Text)
+		m.entries[m.reasoningStream].content = m.reasoningBuf.String()
+	case "text":
+		m.hideActivity()
+		m.closeReasoning() // content after thinking closes the reasoning stream
+		if m.streaming < 0 {
+			m.entries = append(m.entries, entry{role: "Assistant"})
+			m.streaming = len(m.entries) - 1
+		}
+		m.streamBuf.WriteString(v.Text)
+		m.entries[m.streaming].content = m.streamBuf.String()
+	case "approval":
+		m.hideActivity()
+		m.closeReasoning()
+		if m.cancelling {
+			break
+		}
+		m.pending = v.Approval
+		m.markAwaitingApproval()
+		m.resetToolInspection()
+		m.resetAgentInspection()
+		m.scroll = 0 // review starts at the top of the proposal screen
+		m.following = false
+		m.layoutWidth = 0
+		m.reviewSeen = make([]bool, m.pageCount())
+		m.reviewFocus = focusApprove
+		m.markSeenFromScroll()
+		m.status = "Review " + m.pending.Kind + " before approval"
+	case "tool_start", "tool_result":
+		m.hideActivity()
+		m.streamBuf.Reset()
+		m.streaming = -1
+		// A tool call ends the reasoning block too: reasoning after it
+		// opens a new block below the tool item.
+		m.closeReasoning()
+		if v.Kind == "tool_start" {
+			m.startToolItem(v.Text, v.ToolCall)
+		} else if v.ToolCall != nil && v.ToolResult != nil {
+			m.recordToolResult(*v.ToolCall, *v.ToolResult, v.Text)
+		} else {
+			m.entries = append(m.entries, entry{role: "Tool", content: v.Text})
+		}
+		if m.cancelling {
+			m.status = "Cancelling"
+		} else if v.Kind == "tool_start" {
+			m.status = "Reading repository"
+		} else {
+			m.status = "Waiting for model"
+		}
+		if v.Kind == "tool_result" {
+			if m.statusLineOpts.Changes || m.statusLineOpts.Staged || providers.FlagEnabled(m.statusLineOpts.Branch) {
+				m.git, m.gitOK = gitStatus(m.root)
+			}
+			m.history = v.History
+			m.persist()
+			if m.working && !m.cancelling && m.pending == nil {
+				m.showActivity()
+				return m.activityTickCmd()
+			}
+		}
+		if v.Kind == "tool_start" && m.working && m.pending == nil {
+			// The running dot blinks on the activity tick, which would
+			// otherwise stop with the Working row it just replaced.
+			if tick := m.armActivityTick(); tick != nil {
+				m.layoutWidth = 0
+				return tick
+			}
+		}
+	case "notice":
+		m.entries = append(m.entries, entry{role: "Likha", content: v.Text})
+		if v.History != nil {
+			m.history = v.History
+		}
+		m.persist()
+	case "steer":
+		m.hideActivity()
+		// A queued message reached the model: adopt the engine's history
+		// and flip its Queued row to You. A message from a sent batch
+		// has no row yet, so append one to keep the transcript in step
+		// with the history it just produced (spec FR-21).
+		m.history = v.History
+		// The delivery opens a new provider round: close any open
+		// assistant/reasoning stream so the next round's output starts
+		// fresh entries instead of appending to the previous answer.
+		m.streaming = -1
+		m.streamBuf.Reset()
+		m.closeReasoning()
+		if !m.flipQueuedRow(v.Text) {
+			m.entries = append(m.entries, entry{role: "You", content: v.Text})
+		}
+		if len(m.queue) > 0 {
+			m.queue = m.queue[1:]
+		}
+		if m.turnSent == nil {
+			m.turnSent = make(map[string]int)
+		}
+		m.turnSent[v.Text]++
+		m.persist()
+		if m.working && !m.cancelling && m.pending == nil {
+			m.showActivity()
+			return m.activityTickCmd()
+		}
+	case "compacted":
+		m.hideActivity()
+		m.closeReasoning()
+		m.resetToolInspection()
+		m.resetAgentInspection()
+		// The single summarize call finished: swap the summarized turns
+		// for the brief and mark the point in the conversation.
+		m.history = v.History
+		m.recalculateContext(m.history)
+		m.entries = append(m.entries, entry{role: "Likha", content: "Conversation compacted. Summary of earlier turns:\n\n" + v.Text})
+		m.status = "Ready"
+		m.working = false
+		if m.cancel != nil {
+			m.cancel()
+		}
+		m.cancel = nil
+		m.persist()
+		m.layoutWidth = 0
+		// A finished compaction holds any queue for an explicit Enter.
+		m.steer = nil
+		return nil
+	case "done", "error":
+		if cmd := m.finishRun(v); cmd != nil {
+			m.layoutWidth = 0
+			return cmd
+		}
+	}
+	return nil
+}
+
+// finishRun settles the active run on its terminal event: the run state
+// clears, a cancelled run gets its notice and footer, and the queue is held
+// for an explicit Enter. forceStopRun reuses it for a run that never
+// delivered one.
+func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
+	m.hideActivity()
+	m.closeReasoning()
+	m.pending = nil
+	m.reviewFocus = focusApprove
+	m.history = v.History
+	m.working = false
+	m.taskRuntime = nil
+	// An unanswered question dies with the run context; record the
+	// interruption once and never reopen or replay it.
+	m.askInterruptedNote()
+	m.closeConsent()
+	if m.cancel != nil {
+		m.cancel()
+	}
+	m.cancel = nil
+	if m.streaming >= 0 && v.Kind == "error" {
+		m.entries = append(m.entries[:m.streaming], m.entries[m.streaming+1:]...)
+		m.adjustToolRecordsAfterRemoval(m.streaming)
+	}
+	m.streaming = -1
+	if m.cancelling {
+		m.recordUnexecutedCalls(v.History)
+	}
+	turnTools, turnCancelled := m.turnToolItems, m.cancelling
+	m.liveToolCalls, m.runToolCalls, m.approvalCall = nil, nil, ""
+	m.approvedEdits = nil
+	if m.cancelling {
+		m.status = "Cancelled"
+		m.entries = append(m.entries, entry{role: "Likha", content: "Run cancelled; no further tools will execute. Approved shell commands may leave detached processes running."})
+	} else if v.Kind == "error" {
+		m.status = "Error"
+		m.entries = append(m.entries, entry{role: "Error", content: v.Text})
+	} else {
+		m.status = "Ready"
+	}
+	// The footer closes every finished user turn, failed ones
+	// included, below the run's last notice.
+	m.appendTurnFooter(turnTools, turnCancelled)
+	if v.Kind == "done" && m.client != nil {
+		// Provider-reported usage of the just-finished response;
+		// absent usage keeps the ctx/tokens segments at their fallback.
+		if usage, ok := m.client.LastTokenUsage(); ok {
+			m.usagePrompt += usage.Prompt
+			m.usageCompletion += usage.Completion
+			m.lastPromptTokens = usage.Prompt
+			m.usageSeen = true
+			// Session spend (spec tui-layout 1b.6): the subscription
+			// row is a known $0.00, priced models accumulate, and a
+			// model without documented pricing keeps the segment
+			// hidden rather than estimating.
+			if m.conn.ProviderCanonical == "chatgpt" {
+				m.spendKnown = true
+			} else if cost, priced := model.TurnCost(m.modelName, usage.Prompt, usage.Completion); priced {
+				m.spend += cost
+				m.spendKnown = true
+			}
+		}
+	}
+	m.cancelling = false
+	// A run end (done, error, cancel) holds the queue: reconcile the
+	// backstop against the adopted history, then leave the remaining
+	// messages queued for an explicit Enter (FR-21).
+	m.reconcileQueue()
+	m.persist()
+	m.refreshStatusSessionTitle()
+	m.steer = nil
+	return m.autoNameAfterFirstTurn(v.Kind)
+}
+
+// forceStopRun ends a cancelled run that never delivered its terminal
+// event. Closing abandon releases the run goroutine's undroppable sends, the
+// run settles as cancelled with the queue held, and its late events are
+// dropped by the run-ID guard because the UI is no longer working.
+func (m *ui) forceStopRun() tea.Cmd {
+	if m.abandon != nil {
+		close(m.abandon)
+		m.abandon = nil
+	}
+	m.entries = append(m.entries, entry{role: "Likha", content: "The run did not stop in time; it was detached."})
+	return m.finishRun(agent.TurnEvent{Kind: "error", RunID: m.runID, History: m.history})
 }
 
 // enqueue records a steering prompt typed while a run is active: a visible
@@ -804,253 +1078,15 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.working || v.RunID != m.runID {
 			return m, nil
 		}
-		switch v.Kind {
-		case "task_runtime":
-			m.taskRuntime = v.TaskRuntime
-		case "task":
-			if v.Task != nil {
-				m.acceptTaskRecord(*v.Task)
-			}
-		case "tool_checkpoint":
-			m.history = v.History
-			m.persist()
-		case "ask":
-			// One blocking ask_user broker waits on the reply channel; this
-			// opens the interactive question. The reply has room for one
-			// send, exactly once, and stale duplicates are dropped here.
-			m.hideActivity()
-			if v.Ask == nil {
-				return m, nil
-			}
-			ask := v.Ask
-			m.openAskQuestion(ask.Request, ask.ID, ask.CallID, func(answer tools.AskAnswer) {
-				select {
-				case ask.Reply <- answer:
-				default:
-				}
-			})
-			return m, nil
-		case "consent":
-			m.openConsent(v.Consent)
-			return m, nil
-		case "context":
-			// Each stream replaces the displayed context state. An unknown
-			// measurement intentionally clears any value from the prior turn.
-			m.contextTokens = v.ContextTokens
-			m.contextSeen = v.ContextKnown
-			m.contextEstimated = v.ContextEstimated
-		case "reasoning":
-			// Thinking output from a reasoning model; rendered muted and
-			// closed as soon as the first real content delta arrives. Deltas
-			// after content started are dropped so thinking cannot be
-			// mistaken for the answer.
-			m.hideActivity()
-			if m.streaming >= 0 {
-				return m, nil
-			}
-			if m.reasoningStream < 0 {
-				m.openReasoning()
-			}
-			m.reasoningBuf.WriteString(v.Text)
-			m.entries[m.reasoningStream].content = m.reasoningBuf.String()
-		case "text":
-			m.hideActivity()
-			m.closeReasoning() // content after thinking closes the reasoning stream
-			if m.streaming < 0 {
-				m.entries = append(m.entries, entry{role: "Assistant"})
-				m.streaming = len(m.entries) - 1
-			}
-			m.streamBuf.WriteString(v.Text)
-			m.entries[m.streaming].content = m.streamBuf.String()
-		case "approval":
-			m.hideActivity()
-			m.closeReasoning()
-			if m.cancelling {
-				break
-			}
-			m.pending = v.Approval
-			m.markAwaitingApproval()
-			m.resetToolInspection()
-			m.resetAgentInspection()
-			m.scroll = 0 // review starts at the top of the proposal screen
-			m.following = false
-			m.layoutWidth = 0
-			m.reviewSeen = make([]bool, m.pageCount())
-			m.reviewFocus = focusApprove
-			m.markSeenFromScroll()
-			m.status = "Review " + m.pending.Kind + " before approval"
-		case "tool_start", "tool_result":
-			m.hideActivity()
-			m.streamBuf.Reset()
-			m.streaming = -1
-			// A tool call ends the reasoning block too: reasoning after it
-			// opens a new block below the tool item.
-			m.closeReasoning()
-			if v.Kind == "tool_start" {
-				m.startToolItem(v.Text, v.ToolCall)
-			} else if v.ToolCall != nil && v.ToolResult != nil {
-				m.recordToolResult(*v.ToolCall, *v.ToolResult, v.Text)
-			} else {
-				m.entries = append(m.entries, entry{role: "Tool", content: v.Text})
-			}
-			if m.cancelling {
-				m.status = "Cancelling"
-			} else if v.Kind == "tool_start" {
-				m.status = "Reading repository"
-			} else {
-				m.status = "Waiting for model"
-			}
-			if v.Kind == "tool_result" {
-				if m.statusLineOpts.Changes || m.statusLineOpts.Staged || providers.FlagEnabled(m.statusLineOpts.Branch) {
-					m.git, m.gitOK = gitStatus(m.root)
-				}
-				m.history = v.History
-				m.persist()
-				if m.working && !m.cancelling && m.pending == nil {
-					m.showActivity()
-					return m, tea.Batch(waitEvent(m.events), m.activityTickCmd())
-				}
-			}
-			if v.Kind == "tool_start" && m.working && m.pending == nil {
-				// The running dot blinks on the activity tick, which would
-				// otherwise stop with the Working row it just replaced.
-				if tick := m.armActivityTick(); tick != nil {
-					m.layoutWidth = 0
-					return m, tea.Batch(waitEvent(m.events), tick)
-				}
-			}
-		case "notice":
-			m.entries = append(m.entries, entry{role: "Likha", content: v.Text})
-			if v.History != nil {
-				m.history = v.History
-			}
-			m.persist()
-		case "steer":
-			m.hideActivity()
-			// A queued message reached the model: adopt the engine's history
-			// and flip its Queued row to You. A message from a sent batch
-			// has no row yet, so append one to keep the transcript in step
-			// with the history it just produced (spec FR-21).
-			m.history = v.History
-			// The delivery opens a new provider round: close any open
-			// assistant/reasoning stream so the next round's output starts
-			// fresh entries instead of appending to the previous answer.
-			m.streaming = -1
-			m.streamBuf.Reset()
-			m.closeReasoning()
-			if !m.flipQueuedRow(v.Text) {
-				m.entries = append(m.entries, entry{role: "You", content: v.Text})
-			}
-			if len(m.queue) > 0 {
-				m.queue = m.queue[1:]
-			}
-			if m.turnSent == nil {
-				m.turnSent = make(map[string]int)
-			}
-			m.turnSent[v.Text]++
-			m.persist()
-			if m.working && !m.cancelling && m.pending == nil {
-				m.showActivity()
-				return m, tea.Batch(waitEvent(m.events), m.activityTickCmd())
-			}
-		case "compacted":
-			m.hideActivity()
-			m.closeReasoning()
-			m.resetToolInspection()
-			m.resetAgentInspection()
-			// The single summarize call finished: swap the summarized turns
-			// for the brief and mark the point in the conversation.
-			m.history = v.History
-			m.recalculateContext(m.history)
-			m.entries = append(m.entries, entry{role: "Likha", content: "Conversation compacted. Summary of earlier turns:\n\n" + v.Text})
-			m.status = "Ready"
-			m.working = false
-			if m.cancel != nil {
-				m.cancel()
-			}
-			m.cancel = nil
-			m.persist()
-			m.layoutWidth = 0
-			// A finished compaction holds any queue for an explicit Enter.
-			m.steer = nil
-			return m, nil
-		case "done", "error":
-			m.hideActivity()
-			m.closeReasoning()
-			m.pending = nil
-			m.reviewFocus = focusApprove
-			m.history = v.History
-			m.working = false
-			m.taskRuntime = nil
-			// An unanswered question dies with the run context; record the
-			// interruption once and never reopen or replay it.
-			m.askInterruptedNote()
-			m.closeConsent()
-			if m.cancel != nil {
-				m.cancel()
-			}
-			m.cancel = nil
-			if m.streaming >= 0 && v.Kind == "error" {
-				m.entries = append(m.entries[:m.streaming], m.entries[m.streaming+1:]...)
-				m.adjustToolRecordsAfterRemoval(m.streaming)
-			}
-			m.streaming = -1
-			if m.cancelling {
-				m.recordUnexecutedCalls(v.History)
-			}
-			turnTools, turnCancelled := m.turnToolItems, m.cancelling
-			m.liveToolCalls, m.runToolCalls, m.approvalCall = nil, nil, ""
-			m.approvedEdits = nil
-			if m.cancelling {
-				m.status = "Cancelled"
-				m.entries = append(m.entries, entry{role: "Likha", content: "Run cancelled; no further tools will execute. Approved shell commands may leave detached processes running."})
-			} else if v.Kind == "error" {
-				m.status = "Error"
-				m.entries = append(m.entries, entry{role: "Error", content: v.Text})
-			} else {
-				m.status = "Ready"
-			}
-			// The footer closes every finished user turn, failed ones
-			// included, below the run's last notice.
-			m.appendTurnFooter(turnTools, turnCancelled)
-			if v.Kind == "done" && m.client != nil {
-				// Provider-reported usage of the just-finished response;
-				// absent usage keeps the ctx/tokens segments at their fallback.
-				if usage, ok := m.client.LastTokenUsage(); ok {
-					m.usagePrompt += usage.Prompt
-					m.usageCompletion += usage.Completion
-					m.lastPromptTokens = usage.Prompt
-					m.usageSeen = true
-					// Session spend (spec tui-layout 1b.6): the subscription
-					// row is a known $0.00, priced models accumulate, and a
-					// model without documented pricing keeps the segment
-					// hidden rather than estimating.
-					if m.conn.ProviderCanonical == "chatgpt" {
-						m.spendKnown = true
-					} else if cost, priced := model.TurnCost(m.modelName, usage.Prompt, usage.Completion); priced {
-						m.spend += cost
-						m.spendKnown = true
-					}
-				}
-			}
-			m.cancelling = false
-			// A run end (done, error, cancel) holds the queue: reconcile the
-			// backstop against the adopted history, then leave the remaining
-			// messages queued for an explicit Enter (FR-21).
-			m.reconcileQueue()
-			m.persist()
-			m.refreshStatusSessionTitle()
-			m.steer = nil
-			if cmd := m.autoNameAfterFirstTurn(v.Kind); cmd != nil {
-				m.layoutWidth = 0
-				return m, cmd
-			}
-		}
+		cmd := m.applyTurnEvent(v)
 		m.layoutWidth = 0
-		if m.working {
-			return m, waitEvent(m.events)
+		// Every event of the live run schedules the next read here, so no
+		// branch can strand the run's channel: an open question, a dropped
+		// delta, or a cancel all keep draining until the terminal event.
+		if m.working && v.RunID == m.runID {
+			cmd = tea.Batch(cmd, waitEvent(m.events))
 		}
-		return m, nil
+		return m, cmd
 	case tea.MouseMsg:
 		if m.mode == modeSetup {
 			return m, nil
@@ -1131,6 +1167,11 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activityFrame++
 		m.layoutWidth = 0
 		return m, m.activityTickCmd()
+	case cancelWatchdogMsg:
+		if m.working && m.cancelling && v.runID == m.runID {
+			return m, m.forceStopRun()
+		}
+		return m, nil
 	case escDecayMsg:
 		// The Alt-prefix decay expired: this was a bare ESC, not the
 		// Alt+Return prefix — clear the draft as ESC did before the decay
@@ -1355,6 +1396,11 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc":
 			m.toolCatalogGen++
 			if m.working {
+				if m.cancelling {
+					// The run has not acknowledged the first cancel; a
+					// second press stops waiting for it.
+					return m, m.forceStopRun()
+				}
 				// Cancel-run stays immediate: ESC during a run never arms
 				// the newline prefix, so it carries no ambiguity.
 				m.cancel()
@@ -1366,7 +1412,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancelling = true
 				m.status = "Cancelling"
 				m.layoutWidth = 0
-				return m, nil
+				return m, cancelWatchdog(m.runID)
 			}
 			if v.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -1717,6 +1763,16 @@ type escDecayMsg struct{}
 
 func escDecay() tea.Cmd {
 	return tea.Tick(escDecayWindow, func(time.Time) tea.Msg { return escDecayMsg{} })
+}
+
+// cancelWatchdogWindow is how long a cancelled run may take to deliver its
+// terminal event before the UI stops waiting and detaches it.
+const cancelWatchdogWindow = 3 * time.Second
+
+type cancelWatchdogMsg struct{ runID uint64 }
+
+func cancelWatchdog(runID uint64) tea.Cmd {
+	return tea.Tick(cancelWatchdogWindow, func(time.Time) tea.Msg { return cancelWatchdogMsg{runID: runID} })
 }
 
 // nameGeneratedMsg carries the outcome of the one auto-naming call. An error

@@ -130,7 +130,7 @@ func TestEditItemShowsReviewedDiff(t *testing.T) {
 			"  ⎿  Created long.go (14 lines)",
 			"      1 + row 1", "      2 + row 2", "      3 + row 3", "      4 + row 4", "      5 + row 5",
 			"      6 + row 6", "      7 + row 7", "      8 + row 8", "      9 + row 9", "     10 + row 10",
-			"     … +4 lines (ctrl+o to expand)",
+			"     … +4 lines (enter to expand · ctrl+o to inspect)",
 		}},
 	}
 	for _, tc := range cases {
@@ -256,7 +256,7 @@ func TestPermE2EApprovedEditShowsDiff(t *testing.T) {
 	}
 	rows := trimmed(itemRows(m, indices[0]))
 	want := []string{"⏺ Update(work.txt)", "  ⎿  Updated work.txt with 120 additions and 1 removal", "     1 - before", "     1 + new line"}
-	if len(rows) != 13 || strings.Join(rows[:4], "\n") != strings.Join(want, "\n") || rows[12] != "     … +111 lines (ctrl+o to expand)" {
+	if len(rows) != 13 || strings.Join(rows[:4], "\n") != strings.Join(want, "\n") || rows[12] != "     … +111 lines (enter to expand · ctrl+o to inspect)" {
 		t.Fatalf("applied edit rows %q", rows)
 	}
 }

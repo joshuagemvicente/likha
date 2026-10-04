@@ -207,13 +207,18 @@ func (m *ui) toolItemRows(index int, plan toolItemPlan, focused bool, width int)
 	sub := "  " + g.Result + "  "
 	indent := runewidth.StringWidth(sub)
 	room := max(0, width-indent)
-	summary, preview, more := toolSummary(record, g.Ellipsis)
+	expanded := m.toolOutputExpanded(record)
+	limit, diffLines := toolPreviewLines, transcript.DefaultDiffLines
+	if expanded {
+		limit, diffLines = toolExpandedLines, toolExpandedLines
+	}
+	summary, preview, more := toolSummary(record, g.Ellipsis, limit)
 	if legacyResult {
 		// Legacy results recorded no status; say so instead of guessing one.
 		summary = "Status not recorded"
 		preview, more = nil, 0
 		if record.Name != "grep" && record.Name != "glob" {
-			preview, more = toolPreview(record.Content)
+			preview, more = toolPreview(record.Content, limit)
 		}
 	}
 	var diff transcript.DiffSummary
@@ -233,7 +238,7 @@ func (m *ui) toolItemRows(index int, plan toolItemPlan, focused bool, width int)
 				preview, more = nil, 0
 			}
 		}
-	} else if edit, ok := m.toolEditDiff(record); ok {
+	} else if edit, ok := m.toolEditDiff(record, diffLines); ok {
 		diff = edit
 		summary = toolClipCells(edit.Summary+toolSummarySuffix(record), toolSummaryCells, g.Ellipsis)
 		preview, more = nil, edit.More
@@ -281,8 +286,16 @@ func (m *ui) toolItemRows(index int, plan toolItemPlan, focused bool, width int)
 		rows = append(rows, toolRow{text: pad + toolPreviewRow(line, room, g.Ellipsis), style: muted})
 	}
 	rows = append(rows, m.diffRows(diff, pad, room, row, muted)...)
-	if more > 0 {
-		hint := g.Ellipsis + " +" + toolCount(more, "line", "lines") + " (ctrl+o to expand)"
+	hint := ""
+	switch {
+	case more > 0 && expanded:
+		hint = g.Ellipsis + " +" + toolCount(more, "line", "lines") + " (ctrl+o to inspect)"
+	case more > 0:
+		hint = g.Ellipsis + " +" + toolCount(more, "line", "lines") + " (enter to expand · ctrl+o to inspect)"
+	case expanded && (len(preview) > 0 || len(diff.Lines) > 0):
+		hint = "(enter to collapse)"
+	}
+	if hint != "" {
 		rows = append(rows, toolRow{text: pad + toolClipCells(hint, room, g.Ellipsis), style: muted})
 	}
 	if len(diff.OtherFiles) > 0 {
@@ -323,7 +336,10 @@ func (m *ui) diffRows(diff transcript.DiffSummary, pad string, room int, row, mu
 
 // editDiffKey identifies one edit item's diff: the summary depends only on
 // the record's name, arguments, and stored diff.
-type editDiffKey struct{ name, arguments, diff string }
+type editDiffKey struct {
+	name, arguments, diff string
+	lines                 int
+}
 
 // toolEditDiff is an applied edit's diff summary (spec transcript-redesign
 // § Diffs, § Persistence): the reviewed diff the record stores, else one
@@ -331,7 +347,7 @@ type editDiffKey struct{ name, arguments, diff string }
 // failed, cancelled, and running edits, and edits with neither source, keep
 // the generic summary. Summaries are memoized across layouts: every event
 // lays the transcript out again, and a diff can be megabytes.
-func (m *ui) toolEditDiff(record session.ToolRecord) (transcript.DiffSummary, bool) {
+func (m *ui) toolEditDiff(record session.ToolRecord, maxLines int) (transcript.DiffSummary, bool) {
 	if record.SourceKind == "mcp" || record.Name != "edit" && record.Name != "edit_file" {
 		return transcript.DiffSummary{}, false
 	}
@@ -340,7 +356,7 @@ func (m *ui) toolEditDiff(record session.ToolRecord) (transcript.DiffSummary, bo
 	default:
 		return transcript.DiffSummary{}, false
 	}
-	key := editDiffKey{name: record.Name, arguments: record.Arguments, diff: record.Diff}
+	key := editDiffKey{name: record.Name, arguments: record.Arguments, diff: record.Diff, lines: maxLines}
 	summary, ok := m.editDiffCache[key]
 	if !ok {
 		var files []transcript.FileDiff
@@ -350,7 +366,7 @@ func (m *ui) toolEditDiff(record session.ToolRecord) (transcript.DiffSummary, bo
 		if len(files) == 0 {
 			files, _ = transcript.EditFromArguments(record.Name, record.Arguments)
 		}
-		summary = transcript.SummarizeEdit(files, transcript.DefaultDiffLines)
+		summary = transcript.SummarizeEdit(files, maxLines)
 	}
 	if m.editDiffNext != nil {
 		m.editDiffNext[key] = summary
@@ -457,4 +473,47 @@ func (m *ui) toolBlinking() bool {
 		}
 	}
 	return false
+}
+
+// toolOutputExpanded reports whether the user expanded this call's output
+// inline. Expansion keys on the call ID, so it follows the item through
+// rebuilds; it lives in this view only and is never persisted.
+func (m *ui) toolOutputExpanded(record session.ToolRecord) bool {
+	return record.CallID != "" && m.toolExpanded[record.CallID]
+}
+
+// toolHiddenLines counts the output lines a collapsed item leaves out: the
+// lines Enter would reveal inline.
+func (m *ui) toolHiddenLines(record session.ToolRecord) int {
+	if toolStatusKind(record.Status) == toolStatusRunning {
+		return 0
+	}
+	if edit, ok := m.toolEditDiff(record, transcript.DefaultDiffLines); ok {
+		return edit.More
+	}
+	_, _, more := toolSummary(record, m.blocks.Ellipsis, toolPreviewLines)
+	return more
+}
+
+// toggleToolOutput expands or collapses the tool item at index inline. An
+// item with nothing hidden reports false so Enter can open the inspector.
+func (m *ui) toggleToolOutput(index int) bool {
+	record, ok := m.toolRecordAt(index)
+	if !ok || record.CallID == "" {
+		return false
+	}
+	if m.toolExpanded[record.CallID] {
+		delete(m.toolExpanded, record.CallID)
+		m.layoutWidth = 0
+		return true
+	}
+	if m.toolHiddenLines(record) == 0 {
+		return false
+	}
+	if m.toolExpanded == nil {
+		m.toolExpanded = make(map[string]bool)
+	}
+	m.toolExpanded[record.CallID] = true
+	m.layoutWidth = 0
+	return true
 }

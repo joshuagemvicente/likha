@@ -181,7 +181,12 @@ func (m *ui) handleToolInspection(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 			m.toggleThought(index)
 			return true, nil
 		}
-		if _, ok := m.focusedToolEntry(); ok {
+		if index, ok := m.focusedToolEntry(); ok {
+			// Enter expands or collapses the output inline; Ctrl+O, and
+			// Enter on an item with nothing hidden, open the inspector.
+			if key == "enter" && m.toggleToolOutput(index) {
+				return true, nil
+			}
 			return true, m.openToolResultInspection()
 		}
 		if key == "ctrl+o" && len(m.inspectableToolEntries()) > 0 {
@@ -1034,7 +1039,7 @@ func (m *ui) toolInspectionHelp() string {
 				break
 			}
 		}
-		return fmt.Sprintf("Tool %d/%d focused · Tab/Shift+Tab tool · Enter/Ctrl+O inspect · Back unfocus", position, len(indices))
+		return fmt.Sprintf("Tool %d/%d focused · Tab/Shift+Tab tool · Enter expand/collapse · Ctrl+O inspect · Back unfocus", position, len(indices))
 	}
 	return "Tab/Shift+Tab focus tool · Ctrl+O inspect"
 }
