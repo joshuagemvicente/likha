@@ -358,6 +358,7 @@ func (m *ui) resumeSession(id string) tea.Cmd {
 	m.streaming = -1
 	m.reasoningBuf.Reset()
 	m.reasoningStream = -1
+	m.resetThoughts() // expansion and measured durations belong to the old view
 	m.pending = nil
 	m.reviewSeen = nil
 	m.reviewFocus = focusApprove

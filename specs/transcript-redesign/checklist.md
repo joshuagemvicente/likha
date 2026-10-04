@@ -41,14 +41,23 @@ blocks) and FR-15 (themes, muted reasoning, legible plain text).
 
 ## Live surfaces (S3)
 
-- [ ] Applied edits show the summary sentence and up to 10 numbered `+`/`-`
-      lines on diff tints.
-- [ ] An explore task appears as one `⏺ Task(…)` item with a live `⎿` line
-      and a settle line; no `Agent:` lines appear.
-- [ ] Reasoning shows a live 3-line tail, collapses to `✻ Thought for Ns`,
-      and Enter on a focused marker expands/collapses it.
-- [ ] Each finished turn ends with `✻ model · duration · N tools`, which
-      reappears after resume.
+- [x] Applied edits show the summary sentence and up to 10 numbered `+`/`-`
+      lines on diff tints. — 2026-10-04: `TestEditItemShowsReviewedDiff`
+      (modify, 3-file, create, >10 lines, tint colours),
+      `TestEditDiffSignsSurviveNoColor`, `TestEditDiffSurvivesResume`.
+- [x] An explore task appears as one `⏺ Task(…)` item with a live `⎿` line
+      and a settle line; no `Agent:` lines appear. — 2026-10-04:
+      `TestTaskItemLiveThenSettled` (queued → running → waiting → each
+      outcome; one item, no entries added), `TestTaskItemInterrupted`.
+- [x] Reasoning shows a live 3-line tail, collapses to `✻ Thought for Ns`,
+      and Enter on a focused marker expands/collapses it. — 2026-10-04:
+      `TestLiveReasoningTailThenCollapse`, `TestThoughtMarkersTakeFocusAndToggle`,
+      `TestExpandedReasoningRendersMarkdown`.
+- [x] Each finished turn ends with `✻ model · duration · N tools`, which
+      reappears after resume. — 2026-10-04:
+      `TestTurnFooterAfterDoneCancelledAndError`,
+      `TestTurnFooterCountsToolItemsNotCallIDs`,
+      `TestTurnFooterAndThoughtsSurviveResume`.
 
 ## Gates
 

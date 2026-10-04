@@ -148,6 +148,7 @@ func TestScrollbarStaysAtTheRightEdgeOnStyledRows(t *testing.T) {
 	m.entries = append(m.entries,
 		entry{role: "Reasoning", content: strings.Repeat("the reasoning paragraph wraps well inside the viewport width. ", 40)},
 		entry{role: "Assistant", content: "short answer"})
+	m.thoughtExpanded = map[int]bool{0: true} // expanded: the full reasoning lays out
 	m.layoutWidth = 0
 	rows := strings.Split(m.View(), "\n")
 	body := m.bodyHeight()

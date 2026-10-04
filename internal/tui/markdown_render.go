@@ -19,8 +19,9 @@ import (
 // Assistant markdown in the transcript (spec transcript-redesign § Markdown,
 // § Assistant text): assistant entries, the streaming one included, render
 // through internal/markdown into the text column after the ⏺ gutter, with
-// code blocks highlighted by internal/highlight in theme colors. Reasoning
-// and every other role keep plain wrapped prose.
+// code blocks highlighted by internal/highlight in theme colors. Expanded
+// reasoning renders through the same path in Muted italics (§ Reasoning);
+// the live reasoning tail and every other role keep plain wrapped prose.
 
 // markdownCacheKey identifies one rendered assistant entry: the rows depend
 // only on the text, the text column, the theme styles, the glyph set, and
@@ -31,6 +32,7 @@ type markdownCacheKey struct {
 	theme     string
 	ascii     bool
 	plainOpen bool
+	reasoning bool // expanded reasoning: the Muted italic styles
 }
 
 // markdownEntry is one cached assistant layout and the code blocks it
@@ -113,6 +115,20 @@ func markdownStyles(t likhaui.Theme) markdown.Styles {
 	return s
 }
 
+// reasoningMarkdownStyles restyles the assistant styles for expanded
+// reasoning (spec § Reasoning, § Markdown): prose and headings keep the
+// reasoning's Muted italics, so the block stays quieter than the answer,
+// while bold, strike, underline, inline code, code panels, quotes, rules,
+// and tables render as they do in assistant text. Inline attribute styles
+// inherit the Muted italic container.
+func reasoningMarkdownStyles(s markdown.Styles, t likhaui.Theme) markdown.Styles {
+	body := t.Muted.Italic(true)
+	s.Text = body
+	s.Heading = body.Bold(true)
+	s.HeadingUnderline = s.Heading.Underline(true)
+	return s
+}
+
 // markdownGlyphs is the structural glyph set for the block glyph choice.
 func markdownGlyphs(ascii bool) markdown.Glyphs {
 	if ascii {
@@ -166,6 +182,7 @@ var runHighlight = highlightCode
 // caches, so nothing outlives the entries that need it.
 type markdownLayout struct {
 	styles   markdown.Styles
+	thoughts markdown.Styles // expanded reasoning (reasoningMarkdownStyles)
 	glyphs   markdown.Glyphs
 	themeKey string
 	ascii    bool
@@ -184,6 +201,7 @@ func (m *ui) newMarkdownLayout() *markdownLayout {
 	styles := markdownStyles(m.theme)
 	return &markdownLayout{
 		styles:   styles,
+		thoughts: reasoningMarkdownStyles(styles, m.theme),
 		glyphs:   markdownGlyphs(m.conn.ASCII),
 		themeKey: markdownThemeKey(styles, m.theme),
 		ascii:    m.conn.ASCII,
@@ -255,7 +273,20 @@ func markdownThemeKey(s markdown.Styles, t likhaui.Theme) string {
 // text changes with every delta, so it re-renders as it grows, reusing the
 // highlight of every closed code block and leaving its open fence plain.
 func (m *ui) assistantRows(md *markdownLayout, content, glyph string, width int, streaming bool) []toolRow {
-	key := markdownCacheKey{content: content, width: width, theme: md.themeKey, ascii: md.ascii, plainOpen: streaming}
+	return m.markdownRows(md, content, glyph+" ", width, streaming, false)
+}
+
+// reasoningBodyRows lays out an expanded reasoning block's text as markdown
+// in Muted italics, hanging under the two-cell pad after the marker row.
+// The block is closed, so open fences render like any other.
+func (m *ui) reasoningBodyRows(md *markdownLayout, content string, width int) []toolRow {
+	return m.markdownRows(md, content, "  ", width, false, true)
+}
+
+// markdownRows renders content into the text column after gutter, through
+// the layout caches, in the assistant or the expanded reasoning styles.
+func (m *ui) markdownRows(md *markdownLayout, content, gutter string, width int, streaming, reasoning bool) []toolRow {
+	key := markdownCacheKey{content: content, width: width, theme: md.themeKey, ascii: md.ascii, plainOpen: streaming, reasoning: reasoning}
 	if e, ok := md.next[key]; ok {
 		return e.rows
 	}
@@ -270,11 +301,14 @@ func (m *ui) assistantRows(md *markdownLayout, content, glyph string, width int,
 		md.deferred = md.deferred || e.deferred
 	} else {
 		e = markdownEntry{}
-		gutter := glyph + " "
 		indent := runewidth.StringWidth(gutter)
+		styles := md.styles
+		if reasoning {
+			styles = md.thoughts
+		}
 		rendered := markdown.Render(content, markdown.Options{
 			Width:  max(1, width-indent),
-			Styles: md.styles,
+			Styles: styles,
 			Glyphs: md.glyphs,
 			Highlight: func(lang, code string) ([][]markdown.CodeSegment, bool) {
 				k := highlightKey{lang: lang, code: code}

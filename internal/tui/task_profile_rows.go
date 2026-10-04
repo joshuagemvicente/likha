@@ -1,10 +1,6 @@
 package tui
 
-import (
-	"encoding/json"
-
-	"likha/internal/explore"
-)
+import "encoding/json"
 
 // maxProfileNameRunes mirrors the shared profile-name rule from the
 // user-agents spec: 1–64 characters. Every name that passes validProfileName
@@ -87,17 +83,4 @@ func (m *ui) taskRowContentForProfile(callID, profile string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// profileAttributionNote returns the one-line suffix appended to the Agent
-// transcript entry when a task record arrives, attributing the task to a
-// non-default profile. The built-in explore role keeps today's wording, so
-// this returns "" for explore records and for records carrying no agent
-// name. The name is bounded with the shared safe-render helper before it
-// reaches the transcript.
-func (m *ui) profileAttributionNote(record explore.Record) string {
-	if record.Agent == "" || record.Agent == "explore" {
-		return ""
-	}
-	return "profile " + toolShortText(record.Agent, maxProfileNameRunes)
 }

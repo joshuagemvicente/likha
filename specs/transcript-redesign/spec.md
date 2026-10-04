@@ -265,6 +265,13 @@ strikethrough, with theme-mapped styles:
 - Stored session entries keep their role strings; the new look is a
   rendering of the same data. One display role is added, `Turn`, persisted so
   footers reappear on resume.
+- Applied edits persist their reviewed unified diff in an optional
+  `diff` field on the tool record (user-approved 2026-10-04), so numbered
+  diff lines survive resume; older records fall back to a diff rebuilt from
+  the edit arguments (no line numbers).
+- Reasoning durations persist inside the `Turn` entry payload, one value per
+  reasoning block of that turn (user-approved 2026-10-04; no entry schema
+  change). Reasoning without a recorded duration renders `✻ Thought`.
 - Tool calls start a tool record at `tool_start` (status `running`) and the
   result updates the same record by call ID instead of appending a new
   entry, so new sessions store one entry per call.

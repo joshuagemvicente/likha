@@ -548,8 +548,7 @@ func (m *ui) activateModelClient(p model.Provider, client *model.Client, modelID
 	m.modelName = modelID
 	m.streamBuf.Reset()
 	m.streaming = -1
-	m.reasoningBuf.Reset()
-	m.reasoningStream = -1
+	m.closeReasoning()
 	m.pending = nil
 	m.reviewSeen = nil
 	m.jumpBottom()

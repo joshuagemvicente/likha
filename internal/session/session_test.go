@@ -507,3 +507,50 @@ func TestDecodeLegacySnapshotWithoutNamedTitle(t *testing.T) {
 		t.Fatalf("named title did not round-trip: %+v, %v", decoded, err)
 	}
 }
+
+// An applied edit keeps its reviewed diff across save and load; a diff-only
+// change is conversation activity; records saved before the field existed
+// decode with an empty diff.
+func TestToolRecordDiffRoundTrip(t *testing.T) {
+	store, _, _ := testStore(t)
+	snapshot, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff := "--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+new\n"
+	snapshot.Entries = []Entry{{Role: "Tool", Content: "edit_file: Applied edit to a.go"}}
+	snapshot.ToolRecords = []ToolRecord{{EntryIndex: 0, CallID: "c1", Name: "edit_file", Arguments: `{"path":"a.go","content":"new\n"}`, Status: "succeeded", Content: "Applied edit to a.go", Diff: diff}}
+	if err := store.Save(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load(snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.ToolRecords) != 1 || loaded.ToolRecords[0].Diff != diff {
+		t.Fatalf("loaded tool records = %+v; want the reviewed diff", loaded.ToolRecords)
+	}
+	changed := loaded
+	changed.ToolRecords = []ToolRecord{loaded.ToolRecords[0]}
+	changed.ToolRecords[0].Diff = ""
+	if sameConversation(loaded, changed) {
+		t.Fatal("a diff change compared equal; it would not count as conversation activity")
+	}
+
+	id := "0123456789abcdef0123456789abcdef"
+	legacy := []byte(`{"ID":"` + id + `","Root":"/repo","Entries":[{"Role":"Tool","Content":"x"}],"tool_records":[{"entry_index":0,"name":"edit","status":"succeeded"}]}`)
+	old, err := decode(id, "/repo", legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(old.ToolRecords) != 1 || old.ToolRecords[0].Diff != "" || old.ToolRecords[0].Name != "edit" {
+		t.Fatalf("legacy tool records = %+v; want one edit record without a diff", old.ToolRecords)
+	}
+	data, err := json.Marshal(ToolRecord{Name: "read", Status: "succeeded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"diff"`) {
+		t.Fatalf("a record without a diff encoded the field: %s", data)
+	}
+}

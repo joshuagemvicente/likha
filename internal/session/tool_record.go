@@ -7,6 +7,9 @@ import "slices"
 // legacy shape. Arguments describe the call, not configuration credentials or
 // permission grants. ArtifactID and continuation fields are references only:
 // loading a record never retrieves output or reruns its originating operation.
+// Diff is the unified diff the user reviewed and approved for an applied edit
+// (edit, edit_file); it is display data for the transcript, absent on every
+// other record and on records saved before it existed.
 type ToolRecord struct {
 	EntryIndex int      `json:"entry_index"`
 	CallID     string   `json:"call_id,omitempty"`
@@ -23,6 +26,7 @@ type ToolRecord struct {
 	Truncated  bool     `json:"truncated,omitempty"`
 	Warnings   []string `json:"warnings,omitempty"`
 	NextOffset int      `json:"next_offset,omitempty"`
+	Diff       string   `json:"diff,omitempty"`
 }
 
 // Record updates are conversation activity; nil and empty collections remain
@@ -35,7 +39,7 @@ func sameToolRecords(a, b []ToolRecord) bool {
 		if left.SourceKind != right.SourceKind || left.Server != right.Server || left.SourceTool != right.SourceTool || left.Status != right.Status {
 			return false
 		}
-		if left.Content != right.Content || left.ArtifactID != right.ArtifactID || left.Cursor != right.Cursor || left.Truncated != right.Truncated || left.NextOffset != right.NextOffset {
+		if left.Content != right.Content || left.ArtifactID != right.ArtifactID || left.Cursor != right.Cursor || left.Truncated != right.Truncated || left.NextOffset != right.NextOffset || left.Diff != right.Diff {
 			return false
 		}
 		return slices.Equal(left.Warnings, right.Warnings)

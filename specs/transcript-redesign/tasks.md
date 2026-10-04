@@ -75,19 +75,19 @@ slice starts.
 
 ## S3 — Live surfaces
 
-15. **Diffs.** Edit items: summary sentence + up to 10 numbered `+`/`-`
+15. **Diffs.** [x] DONE 2026-10-04 — reviewed diff captured at approval, persisted as optional `ToolRecord.Diff` only for succeeded/limited results, argument fallback for older records; `edit_file` creates read `Create(path)`; `TestEditItemShowsReviewedDiff`, `TestEditDiffSignsSurviveNoColor`, `TestEditDiffSurvivesResume`, `TestEditFileCreateHeaderFollowsAppliedDiff`, `TestPermE2EApprovedEditShowsDiff`. — Edit items: summary sentence + up to 10 numbered `+`/`-`
     lines on diff tints, multi-file naming, create summary. Verify: render
     tests for modify/multi-file/create; no-color keeps signs.
-16. **Subagent items.** `task` item live `⎿` line from the direct child's
+16. **Subagent items.** [x] DONE 2026-10-04 — `⎿` line from `FitLiveLine`/`FitSettle` by `TaskID`, blinking muted dot while live, no `Agent` entries written (legacy ones still render as `ℹ`); `TestTaskItemLiveThenSettled`, `TestTaskItemInterrupted`, `TestTaskItemsResumeWithLegacyAgentEntries`. — `task` item live `⎿` line from the direct child's
     latest activity; settle line with tool uses + wait/active or outcome;
     stop emitting `Agent` entries. Verify: tests driving record updates
     through queued→running→waiting→completed/failed show one item and no
     `Agent` entries.
-17. **Reasoning.** Live 3-line tail; collapse to `✻ Thought for Ns`; Tab
+17. **Reasoning.** [x] DONE 2026-10-04 — exactly the last 3 rows live, timer per block, `Thought for Ns`/`<1s`/`Thought`, Tab/Enter on markers, expanded body rendered as markdown in Muted italics; two stream bugs fixed (buffer reset on text, tool calls close the block); `TestLiveReasoningTailThenCollapse`, `TestThoughtMarkersTakeFocusAndToggle`, `TestExpandedReasoningRendersMarkdown`, `TestReasoningStreamClosesOnToolCall`. — Live 3-line tail; collapse to `✻ Thought for Ns`; Tab
     focus on markers; Enter toggles inline expansion (per view). Verify:
     streaming, collapse, focus, and toggle tests.
-18. **Turn footer.** Persisted `Turn` entry: model · duration · N tools
+18. **Turn footer.** [x] DONE 2026-10-04 — `Turn` entry after every finished user turn (done, cancelled, failed; never compaction) with `thoughts_ms` durations; tool count is per item, not per call ID; `TestTurnFooterAfterDoneCancelledAndError`, `TestTurnFooterCountsToolItemsNotCallIDs`, `TestTurnFooterAndThoughtsSurviveResume`, `TestTurnFooterEndToEndNeverReachesTheModel`. — Persisted `Turn` entry: model · duration · N tools
     (+ cancelled); narrow segment dropping. Verify: footer after
     completed/cancelled turns; survives resume.
-19. **Docs + commit S3.** Full checks; commit; user walkthrough; update the
+19. **Docs + commit S3.** [x] docs DONE; [x] commit DONE 2026-10-04; [ ] user walkthrough pending — Full checks; commit; user walkthrough; update the
     specs index status.

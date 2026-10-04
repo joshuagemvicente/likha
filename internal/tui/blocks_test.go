@@ -49,7 +49,7 @@ func TestBlockGlyphPerRoleBothSets(t *testing.T) {
 			{"Queued", g.User + " queued · held"},
 			{"Assistant", g.Assistant + " answer"},
 			{"Tool", g.ToolHeader + " tool output"},
-			{"Reasoning", g.Thought + " pondering"},
+			{"Reasoning", g.Thought + " Thought"}, // a finished block collapses to its marker
 			{"Error", g.Error + " failure"},
 			{"Likha", g.Notice + " notice"},
 			{"Agent", g.Notice + " legacy agent line"},

@@ -95,6 +95,12 @@ func (m *ui) statusHints(page, pages int, narrow bool) []string {
 		return []string{kind + " · " + position + " · " + controls, "Review " + position + " " + compact}
 	}
 	state := m.statusState()
+	if _, ok := m.focusedThoughtEntry(); ok {
+		if m.working {
+			return []string{m.toolInspectionHelp() + " · Ctrl+C cancel", position + " Tab · Enter expand · ^C cancel", "Tab · Enter · ^C cancel"}
+		}
+		return []string{m.toolInspectionHelp(), position + " Tab · Enter expand · Back unfocus", "Tab · Enter · Back unfocus"}
+	}
 	if m.toolInspector.focused {
 		if m.working {
 			return []string{m.toolInspectionHelp() + " · Ctrl+C cancel", position + " Tab · ^O inspect · ^C cancel", "Tab · ^O inspect · ^C cancel"}

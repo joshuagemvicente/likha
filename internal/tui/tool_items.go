@@ -421,13 +421,20 @@ func toolSummary(record session.ToolRecord, ellipsis string) (summary string, pr
 		return toolClipCells("Failed: "+toolFailureReason(record, ellipsis), toolSummaryCells, ellipsis), nil, 0
 	}
 	summary, preview, more = toolSuccessSummary(record, ellipsis)
-	if status == string(tools.Limited) || record.Truncated {
-		summary += " · limited"
+	return toolClipCells(summary+toolSummarySuffix(record), toolSummaryCells, ellipsis), preview, more
+}
+
+// toolSummarySuffix qualifies a succeeded or limited summary: " · limited"
+// when the result is incomplete, then the warning count.
+func toolSummarySuffix(record session.ToolRecord) string {
+	suffix := ""
+	if strings.EqualFold(strings.TrimSpace(record.Status), string(tools.Limited)) || record.Truncated {
+		suffix += " · limited"
 	}
 	if count := len(record.Warnings); count > 0 {
-		summary += " · " + toolCount(count, "warning", "warnings")
+		suffix += " · " + toolCount(count, "warning", "warnings")
 	}
-	return toolClipCells(summary, toolSummaryCells, ellipsis), preview, more
+	return suffix
 }
 
 // toolSuccessSummary covers succeeded and limited records. Counts come from

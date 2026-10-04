@@ -589,10 +589,68 @@ func TestHighlightKindsMapOneToOne(t *testing.T) {
 	}
 }
 
-func TestReasoningStaysPlainProse(t *testing.T) {
+// Expanded reasoning renders markdown like assistant text (spec §
+// Markdown: "Assistant text (and expanded reasoning)"), with prose and
+// headings in the reasoning's Muted italics and the syntax hidden; the
+// collapsed marker shows no body.
+func TestExpandedReasoningRendersMarkdown(t *testing.T) {
+	const content = "# Plan\n**raw** `kept`\n- item\n\n```go\nfunc main() {}\n```"
 	m := markdownTestUI(t, "catppuccin", false, 80)
-	starts := layoutEntries(m, entry{role: "Reasoning", content: "**raw** `kept`"})
-	if got := m.lines[starts[0]]; got != m.blocks.Thought+" **raw** `kept`" {
-		t.Fatalf("reasoning row %q, want unrendered text in S2", got)
+	starts := layoutEntries(m, entry{role: "Reasoning", content: content}, entry{role: "You", content: "next"})
+	if starts[1]-starts[0] != 2 || m.lines[starts[0]] != m.blocks.Thought+" Thought" {
+		t.Fatalf("collapsed reasoning rows %q", m.lines[starts[0]:starts[1]])
+	}
+	m.thoughtExpanded = map[int]bool{0: true}
+	m.layoutWidth = 0
+	m.rebuild()
+	starts = m.entryLines
+	if m.lines[starts[0]] != m.blocks.Thought+" Thought" {
+		t.Fatalf("expanded marker row %q", m.lines[starts[0]])
+	}
+	body := m.lines[starts[0]+1 : starts[1]-1]
+	for _, row := range body {
+		if row != "" && !strings.HasPrefix(row, "  ") {
+			t.Fatalf("body row %q does not hang under the pad", row)
+		}
+		for _, raw := range []string{"#", "**", "`"} {
+			if strings.Contains(row, raw) {
+				t.Fatalf("expanded reasoning row %q shows markdown syntax %q", row, raw)
+			}
+		}
+	}
+	muted := colorName(m.theme.Muted.GetForeground())
+	heading := lineWith(t, m, starts[0]+1, "Plan")
+	if m.lines[heading] != "  Plan" {
+		t.Fatalf("heading row %q", m.lines[heading])
+	}
+	if run, ok := runOver(m, heading, 2); !ok || !run.style.GetBold() || !run.style.GetItalic() || colorName(run.style.GetForeground()) != muted {
+		t.Fatalf("heading run %+v ok=%t, want bold Muted italics", run, ok)
+	}
+	prose := lineWith(t, m, starts[0]+1, "raw")
+	if m.lines[prose] != "  raw kept" {
+		t.Fatalf("prose row %q", m.lines[prose])
+	}
+	if run, ok := runOver(m, prose, 2); !ok || !run.style.GetBold() || !run.style.GetItalic() || colorName(run.style.GetForeground()) != muted {
+		t.Fatalf("bold run %+v ok=%t, want bold inside the Muted italics", run, ok)
+	}
+	if run, ok := runOver(m, prose, runeIndex(t, m.lines[prose], "kept")); !ok || colorName(run.style.GetForeground()) != colorName(m.theme.Accent.GetForeground()) || colorName(run.style.GetBackground()) != colorName(m.theme.BgCode.GetBackground()) {
+		t.Fatalf("inline code run %+v ok=%t, want Accent on BgCode", run, ok)
+	}
+	if item := lineWith(t, m, starts[0]+1, "item"); m.lines[item] != "  • item" {
+		t.Fatalf("list row %q", m.lines[item])
+	}
+	code := lineWith(t, m, starts[0]+1, "func main() {}")
+	if kw, ok := runOver(m, code, runeIndex(t, m.lines[code], "func")); !strings.HasPrefix(m.lines[code], "  func") || !ok || colorName(kw.style.GetForeground()) != colorName(m.theme.Accent.GetForeground()) {
+		t.Fatalf("code row %q keyword run %+v ok=%t", m.lines[code], kw, ok)
+	}
+	for i := starts[0]; i < len(m.lines); i++ {
+		if w := runewidth.StringWidth(m.lines[i]); w > contentWidth(80) {
+			t.Fatalf("row %d is %d cells: %q", i, w, m.lines[i])
+		}
+	}
+	// lines, styles, and runs stay aligned: the next block starts where
+	// entryLines says.
+	if len(m.lineRuns) != len(m.lines) || len(m.lineStyles) != len(m.lines) || m.lines[starts[1]+1] != "> next" {
+		t.Fatalf("layout out of step: row %q", m.lines[starts[1]+1])
 	}
 }

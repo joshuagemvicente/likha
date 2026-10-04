@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
+	"likha/internal/transcript"
 	likhaui "likha/internal/ui"
 )
 
@@ -116,8 +117,12 @@ func (m *ui) rebuild() {
 		first := false
 		m.entryLines = make([]int, len(m.entries))
 		md := m.newMarkdownLayout()
+		m.editDiffNext = map[editDiffKey]transcript.DiffSummary{}
 		plan := m.toolItemPlan()
 		focused, hasFocus := m.focusedToolItem(plan)
+		focusedThought, hasThoughtFocus := m.focusedThoughtEntry()
+		times := m.thoughtTimes()
+		thought := 0 // ordinal of the next Reasoning entry
 		// Lay assistant answers out newest first, so the highlight budget
 		// goes to the answers nearest the screen; the loop below then finds
 		// every one of them in this layout's cache.
@@ -158,11 +163,34 @@ func (m *ui) rebuild() {
 				}
 				continue
 			}
+			var footer toolRow
+			if e.role == transcript.TurnRole {
+				// A turn footer that does not decode renders nothing, not
+				// even its separator row.
+				var ok bool
+				if footer, ok = m.footerRow(e, width); !ok {
+					m.entryLines[index] = len(m.lines)
+					continue
+				}
+			}
 			if first {
 				add([]string{""}, withBase(plain, m.theme.Base))
 			}
 			first = true
 			m.entryLines[index] = len(m.lines)
+			if e.role == transcript.TurnRole {
+				addTool([]toolRow{footer})
+				continue
+			}
+			if e.role == "Reasoning" {
+				var t thoughtTime
+				if thought < len(times) {
+					t = times[thought]
+				}
+				addTool(m.reasoningRows(md, index, t, m.thoughtExpanded[thought], hasThoughtFocus && focusedThought == index, width))
+				thought++
+				continue
+			}
 			if e.role == "Working" {
 				plainText := activitySpinner(m.activityFrame) + " " + workingLabel
 				for i, line := range wrap(plainText, width) {
@@ -217,6 +245,7 @@ func (m *ui) rebuild() {
 		// Keep only this layout's rendered entries and code highlights:
 		// edits, theme changes, and resizes leave nothing stale behind.
 		m.commitMarkdownLayout(md)
+		m.editDiffCache, m.editDiffNext = m.editDiffNext, nil
 		m.layoutWidth = m.width
 	}
 }
@@ -238,8 +267,9 @@ func (m *ui) transcriptBlock(e entry) (glyph string, style lipgloss.Style, band 
 		return g.User, withBase(m.theme.Muted, m.theme.BgUser), true
 	case "Assistant":
 		return g.Assistant, withBase(m.theme.Normal, m.theme.Base), false
-	case "Reasoning":
-		// The quietest layer: foreground-muted only, no band.
+	case "Reasoning", transcript.TurnRole:
+		// The quietest layer: foreground-muted only, no band. Reasoning
+		// and turn footers lay out in reasoningRows and footerRow.
 		return g.Thought, m.theme.Muted, false
 	case "Error":
 		return g.Error, withBase(m.theme.Error, m.theme.Base), false

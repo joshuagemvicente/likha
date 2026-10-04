@@ -118,7 +118,7 @@ func TestBandRolesAcrossThemes(t *testing.T) {
 			}
 		}
 		// Reasoning stays flat: same fg as Muted, no background.
-		idx, line := roleLine(m, "✻ thinking")
+		idx, line := roleLine(m, "✻ Thought")
 		if idx < 0 {
 			t.Fatalf("theme %s: Reasoning line missing", name)
 		}
@@ -242,7 +242,7 @@ func TestDegradationAcrossProfiles(t *testing.T) {
 				view := m.View()
 				// Glyphs and words survive every profile: block identity
 				// never rides on color alone.
-				for _, want := range []string{"> hello", "⏺ hi there", "⏺ listing files", "✻ thinking", "✗ boom", "> queued · queued prompt", "ℹ plain prose"} {
+				for _, want := range []string{"> hello", "⏺ hi there", "⏺ listing files", "✻ Thought", "✗ boom", "> queued · queued prompt", "ℹ plain prose"} {
 					if !strings.Contains(stripANSI(view), want) {
 						t.Fatalf("profile %v theme %s: content %q lost in %q", profile, name, want, stripANSI(view)[:min(200, len(stripANSI(view)))])
 					}

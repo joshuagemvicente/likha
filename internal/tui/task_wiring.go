@@ -42,14 +42,12 @@ func (m *ui) acceptTaskRecord(record explore.Record) {
 	if record.SessionID != m.snapshot.ID {
 		return
 	}
-	previous := explore.State("")
 	found := false
 	for i := range m.taskRecords {
 		if m.taskRecords[i].ID == record.ID {
 			if m.taskRecords[i].Version >= record.Version {
 				return
 			}
-			previous = m.taskRecords[i].Status
 			m.taskRecords[i] = record
 			found = true
 			break
@@ -69,34 +67,14 @@ func (m *ui) acceptTaskRecord(record explore.Record) {
 			}
 		}
 	}
-	// The transcript announces a task once when it appears and once when it
-	// settles. Live churn (queued ↔ running ↔ waiting-for-child) happens every
-	// model round because the explore loop re-queues for its permit; the
-	// task row and /agents show that live state instead.
-	if !found || previous != record.Status && taskSettled(record.Status) {
-		parent := "main"
-		if record.ParentID != "" {
-			parent = record.ParentID
-		}
-		content := fmt.Sprintf("%s · parent %s · depth %d · %s · %s", record.ID, parent, record.Depth, record.Status, record.Description)
-		if note := m.profileAttributionNote(record); note != "" {
-			content += " · " + note
-		}
-		m.entries = append(m.entries, entry{role: "Agent", content: content})
-	}
+	// The task's tool item is its only transcript surface (spec
+	// transcript-redesign § Subagent items): its ⎿ line follows this record
+	// and its direct children on the next layout, so no Agent entry is
+	// written for any depth; /agents keeps the full tree.
 	m.layoutWidth = 0
 	// The runtime's private SaveTask path durably records every child update.
 	// This single UI writer coordinates the display snapshot across siblings.
 	m.persist()
-}
-
-// taskSettled reports whether a task state is final rather than live.
-func taskSettled(status explore.State) bool {
-	switch status {
-	case explore.Queued, explore.Running, explore.Waiting:
-		return false
-	}
-	return true
 }
 
 func (m *ui) inspectFocusedTask(msg tea.KeyMsg) (bool, tea.Cmd) {

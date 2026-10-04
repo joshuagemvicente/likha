@@ -194,6 +194,7 @@ func (m *ui) startToolItem(text string, call *model.ToolCall) {
 	if call == nil {
 		return
 	}
+	m.turnToolItems++
 	record := session.ToolRecord{EntryIndex: len(m.entries) - 1, CallID: call.ID, Name: call.Name, Arguments: call.Arguments, Status: "running"}
 	if call.Name == "task" {
 		record.SourceKind, record.SourceTool = "builtin", "task"
@@ -266,6 +267,14 @@ func (m *ui) recordToolResult(call model.ToolCall, result tools.Result, text str
 			record.TaskID = outcome.TaskID
 		}
 	}
+	if body, ok := m.approvedEdits[call.ID]; ok {
+		// Only an applied edit shows its diff; a refused, failed, or
+		// cancelled one never claims a change it did not make.
+		delete(m.approvedEdits, call.ID)
+		if result.Status == tools.Succeeded || result.Status == tools.Limited {
+			record.Diff = reviewedDiff(body)
+		}
+	}
 	if call.Name == "plan_update" {
 		// An accepted replace mirrors into the snapshot; refusals and
 		// persistence failures keep the previous plan untouched.
@@ -283,6 +292,7 @@ func (m *ui) recordToolResult(call model.ToolCall, result tools.Result, text str
 		m.entries = append(m.entries, entry{role: "Tool", content: text})
 		record.EntryIndex = len(m.entries) - 1
 		m.toolRecords = append(m.toolRecords, record)
+		m.turnToolItems++
 	}
 	m.trackToolCall(call.ID, false)
 	if m.approvalCall == call.ID {
@@ -319,6 +329,7 @@ func (m *ui) recordUnexecutedCalls(history []model.Message) {
 		}
 		m.toolRecords = append(m.toolRecords, session.ToolRecord{EntryIndex: len(m.entries) - 1, CallID: call.ID, Name: call.Name,
 			Arguments: call.Arguments, Status: string(tools.Cancelled), Content: message.Content})
+		m.turnToolItems++
 		m.trackToolCall(call.ID, false)
 	}
 }
@@ -336,6 +347,38 @@ func (m *ui) markAwaitingApproval() {
 			return
 		}
 	}
+}
+
+// rememberApprovedEdit keeps the body of an edit review the user approved,
+// keyed by the call under review, until the call's result decides whether it
+// was applied (recordToolResult). Only edit reviews carry a diff.
+func (m *ui) rememberApprovedEdit() {
+	if m.pending == nil || m.pending.Kind != "edit" || m.approvalCall == "" {
+		return
+	}
+	if m.approvedEdits == nil {
+		m.approvedEdits = make(map[string]string)
+	}
+	m.approvedEdits[m.approvalCall] = m.pending.Body
+}
+
+// reviewedDiff is the unified diff of an edit review body: the edit tool's
+// review opens with its affected-files list, which the diff restates, so the
+// body is cut at the first file header ("--- " then "+++ "). A body without
+// one is kept whole.
+func reviewedDiff(body string) string {
+	for at := 0; at < len(body); {
+		line, rest, _ := strings.Cut(body[at:], "\n")
+		if strings.HasPrefix(line, "--- ") && strings.HasPrefix(rest, "+++ ") {
+			return body[at:]
+		}
+		next := strings.IndexByte(body[at:], '\n')
+		if next < 0 {
+			break
+		}
+		at += next + 1
+	}
+	return body
 }
 
 // resumeAfterApproval returns the reviewed call to running once the user has

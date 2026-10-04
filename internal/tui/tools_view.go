@@ -43,6 +43,10 @@ type toolInspectionState struct {
 	focused      bool
 	focusedEntry int
 	focusedCall  string
+	// focusedThought is 1 + the ordinal of a focused reasoning marker
+	// (thought_items.go); 0 while focus is on a tool item. The ordinal
+	// survives the entry shifts that would move focusedEntry.
+	focusedThought int
 
 	reader        toolOutputInspectionReader
 	generation    uint64
@@ -159,7 +163,9 @@ func (m *ui) handleToolInspection(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	}
 	switch key {
 	case "tab", "shift+tab":
-		indices := m.inspectableToolEntries()
+		// Tab visits tool items and collapsed reasoning markers alike, in
+		// transcript order.
+		indices := m.transcriptFocusStops()
 		if len(indices) == 0 {
 			return false, nil
 		}
@@ -170,6 +176,11 @@ func (m *ui) handleToolInspection(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 		m.cycleToolEntryFocus(indices, direction, true)
 		return true, nil
 	case "enter", "ctrl+o":
+		if index, ok := m.focusedThoughtEntry(); ok && key == "enter" {
+			// Enter on a reasoning marker expands or collapses it inline.
+			m.toggleThought(index)
+			return true, nil
+		}
 		if _, ok := m.focusedToolEntry(); ok {
 			return true, m.openToolResultInspection()
 		}
@@ -653,7 +664,7 @@ func (m *ui) focusedToolEntry() (int, bool) {
 // reuse IDs across rounds) the one nearest the last focused row wins.
 func (m *ui) focusedToolItem(plan toolItemPlan) (int, bool) {
 	state := &m.toolInspector
-	if !state.focused || state.sessionID != m.snapshot.ID {
+	if !state.focused || state.sessionID != m.snapshot.ID || state.focusedThought > 0 {
 		return 0, false
 	}
 	if state.focusedCall != "" {
@@ -684,7 +695,10 @@ func (m *ui) setToolEntryFocus(index int) {
 	m.toolInspector.focused = true
 	m.toolInspector.focusedEntry = index
 	m.toolInspector.focusedCall = ""
-	if record, ok := m.toolRecordAt(index); ok {
+	m.toolInspector.focusedThought = 0
+	if index >= 0 && index < len(m.entries) && m.entries[index].role == "Reasoning" {
+		m.toolInspector.focusedThought = m.reasoningOrdinal(index) + 1
+	} else if record, ok := m.toolRecordAt(index); ok {
 		m.toolInspector.focusedCall = record.CallID
 	}
 	m.layoutWidth = 0
@@ -693,6 +707,7 @@ func (m *ui) setToolEntryFocus(index int) {
 func (m *ui) clearToolEntryFocus() {
 	m.toolInspector.focused = false
 	m.toolInspector.focusedCall = ""
+	m.toolInspector.focusedThought = 0
 	m.layoutWidth = 0
 }
 
@@ -702,7 +717,7 @@ func (m *ui) cycleToolEntryFocus(indices []int, direction int, reveal bool) {
 		return
 	}
 	position := -1
-	if index, ok := m.focusedToolEntry(); ok {
+	if index, ok := m.focusedStop(); ok {
 		for i, candidate := range indices {
 			if index == candidate {
 				position = i
@@ -1004,6 +1019,9 @@ func (m *ui) toolInspectionView() string {
 // toolInspectionHelp is the coordinator's main-view footer/help hook. Only a
 // focused row claims Enter, so the normal composer and steering flow stay live.
 func (m *ui) toolInspectionHelp() string {
+	if _, ok := m.focusedThoughtEntry(); ok && m.pending == nil {
+		return "Reasoning focused · Tab/Shift+Tab next · Enter expand/collapse · Back unfocus"
+	}
 	indices := m.inspectableToolEntries()
 	if len(indices) == 0 || m.pending != nil {
 		return ""

@@ -10,7 +10,10 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 
+	"likha/internal/explore"
 	"likha/internal/session"
+	"likha/internal/tools"
+	"likha/internal/transcript"
 )
 
 // Tool items in the transcript (spec transcript-redesign § Tool items): one
@@ -99,7 +102,7 @@ func (m *ui) toolItemPlan() toolItemPlan {
 	var open []request
 	for i, e := range m.entries {
 		switch e.role {
-		case "You", "Assistant", "Reasoning":
+		case "You", "Assistant", "Reasoning", transcript.TurnRole:
 			open = open[:0]
 			continue
 		case "Tool":
@@ -201,6 +204,40 @@ func (m *ui) toolItemRows(index int, plan toolItemPlan, focused bool, width int)
 		// crashed run, whether or not a new turn is working now.
 		record.Status, kind = "interrupted", toolStatusFailure
 	}
+	sub := "  " + g.Result + "  "
+	indent := runewidth.StringWidth(sub)
+	room := max(0, width-indent)
+	summary, preview, more := toolSummary(record, g.Ellipsis)
+	if legacyResult {
+		// Legacy results recorded no status; say so instead of guessing one.
+		summary = "Status not recorded"
+		preview, more = nil, 0
+		if record.Name != "grep" && record.Name != "glob" {
+			preview, more = toolPreview(record.Content)
+		}
+	}
+	var diff transcript.DiffSummary
+	if task, children, ok := m.toolTaskRecord(record); ok {
+		// Subagent items (§ Subagent items): the explore record, not the
+		// call's coarse status, words the ⎿ line — its latest activity while
+		// live, its outcome once settled.
+		switch {
+		case kind == toolStatusRunning && transcript.IsLive(task.Status):
+			summary, preview, more = transcript.FitLiveLine(task, children, room, g.Ellipsis), nil, 0
+		case !transcript.IsLive(task.Status):
+			text, success := transcript.FitSettle(task, room, g.Ellipsis)
+			summary, kind = text, toolStatusFailure
+			if success {
+				kind = toolStatusSuccess
+			} else {
+				preview, more = nil, 0
+			}
+		}
+	} else if edit, ok := m.toolEditDiff(record); ok {
+		diff = edit
+		summary = toolClipCells(edit.Summary+toolSummarySuffix(record), toolSummaryCells, g.Ellipsis)
+		preview, more = nil, edit.More
+	}
 	dot := muted
 	switch {
 	case focused:
@@ -211,6 +248,11 @@ func (m *ui) toolItemRows(index int, plan toolItemPlan, focused bool, width int)
 		dot = on(m.theme.Error)
 	}
 	display, args := toolRecordHeaderParts(record, g.Ellipsis)
+	if record.Name == "edit_file" && display == "Update" && diff.Created {
+		// edit_file's arguments cannot tell a create from an update; the
+		// applied diff can (spec § Tool items: a create reads Create(path)).
+		display = "Create"
+	}
 	header := fitToolHeader(display, args, max(0, width-gutterCells), g.Ellipsis)
 	glyphEnd := utf8.RuneCountInString(glyph)
 	textStart := utf8.RuneCountInString(gutter)
@@ -220,25 +262,14 @@ func (m *ui) toolItemRows(index int, plan toolItemPlan, focused bool, width int)
 	}
 	text := gutter + header
 	rows := []toolRow{{text: text, style: on(m.theme.Normal), runs: []lineRun{
-		{start: 0, end: glyphEnd, style: shared(dot), blink: live && !focused},
+		{start: 0, end: glyphEnd, style: shared(dot), blink: live && kind == toolStatusRunning && !focused},
 		{start: textStart, end: nameEnd, style: shared(on(m.theme.Normal).Bold(true))},
 		{start: nameEnd, end: utf8.RuneCountInString(text), style: shared(on(m.theme.Normal))},
 	}}}
 
-	summary, preview, more := toolSummary(record, g.Ellipsis)
-	if legacyResult {
-		// Legacy results recorded no status; say so instead of guessing one.
-		summary = "Status not recorded"
-		preview, more = nil, 0
-		if record.Name != "grep" && record.Name != "glob" {
-			preview, more = toolPreview(record.Content)
-		}
-	}
 	if summary == "" {
 		return rows
 	}
-	sub := "  " + g.Result + "  "
-	indent := runewidth.StringWidth(sub)
 	for i, line := range wrapHanging(summary, width, indent, indent) {
 		if i == 0 {
 			line = sub + line
@@ -246,15 +277,106 @@ func (m *ui) toolItemRows(index int, plan toolItemPlan, focused bool, width int)
 		rows = append(rows, toolRow{text: line, style: muted})
 	}
 	pad := strings.Repeat(" ", indent)
-	room := max(0, width-indent)
 	for _, line := range preview {
 		rows = append(rows, toolRow{text: pad + toolPreviewRow(line, room, g.Ellipsis), style: muted})
 	}
+	rows = append(rows, m.diffRows(diff, pad, room, row, muted)...)
 	if more > 0 {
 		hint := g.Ellipsis + " +" + toolCount(more, "line", "lines") + " (ctrl+o to expand)"
 		rows = append(rows, toolRow{text: pad + toolClipCells(hint, room, g.Ellipsis), style: muted})
 	}
+	if len(diff.OtherFiles) > 0 {
+		// A multi-file edit shows the first file's lines and names the rest.
+		others := "Also " + strings.Join(diff.OtherFiles, ", ")
+		rows = append(rows, toolRow{text: pad + toolClipCells(others, room, g.Ellipsis), style: muted})
+	}
 	return rows
+}
+
+// diffRows lays out an edit item's diff lines under the ⎿ text column (spec
+// transcript-redesign § Diffs): line number, sign, and text, each row's text
+// column tinted BgDiffAdd or BgDiffRemove. The sign column carries the
+// meaning, so a profile without color loses nothing; the tint spans the
+// whole text column, as a code panel does.
+func (m *ui) diffRows(diff transcript.DiffSummary, pad string, room int, row, muted lipgloss.Style) []toolRow {
+	if len(diff.Lines) == 0 || room <= 0 {
+		return nil
+	}
+	add := shared(withBase(withBase(m.theme.Normal, m.theme.BgDiffAdd), row))
+	remove := shared(withBase(withBase(m.theme.Normal, m.theme.BgDiffRemove), row))
+	numbers := diff.NumberWidth()
+	off := utf8.RuneCountInString(pad)
+	rows := make([]toolRow, 0, len(diff.Lines))
+	for _, line := range diff.Lines {
+		text := transcript.FormatDiffLine(line, numbers, room, m.blocks.Ellipsis)
+		text += strings.Repeat(" ", max(0, room-runewidth.StringWidth(text)))
+		tint := add
+		if line.Sign == '-' {
+			tint = remove
+		}
+		rows = append(rows, toolRow{text: pad + text, style: muted, runs: []lineRun{
+			{start: off, end: off + utf8.RuneCountInString(text), style: tint},
+		}})
+	}
+	return rows
+}
+
+// editDiffKey identifies one edit item's diff: the summary depends only on
+// the record's name, arguments, and stored diff.
+type editDiffKey struct{ name, arguments, diff string }
+
+// toolEditDiff is an applied edit's diff summary (spec transcript-redesign
+// § Diffs, § Persistence): the reviewed diff the record stores, else one
+// rebuilt from the edit arguments (older records; no line numbers). Refused,
+// failed, cancelled, and running edits, and edits with neither source, keep
+// the generic summary. Summaries are memoized across layouts: every event
+// lays the transcript out again, and a diff can be megabytes.
+func (m *ui) toolEditDiff(record session.ToolRecord) (transcript.DiffSummary, bool) {
+	if record.SourceKind == "mcp" || record.Name != "edit" && record.Name != "edit_file" {
+		return transcript.DiffSummary{}, false
+	}
+	switch strings.ToLower(strings.TrimSpace(record.Status)) {
+	case string(tools.Succeeded), string(tools.Limited):
+	default:
+		return transcript.DiffSummary{}, false
+	}
+	key := editDiffKey{name: record.Name, arguments: record.Arguments, diff: record.Diff}
+	summary, ok := m.editDiffCache[key]
+	if !ok {
+		var files []transcript.FileDiff
+		if record.Diff != "" {
+			files = transcript.ParseUnifiedDiff(record.Diff)
+		}
+		if len(files) == 0 {
+			files, _ = transcript.EditFromArguments(record.Name, record.Arguments)
+		}
+		summary = transcript.SummarizeEdit(files, transcript.DefaultDiffLines)
+	}
+	if m.editDiffNext != nil {
+		m.editDiffNext[key] = summary
+	}
+	return summary, summary.Summary != ""
+}
+
+// toolTaskRecord finds the explore record a top-level task item shows, with
+// its direct children. The item's TaskID names it: acceptTaskRecord sets it
+// when the record first arrives and the result restates it.
+func (m *ui) toolTaskRecord(record session.ToolRecord) (explore.Record, []explore.Record, bool) {
+	if record.Name != "task" || record.SourceKind == "mcp" || record.TaskID == "" {
+		return explore.Record{}, nil, false
+	}
+	at := slices.IndexFunc(m.taskRecords, func(r explore.Record) bool { return r.ID == record.TaskID && r.ParentID == "" })
+	if at < 0 {
+		return explore.Record{}, nil, false
+	}
+	task := m.taskRecords[at]
+	var children []explore.Record
+	for _, r := range m.taskRecords {
+		if r.ParentID == task.ID {
+			children = append(children, r)
+		}
+	}
+	return task, children, true
 }
 
 // toolLegacyLine flattens the first line of legacy tool text onto one row,

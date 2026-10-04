@@ -21,6 +21,7 @@ import (
 	"likha/internal/session"
 	"likha/internal/tooloutput"
 	"likha/internal/tools"
+	"likha/internal/transcript"
 	likhaui "likha/internal/ui"
 	"likha/internal/update"
 )
@@ -184,6 +185,30 @@ type ui struct {
 	webConfigState        string          // last loaded web config; a change clears webGrants
 	webConfigSeen         bool
 	grantsMu              sync.Mutex // serializes UI writes with tool-goroutine reads
+
+	// Edit diffs (spec transcript-redesign § Diffs). approvedEdits holds the
+	// reviewed diff of each edit this run approved, by call ID, until the
+	// call's result decides whether it was applied. editDiffCache keeps the
+	// edit item diffs of the last layout, reused while unchanged;
+	// editDiffNext collects the ones the layout in progress uses (nil
+	// outside rebuild).
+	approvedEdits map[string]string
+	editDiffCache map[editDiffKey]transcript.DiffSummary
+	editDiffNext  map[editDiffKey]transcript.DiffSummary
+
+	// Reasoning blocks and turn footers (spec transcript-redesign §
+	// Reasoning, § Turn footer; thought_items.go). Blocks key on their
+	// Reasoning ordinal. thoughtDurations holds the durations measured in
+	// this view; thoughtExpanded the markers expanded inline. Neither is
+	// persisted: durations reach the session inside each Turn entry.
+	clock            func() time.Time // nil: time.Now
+	reasoningStarted time.Time        // open block's start; zero when none
+	thoughtDurations map[int]time.Duration
+	thoughtExpanded  map[int]bool
+	turnStarted      time.Time // current user turn's start; zero outside one (and for compaction)
+	turnModel        string    // model the current user turn runs on
+	turnThoughtBase  int       // reasoning ordinal of the current turn's first block
+	turnToolItems    int       // top-level tool items the current turn opened
 }
 
 // dialogMatches documents the shared selection-dialog filter: a
@@ -397,8 +422,8 @@ func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
 	m.persist()
 	m.streamBuf.Reset()
 	m.streaming = -1
-	m.reasoningBuf.Reset()
-	m.reasoningStream = -1
+	m.closeReasoning()
+	m.beginTurnFooter()
 	m.status = "Waiting for model"
 	m.working = true
 	m.jumpBottom()
@@ -411,6 +436,7 @@ func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
 	m.runID++
 	m.taskRuntime = nil
 	m.liveToolCalls, m.runToolCalls, m.approvalCall = nil, nil, ""
+	m.approvedEdits = nil
 	m.resetAgentInspection()
 	runID := m.runID
 	events := m.events
@@ -534,6 +560,7 @@ func (m *ui) reconcileQueue() {
 func (m *ui) startCompaction(focus string) tea.Cmd {
 	m.status = "Compacting…"
 	m.working = true
+	m.turnStarted = time.Time{} // a compaction is not a user turn: no footer
 	m.jumpBottom()
 	m.layoutWidth = 0
 	m.showActivity()
@@ -822,14 +849,13 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.reasoningStream < 0 {
-				m.entries = append(m.entries, entry{role: "Reasoning"})
-				m.reasoningStream = len(m.entries) - 1
+				m.openReasoning()
 			}
 			m.reasoningBuf.WriteString(v.Text)
 			m.entries[m.reasoningStream].content = m.reasoningBuf.String()
 		case "text":
 			m.hideActivity()
-			m.reasoningStream = -1 // content after thinking closes the reasoning stream
+			m.closeReasoning() // content after thinking closes the reasoning stream
 			if m.streaming < 0 {
 				m.entries = append(m.entries, entry{role: "Assistant"})
 				m.streaming = len(m.entries) - 1
@@ -838,6 +864,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.entries[m.streaming].content = m.streamBuf.String()
 		case "approval":
 			m.hideActivity()
+			m.closeReasoning()
 			if m.cancelling {
 				break
 			}
@@ -856,6 +883,9 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.hideActivity()
 			m.streamBuf.Reset()
 			m.streaming = -1
+			// A tool call ends the reasoning block too: reasoning after it
+			// opens a new block below the tool item.
+			m.closeReasoning()
 			if v.Kind == "tool_start" {
 				m.startToolItem(v.Text, v.ToolCall)
 			} else if v.ToolCall != nil && v.ToolResult != nil {
@@ -907,8 +937,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// fresh entries instead of appending to the previous answer.
 			m.streaming = -1
 			m.streamBuf.Reset()
-			m.reasoningStream = -1
-			m.reasoningBuf.Reset()
+			m.closeReasoning()
 			if !m.flipQueuedRow(v.Text) {
 				m.entries = append(m.entries, entry{role: "You", content: v.Text})
 			}
@@ -926,6 +955,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "compacted":
 			m.hideActivity()
+			m.closeReasoning()
 			m.resetToolInspection()
 			m.resetAgentInspection()
 			// The single summarize call finished: swap the summarized turns
@@ -946,6 +976,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "done", "error":
 			m.hideActivity()
+			m.closeReasoning()
 			m.pending = nil
 			m.reviewFocus = focusApprove
 			m.history = v.History
@@ -967,7 +998,9 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cancelling {
 				m.recordUnexecutedCalls(v.History)
 			}
+			turnTools, turnCancelled := m.turnToolItems, m.cancelling
 			m.liveToolCalls, m.runToolCalls, m.approvalCall = nil, nil, ""
+			m.approvedEdits = nil
 			if m.cancelling {
 				m.status = "Cancelled"
 				m.entries = append(m.entries, entry{role: "Likha", content: "Run cancelled; no further tools will execute. Approved shell commands may leave detached processes running."})
@@ -977,6 +1010,9 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.status = "Ready"
 			}
+			// The footer closes every finished user turn, failed ones
+			// included, below the run's last notice.
+			m.appendTurnFooter(turnTools, turnCancelled)
 			if v.Kind == "done" && m.client != nil {
 				// Provider-reported usage of the just-finished response;
 				// absent usage keeps the ctx/tokens segments at their fallback.
@@ -1283,6 +1319,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.status = reviewGateStatus
 						return m, nil
 					}
+					m.rememberApprovedEdit()
 					m.pending.Reply <- true
 					m.status = "Executing approved " + m.pending.Kind
 					m.pending = nil
