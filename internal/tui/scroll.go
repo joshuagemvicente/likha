@@ -25,7 +25,14 @@ const scrollbarColumn = 1
 // scrollMax is the topmost valid scroll offset for the current content and
 // viewport: the number of body lines hidden below the fold.
 func (m *ui) scrollMax() int {
-	return max(0, len(m.lines)-m.bodyHeight())
+	return max(0, m.transcriptLineCount()-m.bodyHeight())
+}
+
+func (m *ui) transcriptLineCount() int {
+	if m.transcriptSelectionFrozen() {
+		return len(m.selection.snapshot.lines)
+	}
+	return len(m.lines)
 }
 
 // clampScroll reconciles the offset with the current content: while
@@ -134,7 +141,7 @@ func (m *ui) caretNote() {
 // scrollbarVisible reports whether the body needs a scrollbar: only when
 // content overflows the viewport.
 func (m *ui) scrollbarVisible(body int) bool {
-	return len(m.lines) > body
+	return m.transcriptLineCount() > body
 }
 
 // scrollbarRows renders the one-column scrollbar for the body's right edge:
@@ -146,7 +153,7 @@ func (m *ui) scrollbarRows(body int) []string {
 		return nil
 	}
 	rows := make([]string, 0, body)
-	thumb := max(1, body*body/len(m.lines))
+	thumb := max(1, body*body/m.transcriptLineCount())
 	thumb = min(thumb, body)
 	travel := max(1, body-thumb)
 	pos := 0
@@ -175,7 +182,13 @@ func (m *ui) spliceScrollbar(rows []string, header int, body int) {
 	}
 	for i := range body {
 		row := rows[header+i]
-		rows[header+i] = truncateRow(row, m.width-1) + bar[i]
+		cut := truncateRow(row, m.width-1)
+		// A wide glyph can straddle the cut. Fill its abandoned cell so
+		// the scrollbar still occupies the exact final display column.
+		if width := runewidth.StringWidth(stripANSI(cut)); width < m.width-1 {
+			cut += m.theme.Base.Render(fit("", m.width-1-width))
+		}
+		rows[header+i] = cut + bar[i]
 	}
 }
 
@@ -222,18 +235,33 @@ func truncateRow(row string, width int) string {
 // thumb jumps to the pointer's vertical position and follows while the button
 // is held (motion events). It reports whether the event was consumed.
 func (m *ui) updateScrollbarMouse(v tea.MouseMsg) bool {
-	if !m.scrollbarVisible(m.bodyHeight()) {
+	if !m.mainScreenVisible() || m.selection.dragging {
 		return false
 	}
-	if v.X != m.width-1 {
-		return false
-	}
-	drag := v.Type == tea.MouseLeft || v.Type == tea.MouseMotion
-	if !drag {
-		return false
+	action, button := selectionMouseActionButton(v)
+	if m.selection.scrollbarDragging && action == tea.MouseActionRelease && (button == tea.MouseButtonLeft || button == tea.MouseButtonNone) {
+		m.selection.scrollbarDragging = false
+		return true
 	}
 	body := m.bodyHeight()
-	frac := float64(max(0, min(v.Y, body-1))) / float64(max(1, body-1))
+	if !m.scrollbarVisible(body) {
+		m.selection.scrollbarDragging = false
+		return false
+	}
+	top := len(m.header())
+	if m.selection.scrollbarDragging {
+		if !selectionMouseDrag(v, action, button) {
+			if action == tea.MouseActionMotion && button == tea.MouseButtonNone {
+				m.selection.scrollbarDragging = false
+			}
+			return false
+		}
+	} else if action == tea.MouseActionPress && button == tea.MouseButtonLeft && v.X == m.width-1 && v.Y >= top && v.Y < top+body {
+		m.selection.scrollbarDragging = true
+	} else {
+		return false
+	}
+	frac := float64(max(0, min(v.Y-top, body-1))) / float64(max(1, body-1))
 	m.scroll = int(float64(m.scrollMax()) * frac)
 	if m.scroll >= m.scrollMax() {
 		m.scroll = m.scrollMax()

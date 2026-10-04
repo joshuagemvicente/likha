@@ -1,15 +1,17 @@
 package tui
 
-// editState carries the composer's cursor and kill ring for m.input
+// editState carries the composer's cursor, selection, and kill ring for m.input
 // (specs/tool-rendering-terminal-keys M2, FR-17). The buffer itself stays
 // m.input []rune so existing draft plumbing keeps working; every mutation
 // goes through these pure operations.
 type editState struct {
-	caret       int      // rune index of the insertion point, clamped to len(input)
-	ring        [][]rune // kill ring, most recent kill first, capped at killRingCap
-	yankIdx     int      // ring index of the entry the last yank inserted
-	yankLen     int      // runes the last yank inserted (for replace-on-repeat)
-	lastWasYank bool     // true between consecutive yanks (repeat cycles the ring)
+	caret           int      // rune index of the insertion point, clamped to len(input)
+	selectionAnchor int      // fixed rune index while the caret extends a selection
+	selecting       bool     // also true for a zero-width selection during a drag
+	ring            [][]rune // kill ring, most recent kill first, capped at killRingCap
+	yankIdx         int      // ring index of the entry the last yank inserted
+	yankLen         int      // runes the last yank inserted (for replace-on-repeat)
+	lastWasYank     bool     // true between consecutive yanks (repeat cycles the ring)
 }
 
 const killRingCap = 8
@@ -25,18 +27,83 @@ func (s *editState) clampCaret(input []rune) {
 	s.caret = min(len(input), max(0, s.caret))
 }
 
-// endCaret moves the caret to the end after a wholesale buffer replacement.
-func (s *editState) endCaret(input []rune) {
-	s.caret = len(input)
+// selectionRange returns a half-open rune range without changing editor state.
+// Both ends are clamped in case a wholesale buffer replacement left them stale.
+func (s *editState) selectionRange(input []rune) (start, end int, ok bool) {
+	if !s.selecting {
+		return 0, 0, false
+	}
+	anchor := min(len(input), max(0, s.selectionAnchor))
+	caret := min(len(input), max(0, s.caret))
+	start, end = min(anchor, caret), max(anchor, caret)
+	return start, end, start < end
+}
+
+// clearSelection leaves the caret and kill/yank state untouched.
+func (s *editState) clearSelection() {
+	s.selectionAnchor = 0
+	s.selecting = false
+}
+
+// setSelection keeps zero-width selections active so a drag can cross its
+// anchor without losing the original insertion point.
+func (s *editState) setSelection(input []rune, anchor, caret int) {
+	s.selectionAnchor = min(len(input), max(0, anchor))
+	s.caret = min(len(input), max(0, caret))
+	s.selecting = true
 	s.lastWasYank = false
 }
 
-// insertRunes inserts rs at the caret and moves the caret past them.
+// extendSelection fixes the old caret as the anchor on the first extension.
+func (s *editState) extendSelection(input []rune, caret int) {
+	anchor := s.selectionAnchor
+	if !s.selecting {
+		anchor = s.caret
+	}
+	s.setSelection(input, anchor, caret)
+}
+
+func (s *editState) selectedText(input []rune) string {
+	start, end, ok := s.selectionRange(input)
+	if !ok {
+		return ""
+	}
+	return string(input[start:end])
+}
+
+// endCaret moves the caret to the end after a wholesale buffer replacement.
+func (s *editState) endCaret(input []rune) {
+	s.caret = len(input)
+	s.clearSelection()
+	s.lastWasYank = false
+}
+
+// deleteSelectedRunes removes a nonempty selection, optionally saving it on the
+// kill ring. Plain deletes and replacement edits do not affect the ring.
+func deleteSelectedRunes(input *[]rune, s *editState, kill bool) bool {
+	start, end, ok := s.selectionRange(*input)
+	if !ok {
+		return false
+	}
+	if kill {
+		s.pushKill((*input)[start:end])
+	}
+	*input = append((*input)[:start], (*input)[end:]...)
+	s.caret = start
+	s.clearSelection()
+	s.lastWasYank = false
+	return true
+}
+
+// insertRunes replaces selected text, or inserts rs at the caret, then moves
+// the caret past the inserted runes. An empty insertion remains a no-op.
 func insertRunes(input *[]rune, s *editState, rs []rune) {
 	if len(rs) == 0 {
 		return
 	}
 	s.clampCaret(*input)
+	deleteSelectedRunes(input, s, false)
+	s.clearSelection()
 	*input = append(*input, make([]rune, len(rs))...)
 	copy((*input)[s.caret+len(rs):], (*input)[s.caret:])
 	copy((*input)[s.caret:], rs)
@@ -44,9 +111,14 @@ func insertRunes(input *[]rune, s *editState, rs []rune) {
 	s.lastWasYank = false
 }
 
-// deleteBack removes the rune before the caret. Reports whether it ran.
+// deleteBack removes selected text or the rune before the caret.
+// Reports whether it ran.
 func deleteBack(input *[]rune, s *editState) bool {
 	s.clampCaret(*input)
+	if deleteSelectedRunes(input, s, false) {
+		return true
+	}
+	s.clearSelection()
 	if s.caret == 0 {
 		return false
 	}
@@ -56,9 +128,14 @@ func deleteBack(input *[]rune, s *editState) bool {
 	return true
 }
 
-// deleteForward removes the rune at the caret. Reports whether it ran.
+// deleteForward removes selected text or the rune at the caret.
+// Reports whether it ran.
 func deleteForward(input *[]rune, s *editState) bool {
 	s.clampCaret(*input)
+	if deleteSelectedRunes(input, s, false) {
+		return true
+	}
+	s.clearSelection()
 	if s.caret == len(*input) {
 		return false
 	}
@@ -71,6 +148,7 @@ func deleteForward(input *[]rune, s *editState) bool {
 // separating whitespace run.
 func moveWordBack(input []rune, s *editState) {
 	s.clampCaret(input)
+	s.clearSelection()
 	i := s.caret
 	for i > 0 && isWordSpace(input[i-1]) {
 		i--
@@ -86,6 +164,7 @@ func moveWordBack(input []rune, s *editState) {
 // following word.
 func moveWordForward(input []rune, s *editState) {
 	s.clampCaret(input)
+	s.clearSelection()
 	i := s.caret
 	for i < len(input) && isWordSpace(input[i]) {
 		i++
@@ -102,6 +181,10 @@ func moveWordForward(input []rune, s *editState) {
 // When the caret sits in whitespace, the run itself is the kill.
 func killWordBack(input *[]rune, s *editState) bool {
 	s.clampCaret(*input)
+	if deleteSelectedRunes(input, s, true) {
+		return true
+	}
+	s.clearSelection()
 	i := s.caret
 	for i > 0 && !isWordSpace((*input)[i-1]) {
 		i--
@@ -124,6 +207,10 @@ func killWordBack(input *[]rune, s *editState) bool {
 // run and the following word are the kill.
 func killWordForward(input *[]rune, s *editState) bool {
 	s.clampCaret(*input)
+	if deleteSelectedRunes(input, s, true) {
+		return true
+	}
+	s.clearSelection()
 	i := s.caret
 	for i < len(*input) && isWordSpace((*input)[i]) {
 		i++
@@ -144,6 +231,10 @@ func killWordForward(input *[]rune, s *editState) bool {
 // region, so this is the whole head).
 func killToStart(input *[]rune, s *editState) bool {
 	s.clampCaret(*input)
+	if deleteSelectedRunes(input, s, true) {
+		return true
+	}
+	s.clearSelection()
 	if s.caret == 0 {
 		return false
 	}
@@ -157,6 +248,10 @@ func killToStart(input *[]rune, s *editState) bool {
 // killToEnd kills everything from the caret to the end of the draft.
 func killToEnd(input *[]rune, s *editState) bool {
 	s.clampCaret(*input)
+	if deleteSelectedRunes(input, s, true) {
+		return true
+	}
+	s.clearSelection()
 	if s.caret == len(*input) {
 		return false
 	}
@@ -166,16 +261,20 @@ func killToEnd(input *[]rune, s *editState) bool {
 	return true
 }
 
-// yank reinserts the most recent kill at the caret. A consecutive yank
-// (no edit between) replaces the last yank with the next-older ring entry,
-// cycling back to the newest after the oldest.
+// yank replaces selected text or reinserts the most recent kill at the caret.
+// A consecutive yank (no edit between) replaces the last yank with the
+// next-older ring entry, cycling back to the newest after the oldest.
 func yank(input *[]rune, s *editState) bool {
 	if len(s.ring) == 0 {
 		return false
 	}
 	s.clampCaret(*input)
 	idx := 0
-	if s.lastWasYank && s.yankLen > 0 {
+	if s.selecting {
+		// A new selection takes precedence over a previous yank's span.
+		deleteSelectedRunes(input, s, false)
+		s.clearSelection()
+	} else if s.lastWasYank && s.yankLen > 0 && s.yankLen <= s.caret {
 		// Replace the previous yank in place.
 		start := s.caret - s.yankLen
 		*input = append((*input)[:start], (*input)[s.caret:]...)
@@ -194,6 +293,7 @@ func yank(input *[]rune, s *editState) bool {
 // them. Fewer than two runes before the caret is a no-op.
 func transpose(input *[]rune, s *editState) bool {
 	s.clampCaret(*input)
+	s.clearSelection()
 	if s.caret < 2 {
 		return false
 	}

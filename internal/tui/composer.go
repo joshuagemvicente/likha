@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
 	"likha/internal/providers"
@@ -71,56 +73,308 @@ func (m *ui) composerLayout() (style string, fixed, inputWidth int) {
 	return style, fixed, max(1, inputWidth)
 }
 
-// composerLines reserves its own viewport rows; a long draft shows its editable
-// tail without displacing the transcript, mention popup, or status line.
-func (m *ui) composerLines() []string {
-	if m.pending != nil {
-		// A pending review replaces the composer with the decision bar; the
-		// draft, caret, and borders do not render.
-		return m.reviewActionLines()
+// composerGlyph retains the source rune of each safe display glyph. An escape
+// can span rows, but all of its glyphs still select and copy as one source rune.
+// The synthetic caret and placeholder use source -1 and are never selected.
+type composerGlyph struct {
+	text   string
+	source int
+	width  int
+}
+
+type composerInsertion struct {
+	column int
+	caret  int
+}
+
+type composerTextRow struct {
+	glyphs  []composerGlyph
+	points  []composerInsertion
+	columns int
+}
+
+type composerDraftLayout struct {
+	rows      []composerTextRow
+	positions []composerInsertionPosition
+}
+
+type composerInsertionPosition = composerVisualPosition
+
+// layoutComposerDraft follows wrap's escaping and soft-wrap rules, keeping
+// insertion points alongside the display glyphs rather than reverse-mapping
+// the rendered (and possibly styled) strings for mouse input.
+func layoutComposerDraft(input []rune, width, caret int, showCaret bool) composerDraftLayout {
+	width = max(1, width)
+	caret = min(len(input), max(0, caret))
+	layout := composerDraftLayout{
+		rows:      []composerTextRow{{}},
+		positions: make([]composerInsertionPosition, len(input)+1),
 	}
-	width := m.width
-	style, fixed, inputWidth := m.composerLayout()
-	text := string(m.input)
-	placeholder := len(m.input) == 0
-	caret := ""
-	if m.caretVisible() {
-		caret = "█"
+	row := 0
+	point := func(index, column int) {
+		layout.rows[row].points = append(layout.rows[row].points, composerInsertion{column: column, caret: index})
 	}
-	if placeholder {
-		text = "Ask Likha… // escapes a slash"
+	flush := func() {
+		layout.rows = append(layout.rows, composerTextRow{})
+		row++
+	}
+	prepare := func(size, index int, boundary bool) {
+		if layout.rows[row].columns+size > width && layout.rows[row].columns > 0 {
+			if boundary {
+				point(index, layout.rows[row].columns)
+			}
+			flush()
+		}
+	}
+	appendGlyph := func(text string, source, size int) {
+		line := &layout.rows[row]
+		line.glyphs = append(line.glyphs, composerGlyph{text: text, source: source, width: size})
+		line.columns += size
+	}
+	point(0, 0)
+	var caretPosition composerInsertionPosition
+	for i := 0; i <= len(input); i++ {
+		if showCaret && i == caret {
+			prepare(1, i, true)
+			caretPosition = composerInsertionPosition{row: row, column: layout.rows[row].columns}
+			point(i, layout.rows[row].columns)
+			appendGlyph("█", -1, 1)
+			point(i, layout.rows[row].columns)
+		}
+		if i == len(input) {
+			layout.positions[i] = composerInsertionPosition{row: row, column: layout.rows[row].columns}
+			point(i, layout.rows[row].columns)
+			break
+		}
+		r := input[i]
+		if r == '\n' {
+			layout.positions[i] = composerInsertionPosition{row: row, column: layout.rows[row].columns}
+			point(i, layout.rows[row].columns)
+			flush()
+			point(i+1, 0)
+			continue
+		}
+		if hiddenReviewRune(r) {
+			escaped := fmt.Sprintf("\\u%04X", r)
+			prepare(1, i, true)
+			start := composerInsertionPosition{row: row, column: layout.rows[row].columns}
+			layout.positions[i] = start
+			for _, c := range escaped {
+				prepare(1, i, false)
+				appendGlyph(string(c), i, 1)
+			}
+			// A row in the middle of an escape has no insertion point inside
+			// the source rune. Virtual endpoints outside that row let a click
+			// still choose the nearer side of the complete escaped rune.
+			for part := start.row; part <= row; part++ {
+				column := start.column - (part-start.row)*width
+				layout.rows[part].points = append(layout.rows[part].points,
+					composerInsertion{column: column, caret: i},
+					composerInsertion{column: column + len(escaped), caret: i + 1})
+			}
+			continue
+		}
+		size := runewidth.RuneWidth(r)
+		prepare(size, i, true)
+		layout.positions[i] = composerInsertionPosition{row: row, column: layout.rows[row].columns}
+		point(i, layout.rows[row].columns)
+		appendGlyph(string(r), i, size)
+		point(i+1, layout.rows[row].columns)
+	}
+	if showCaret {
+		layout.positions[caret] = caretPosition
+	}
+	return layout
+}
+
+type composerViewport struct {
+	style             string
+	fixed, width      int
+	left, textOffset  int
+	hidden, popupRows int
+	rows              []composerTextRow
+	placeholder       bool
+}
+
+// composerTextViewport is shared by rendering and hit-testing. In particular,
+// a selection (including a newly started, empty drag) never inserts a blinking
+// display cell that could change the soft wraps underneath the mouse.
+func (m *ui) composerTextViewport() composerViewport {
+	if view, frozen := m.frozenComposerViewport(); frozen {
+		return view
+	}
+	style, fixed, width := m.composerLayout()
+	view := composerViewport{style: style, fixed: fixed, width: width, textOffset: 1, placeholder: len(m.input) == 0}
+	switch style {
+	case "rounded":
+		view.left, view.textOffset = 2+runewidth.StringWidth(composerPrompt), 2
+	case "bordered":
+		view.left, view.textOffset = 2, 2
+	case "minimal":
+		view.textOffset = 2
+	case "chatter":
+		view.left = runewidth.StringWidth("You › ")
+	}
+	input := m.input
+	caret := min(len(input), max(0, m.edit.caret))
+	if view.placeholder {
+		text := "Ask Likha… // escapes a slash"
 		if m.working {
-			// A run is active but editable (no review pending): the draft is
-			// a steering prompt queued for the next provider-call boundary.
 			text = "Type to queue… (Enter queues, Esc cancels)"
 		} else if n := len(m.queue); n > 0 {
-			// A run ended with messages held: Enter sends them (FR-21).
 			text = "Enter sends the queued message… (Esc clears)"
 			if n > 1 {
 				text = "Enter sends the queued messages… (Esc clears)"
 			}
 		}
-		if caret != "" {
-			// An empty draft renders the caret before the placeholder, like
-			// a browser's placeholder with a focused empty input.
-			text = caret + text
-			caret = ""
+		input = []rune(text)
+	}
+	layout := layoutComposerDraft(input, width, caret, m.caretVisible() && !m.edit.selecting)
+	if view.placeholder {
+		for i := range layout.rows {
+			for j := range layout.rows[i].glyphs {
+				layout.rows[i].glyphs[j].source = -1
+			}
+			for j := range layout.rows[i].points {
+				layout.rows[i].points[j].caret = 0
+			}
 		}
 	}
-	if caret != "" {
-		// The block caret renders at the insertion point (FR-17), which a
-		// multi-line draft may sit inside any wrapped row of.
-		c := min(len(m.input), max(0, m.edit.caret))
-		text = string(m.input[:c]) + caret + string(m.input[c:])
+	view.popupRows = len(m.mentionLines()) + len(m.commandLines())
+	limit := max(1, m.height-len(m.header())-m.statusLineHeight()-view.popupRows-1-fixed)
+	tail := max(0, len(layout.rows)-limit)
+	view.hidden = tail
+	if !view.placeholder && m.edit.selecting {
+		caretRow := layout.positions[caret].row
+		anchor := min(len(m.input), max(0, m.edit.selectionAnchor))
+		anchorRow := layout.positions[anchor].row
+		if anchorRow < tail {
+			view.hidden = max(0, anchorRow-limit/2)
+		}
+		// Keep the window stable around the drag's anchor until the active
+		// end leaves it; keyboard selection can then reach either hidden end.
+		if caretRow < view.hidden {
+			view.hidden = caretRow
+		} else if caretRow >= view.hidden+limit {
+			view.hidden = caretRow - limit + 1
+		}
+		view.hidden = min(tail, view.hidden)
 	}
-	input := wrap(text, inputWidth)
-	limit := max(1, m.height-len(m.header())-m.statusLineHeight()-len(m.mentionLines())-len(m.commandLines())-1-fixed)
-	hidden := 0 // leading wrapped rows scrolled off above the editable tail
-	if len(input) > limit {
-		hidden = len(input) - limit
-		input = input[hidden:]
+	view.rows = layout.rows[view.hidden:min(len(layout.rows), view.hidden+limit)]
+	return view
+}
+
+// composerSelectionCaretVertical moves through the marker-free rows actually
+// shown during keyboard selection. Reusing the mover retains the preferred
+// display column across short rows without its normal editor's marker geometry.
+func (m *ui) composerSelectionCaretVertical(caret, direction int) (int, bool) {
+	layout := layoutComposerDraft(m.input, m.composerInputWidth(), caret, false)
+	return m.composerVertical.moveVisual(m.input, caret, direction, layout.positions)
+}
+
+func renderComposerTextRow(row composerTextRow, width int, normal, selected lipgloss.Style, start, end int, selecting bool) string {
+	var out, run strings.Builder
+	columns := 0
+	active := false
+	flush := func() {
+		if run.Len() == 0 {
+			return
+		}
+		style := normal
+		if active {
+			style = selected
+		}
+		out.WriteString(style.Render(run.String()))
+		run.Reset()
 	}
-	rows := make([]string, 0, len(input)+fixed)
+	for _, glyph := range row.glyphs {
+		if columns+glyph.width > width {
+			break
+		}
+		next := selecting && glyph.source >= start && glyph.source < end
+		if next != active {
+			flush()
+			active = next
+		}
+		run.WriteString(glyph.text)
+		columns += glyph.width
+	}
+	if active {
+		flush()
+		active = false
+	}
+	run.WriteString(strings.Repeat(" ", max(0, width-columns)))
+	flush()
+	return out.String()
+}
+
+// composerInputVisible mirrors the main-view guards; review bars and overlays
+// must not expose the hidden draft to mouse selection.
+func (m *ui) composerInputVisible() bool {
+	return m.width >= minWidth && m.height >= minHeight && m.mode != modeSetup && m.pending == nil &&
+		!m.keyModal.open && !m.consentVisible() && !m.askVisible() && !m.dialog.open &&
+		!m.agentInspectionVisible() && !m.toolInspectionVisible()
+}
+
+func (m *ui) composerViewportBounds(view composerViewport) (left, top, width, rows int) {
+	header := len(m.header())
+	body := max(1, m.height-header-len(view.rows)-view.fixed-view.popupRows-m.statusLineHeight())
+	return view.left, header + body + view.popupRows + view.textOffset, view.width, len(view.rows)
+}
+
+// composerTextBounds returns the screen-coordinate text area, excluding the
+// separator, border, prompt/prefix, and status bar. Rows count only visible
+// wrapped input rows (or placeholder rows for the empty draft).
+func (m *ui) composerTextBounds() (left, top, width, rows int) {
+	if !m.composerInputVisible() {
+		return 0, 0, 0, 0
+	}
+	return m.composerViewportBounds(m.composerTextViewport())
+}
+
+// composerCaretAt chooses the nearest source insertion point on a visible
+// input row. Horizontal coordinates may extend beyond the input area during
+// a drag; vertical coordinates outside its visible rows are not input hits.
+func (m *ui) composerCaretAt(x, y int) (int, bool) {
+	if !m.composerInputVisible() {
+		return 0, false
+	}
+	view := m.composerTextViewport()
+	left, top, width, rows := m.composerViewportBounds(view)
+	row := y - top
+	if row < 0 || row >= rows {
+		return 0, false
+	}
+	column := min(width, max(0, x-left))
+	best, distance, bestColumn := 0, int(^uint(0)>>1), int(^uint(0)>>1)
+	for _, point := range view.rows[row].points {
+		delta := point.column - column
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta < distance || (delta == distance && point.column < bestColumn) {
+			best, distance, bestColumn = point.caret, delta, point.column
+		}
+	}
+	return best, true
+}
+
+// composerLines reserves its own viewport rows; a long draft shows its editable
+// tail, or the active selection end, without displacing the other screen rows.
+func (m *ui) composerLines() []string {
+	if m.pending != nil {
+		return m.reviewActionLines()
+	}
+	width := m.width
+	view := m.composerTextViewport()
+	style, fixed, inputWidth := view.style, view.fixed, view.width
+	start, end, selecting := m.edit.selectionRange(m.input)
+	normal := withBase(m.theme.Normal, m.theme.Base)
+	if view.placeholder {
+		normal = withBase(m.theme.Muted, m.theme.Base)
+	}
+	selected := textSelectionStyle(m.theme)
+	rows := make([]string, 0, len(view.rows)+fixed)
 	gap := m.theme.Base.Render(fit("", width))
 	rows = append(rows, gap)
 	topLeft, topRight, bottomLeft, bottomRight, horizontal, vertical := roundedBoxRunes(m.composerASCII())
@@ -131,43 +385,28 @@ func (m *ui) composerLines() []string {
 	} else if style == "rounded" {
 		rows = append(rows, withBase(m.theme.Border, m.theme.Base).Render(topLeft+strings.Repeat(horizontal, width-2)+topRight))
 	}
-	for i, line := range input {
+	for i, line := range view.rows {
+		content := renderComposerTextRow(line, inputWidth, normal, selected, start, end, selecting)
 		switch style {
 		case "bordered":
-			inner := withBase(m.theme.Normal, m.theme.Base).Render(fit(line, width-4))
-			if placeholder {
-				inner = withBase(m.theme.Muted, m.theme.Base).Render(fit(line, width-4))
-			}
 			border := withBase(m.theme.Border, m.theme.Base)
-			rows = append(rows, border.Render(vertical+" ")+inner+border.Render(" "+vertical))
+			rows = append(rows, border.Render(vertical+" ")+content+border.Render(" "+vertical))
 		case "rounded":
 			// The prompt glyph marks the draft's first row; wrapped rows
 			// continue under the text column, inside the box.
 			prompt := strings.Repeat(" ", runewidth.StringWidth(composerPrompt))
-			if i == 0 && hidden == 0 {
+			if i == 0 && view.hidden == 0 {
 				prompt = composerPrompt
 			}
-			inner := withBase(m.theme.Normal, m.theme.Base).Render(fit(line, inputWidth))
-			if placeholder {
-				inner = withBase(m.theme.Muted, m.theme.Base).Render(fit(line, inputWidth))
-			}
 			border := withBase(m.theme.Border, m.theme.Base)
-			rows = append(rows, border.Render(vertical+" ")+withBase(m.theme.Normal, m.theme.Base).Render(prompt)+inner+border.Render(" "+vertical))
+			rows = append(rows, border.Render(vertical+" ")+withBase(m.theme.Normal, m.theme.Base).Render(prompt)+content+border.Render(" "+vertical))
 		case "chatter":
 			prefix := "      "
 			if i == 0 {
 				prefix = "You › "
 			}
-			content := withBase(m.theme.Normal, m.theme.Base).Render(fit(line, inputWidth))
-			if placeholder {
-				content = withBase(m.theme.Muted, m.theme.Base).Render(fit(line, inputWidth))
-			}
 			rows = append(rows, withBase(m.theme.Selected, m.theme.Base).Render(prefix)+content)
 		default:
-			content := withBase(m.theme.Normal, m.theme.Base).Render(fit(line, width))
-			if placeholder {
-				content = withBase(m.theme.Muted, m.theme.Base).Render(fit(line, width))
-			}
 			rows = append(rows, content)
 		}
 	}

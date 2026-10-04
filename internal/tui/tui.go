@@ -83,7 +83,9 @@ type ui struct {
 	input              []rune
 	edit               editState // composer cursor + kill ring (specs/tool-rendering-terminal-keys)
 	composerVertical   composerVerticalMover
-	escPrefix          bool // armed after ESC: Return inside the decay window inserts a newline
+	selection          textSelectionState // transient mouse selection; never persisted or sent to the model
+	clipboard          clipboardState     // asynchronous system clipboard writes and transient feedback
+	escPrefix          bool               // armed after ESC: Return inside the decay window inserts a newline
 	lines              []string
 	lineStyles         []lipgloss.Style
 	lineSpans          [][]likhaui.Swatch
@@ -482,6 +484,7 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		m.history = v.History
 		m.persist()
 	case "ask":
+		m.clearTextSelection()
 		// One blocking ask_user broker waits on the reply channel; this
 		// opens the interactive question. The reply has room for one
 		// send, exactly once, and stale duplicates are dropped here.
@@ -502,6 +505,7 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		m.markAwaitingAnswer(ask.CallID)
 		return nil
 	case "consent":
+		m.clearTextSelection()
 		m.openConsent(v.Consent)
 		return nil
 	case "context":
@@ -534,6 +538,7 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		m.streamBuf.WriteString(v.Text)
 		m.entries[m.streaming].content = m.streamBuf.String()
 	case "approval":
+		m.clearTextSelection()
 		m.hideActivity()
 		m.closeReasoning()
 		if m.cancelling {
@@ -999,8 +1004,25 @@ func (m *ui) recalculateContext(messages []model.Message) {
 }
 
 func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	sessionBefore := m.snapshot.ID
+	defer func() {
+		// A selection belongs only to the main surface and the session that
+		// displayed it. Opening a review/overlay must never leave stale copy
+		// targets behind, especially behind an authentication form.
+		if m.snapshot.ID != sessionBefore {
+			m.clearTextSelection()
+			m.clearClipboardNotice()
+		} else if !m.selectionSurfaceVisible() {
+			// Reviews forbid text selection, but their scrollbar still owns
+			// the entire press/drag/release gesture across Update and View.
+			m.clearUnavailableTextSelection()
+			m.clearClipboardNotice()
+		}
+	}()
 	switch v := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.clearTextSelection()
+		m.composerVertical.reset()
 		m.width, m.height = v.Width, v.Height
 		m.layoutWidth = 0
 		if m.pending != nil {
@@ -1011,6 +1033,11 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reviewSeen = make([]bool, m.pageCount())
 			m.markSeenFromScroll()
 		}
+		return m, nil
+	case clipboardResultMsg:
+		return m, m.handleClipboardResult(v)
+	case clipboardNoticeExpiredMsg:
+		m.handleClipboardNoticeExpired(v)
 		return m, nil
 	case updateAvailableMsg:
 		if v.version != "" {
@@ -1092,6 +1119,13 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.handleAgentInspectionMouse(v) || m.handleToolInspectionMouse(v) {
+			return m, nil
+		}
+		if m.handleTextSelectionMouse(v) {
+			return m, nil
+		}
+		// Main-surface mouse events must not scroll content behind overlays.
+		if m.keyModal.open || m.dialog.open || m.askVisible() || m.consentVisible() {
 			return m, nil
 		}
 		// The scrollbar column claims clicks and drags; anywhere else, the
@@ -1265,10 +1299,15 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setup.stage = setupModel
 		return m, nil
 	case tea.KeyMsg:
+		m.endTextSelectionDrag()
 		inputBeforeKey := string(m.input)
+		caretBeforeKey := m.edit.caret
 		defer func() {
 			if string(m.input) != inputBeforeKey {
 				m.composerVertical.reset()
+			}
+			if string(m.input) != inputBeforeKey || m.edit.caret != caretBeforeKey {
+				m.clearTranscriptSelection()
 			}
 		}()
 		if m.mode == modeSetup {
@@ -1286,6 +1325,31 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if handled, cmd := m.handleConsentKey(v); handled {
 			m.layoutWidth = 0
 			return m, cmd
+		}
+		if m.selectionSurfaceVisible() {
+			if v.String() == "alt+c" {
+				return m, m.copyText(m.selectedText())
+			}
+			if v.String() == "esc" && m.textSelectionActive() {
+				m.escPrefix = false
+				m.clearTextSelection()
+				return m, nil
+			}
+			// An existing input range owns ordinary arrows before completion
+			// popups. Once collapsed, the next arrow resumes popup navigation.
+			if _, _, selected := m.edit.selectionRange(m.input); selected {
+				switch v.String() {
+				case "left", "right", "up", "down":
+					m.handleComposerSelectionKey(v)
+					m.layoutWidth = 0
+					return m, nil
+				}
+			}
+			if v.String() == "up" || v.String() == "down" {
+				// Completion navigation should remain visible after returning
+				// from an output selection's frozen popup geometry.
+				m.clearTranscriptSelection()
+			}
 		}
 		// The @ completion popup claims navigation and completion keys only
 		// while it has rows; everything else keeps editing the draft.
@@ -1322,6 +1386,14 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.composerVertical.reset()
 			}
 			return updated, cmd
+		}
+		// Keyboard actions that replace or reflow the transcript release its
+		// frozen selection before inspection, expansion, or submission runs.
+		switch v.String() {
+		case "enter", "tab", "shift+tab", "ctrl+o", "ctrl+g":
+			if m.selectionSurfaceVisible() {
+				m.clearTranscriptSelection()
+			}
 		}
 		if m.pending == nil {
 			if handled, cmd := m.handleAgentInspection(v); handled {
@@ -1380,6 +1452,10 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.resumeAfterApproval()
 			}
 		}
+		if m.handleComposerSelectionKey(v) {
+			m.layoutWidth = 0
+			return m, nil
+		}
 		// Composer arrows are history/caret navigation only after overlays
 		// have declined them. Popups, the review gate, dialogs, and key modal
 		// therefore retain ownership of their navigation keys.
@@ -1396,6 +1472,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc":
 			m.toolCatalogGen++
 			if m.working {
+				m.clearTextSelection()
 				if m.cancelling {
 					// The run has not acknowledged the first cancel; a
 					// second press stops waiting for it.
@@ -1448,6 +1525,15 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if deleteBack(&m.input, &m.edit) {
 					m.promptHistory.resetNavigation()
 				}
+				if cmd := m.syncPopups(); cmd != nil {
+					m.layoutWidth = 0
+					return m, cmd
+				}
+			}
+		case "delete":
+			if m.editable() && deleteForward(&m.input, &m.edit) {
+				m.caretNote()
+				m.promptHistory.resetNavigation()
 				if cmd := m.syncPopups(); cmd != nil {
 					m.layoutWidth = 0
 					return m, cmd

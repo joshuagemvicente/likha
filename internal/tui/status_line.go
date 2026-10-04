@@ -94,6 +94,15 @@ func (m *ui) statusHints(page, pages int, narrow bool) []string {
 		}
 		return []string{kind + " · " + position + " · " + controls, "Review " + position + " " + compact}
 	}
+	if notice := m.clipboardHint(); notice != "" {
+		return []string{notice + " · " + position, notice}
+	}
+	if m.textSelectionActive() {
+		if m.working {
+			return []string{"Alt+C copy · Esc unselect · Ctrl+C cancel · " + position, "Alt+C copy · Esc unselect · ^C cancel", "Alt+C copy · Esc unselect"}
+		}
+		return []string{"Alt+C copy · Esc unselect · " + position, "Alt+C copy · Esc unselect"}
+	}
 	state := m.statusState()
 	if _, ok := m.focusedThoughtEntry(); ok {
 		if m.working {

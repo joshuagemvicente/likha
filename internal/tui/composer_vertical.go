@@ -135,6 +135,16 @@ func (m *composerVerticalMover) reset() {
 func (m *composerVerticalMover) move(input []rune, caret, width, direction int) (newCaret int, moved bool) {
 	caret = min(len(input), max(0, caret))
 	positions := composerVisualPositions(input, width)
+	return m.moveVisual(input, caret, direction, positions)
+}
+
+// moveVisual accepts the same insertion-point map used by the active renderer.
+// Selection omits the synthetic caret cell, unlike ordinary draft navigation.
+func (m *composerVerticalMover) moveVisual(input []rune, caret, direction int, positions []composerVisualPosition) (newCaret int, moved bool) {
+	caret = min(len(input), max(0, caret))
+	if len(positions) != len(input)+1 {
+		return caret, false
+	}
 	if !m.hasPreferredColumn {
 		m.preferredColumn = positions[caret].column
 		m.hasPreferredColumn = true

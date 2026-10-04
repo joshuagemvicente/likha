@@ -34,7 +34,13 @@ func (m *ui) header() []string {
 }
 
 func (m *ui) bodyHeight() int {
-	return max(1, m.height-len(m.header())-len(m.composerLines())-max(len(m.mentionLines()), len(m.commandLines()))-m.statusLineHeight())
+	if m.transcriptSelectionFrozen() {
+		return m.selection.snapshot.body
+	}
+	if m.composerSelectionGestureFrozen() {
+		return m.selection.composerGesture.body
+	}
+	return max(1, m.height-len(m.header())-len(m.composerLines())-len(m.mentionLines())-len(m.commandLines())-m.statusLineHeight())
 }
 
 func (m *ui) pageCount() int {
@@ -43,7 +49,7 @@ func (m *ui) pageCount() int {
 	if body <= 0 {
 		return 1
 	}
-	return max(1, (len(m.lines)+body-1)/body)
+	return max(1, (m.transcriptLineCount()+body-1)/body)
 }
 
 // rebuild lays out content only when the viewport or content changes. The
@@ -51,6 +57,12 @@ func (m *ui) pageCount() int {
 // lineStyles mirrors m.lines so body lines can carry entry-level styling
 // (reasoning output renders muted).
 func (m *ui) rebuild() {
+	if m.transcriptSelectionFrozen() {
+		return
+	}
+	if m.selection.snapshot != nil {
+		m.clearTranscriptSelection()
+	}
 	if m.layoutWidth == m.width && m.lines != nil {
 		return
 	}
@@ -281,6 +293,9 @@ func (m *ui) transcriptBlock(e entry) (glyph string, style lipgloss.Style, band 
 }
 
 func (m *ui) View() string {
+	if !m.selectionSurfaceVisible() {
+		m.clearUnavailableTextSelection()
+	}
 	if m.width <= 0 || m.height <= 0 {
 		return ""
 	}
@@ -317,13 +332,19 @@ func (m *ui) View() string {
 // the bottom.
 func (m *ui) mainView() string {
 	m.rebuild()
-	header := m.header()
-	composer := m.composerLines()
-	mention := m.mentionLines()
-	command := m.commandLines()
-	body := max(1, m.height-len(header)-len(composer)-len(mention)-len(command)-m.statusLineHeight())
+	var header, composer, mention, command []string
+	if m.transcriptSelectionFrozen() {
+		s := m.selection.snapshot
+		header, composer, mention, command = s.header, s.composer, s.mention, s.command
+	} else if m.composerSelectionGestureFrozen() {
+		gesture := m.selection.composerGesture
+		header, composer, mention, command = gesture.header, m.composerLines(), gesture.mention, gesture.command
+	} else {
+		header, composer, mention, command = m.header(), m.composerLines(), m.mentionLines(), m.commandLines()
+	}
+	body := m.bodyHeight()
 	m.clampScroll()
-	pages := max(1, (len(m.lines)+body-1)/body)
+	pages := max(1, (m.transcriptLineCount()+body-1)/body)
 	// The indicator names the page containing the viewport's bottom edge, so
 	// the pinned (bottom) view always reads as the last page.
 	page := (m.scroll + body - 1) / body
@@ -338,21 +359,28 @@ func (m *ui) mainView() string {
 	}
 	start := m.scroll
 	blinkOff := m.toolBlinkOff()
+	lines, styles, lineSpans, lineRuns, activity := m.lines, m.lineStyles, m.lineSpans, m.lineRuns, m.lineActivity
+	activityFrame := m.activityFrame
+	if m.transcriptSelectionFrozen() {
+		s := m.selection.snapshot
+		lines, styles, lineSpans, lineRuns, activity = s.lines, s.lineStyles, s.lineSpans, s.lineRuns, s.lineActivity
+		activityFrame, blinkOff = s.activityFrame, s.blinkOff
+	}
 	for i := range body {
 		line := ""
 		style := m.theme.Base
 		var spans []likhaui.Swatch
 		var runs []lineRun
-		if start+i < len(m.lines) {
-			line = m.lines[start+i]
-			if start+i < len(m.lineStyles) {
-				style = withBase(m.lineStyles[start+i], m.theme.Base)
+		if start+i < len(lines) {
+			line = lines[start+i]
+			if start+i < len(styles) {
+				style = withBase(styles[start+i], m.theme.Base)
 			}
-			if start+i < len(m.lineSpans) {
-				spans = m.lineSpans[start+i]
+			if start+i < len(lineSpans) {
+				spans = lineSpans[start+i]
 			}
-			if start+i < len(m.lineRuns) {
-				runs = m.lineRuns[start+i]
+			if start+i < len(lineRuns) {
+				runs = lineRuns[start+i]
 			}
 		}
 		// Style the padded line: foreground on padding spaces is invisible,
@@ -361,10 +389,10 @@ func (m *ui) mainView() string {
 		// (same indices, cleared with them in rebuild) so stale swatches
 		// can never paint a reused row.
 		fitted := fit(line, m.width)
-		if start+i < len(m.lineActivity) && m.lineActivity[start+i] {
+		if start+i < len(activity) && activity[start+i] {
 			muted := withBase(m.theme.Muted, m.theme.Base)
 			accent := withBase(m.theme.Title, m.theme.Base)
-			rows = append(rows, renderActivityRow(fitted, line, m.activityFrame, muted, accent))
+			rows = append(rows, renderActivityRow(fitted, line, activityFrame, muted, accent))
 			continue
 		}
 		if len(runs) > 0 {
@@ -372,6 +400,9 @@ func (m *ui) mainView() string {
 			continue
 		}
 		rows = append(rows, renderSwatches(style, spans, fitted))
+	}
+	for i := range body {
+		rows[len(header)+i] = m.highlightTranscriptSelection(start+i, rows[len(header)+i])
 	}
 	m.spliceScrollbar(rows, len(header), body)
 	rows = append(rows, mention...)
@@ -612,6 +643,16 @@ func hiddenReviewRune(r rune) bool {
 }
 
 func fit(text string, width int) string {
+	text = fitText(text, width)
+	if columns := runewidth.StringWidth(text); columns < width {
+		text += strings.Repeat(" ", width-columns)
+	}
+	return text
+}
+
+// fitText is fit without the canvas padding: selection copies these visible
+// cells, preserving source whitespace rather than trimming code indentation.
+func fitText(text string, width int) string {
 	var b strings.Builder
 	columns := 0
 	for _, r := range text {
@@ -631,9 +672,6 @@ func fit(text string, width int) string {
 		}
 		b.WriteRune(r)
 		columns += size
-	}
-	if columns < width {
-		b.WriteString(strings.Repeat(" ", width-columns))
 	}
 	return b.String()
 }
