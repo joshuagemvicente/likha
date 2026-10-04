@@ -69,7 +69,11 @@ func (m *ui) acceptTaskRecord(record explore.Record) {
 			}
 		}
 	}
-	if previous != record.Status {
+	// The transcript announces a task once when it appears and once when it
+	// settles. Live churn (queued ↔ running ↔ waiting-for-child) happens every
+	// model round because the explore loop re-queues for its permit; the
+	// task row and /agents show that live state instead.
+	if !found || previous != record.Status && taskSettled(record.Status) {
 		parent := "main"
 		if record.ParentID != "" {
 			parent = record.ParentID
@@ -84,6 +88,15 @@ func (m *ui) acceptTaskRecord(record explore.Record) {
 	// The runtime's private SaveTask path durably records every child update.
 	// This single UI writer coordinates the display snapshot across siblings.
 	m.persist()
+}
+
+// taskSettled reports whether a task state is final rather than live.
+func taskSettled(status explore.State) bool {
+	switch status {
+	case explore.Queued, explore.Running, explore.Waiting:
+		return false
+	}
+	return true
 }
 
 func (m *ui) inspectFocusedTask(msg tea.KeyMsg) (bool, tea.Cmd) {
