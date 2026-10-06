@@ -424,6 +424,29 @@ func TestClientEstimateCountsOnlySentReplay(t *testing.T) {
 	}
 }
 
+// The idle estimate is for the history a new prompt will follow: own
+// signatures are still sent, but the prompt starts a new Gemini turn, so no
+// call gets the skip value.
+func TestClientHistoryEstimateCountsNoSkipValue(t *testing.T) {
+	client, err := New("https://generativelanguage.googleapis.com/v1beta/openai", "local-model", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := replayHistory(t, client.ReplaySource())
+	base, ok := EstimateInputTokens(client.Model(), history, nil)
+	if !ok {
+		t.Fatal("base estimate unavailable")
+	}
+	ownSignature, _ := estimateTextTokens("sig")
+	skipValue, _ := estimateTextTokens(skipThoughtSignature)
+	if got, ok := client.EstimateHistoryTokens(history); !ok || got != base+ownSignature {
+		t.Fatalf("history estimate = %d, %v; want %d", got, ok, base+ownSignature)
+	}
+	if got, ok := client.EstimateInputTokens(history, nil); !ok || got != base+ownSignature+skipValue {
+		t.Fatalf("request estimate = %d, %v; want %d", got, ok, base+ownSignature+skipValue)
+	}
+}
+
 // UnsignedOnly keeps what stays valid after the message changes: unsigned
 // reasoning text. Signed or encrypted parts go, and nothing left means nil,
 // never a Source-only value that would claim the issuer sent nothing.

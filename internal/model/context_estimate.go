@@ -54,14 +54,27 @@ func EstimateInputTokens(modelID string, messages []Message, tools []ToolDefinit
 }
 
 // EstimateInputTokens is the package-level estimate plus the replay state
-// this client would send with messages, and nothing it would leave out. A nil
-// client sends no replay state.
+// this client would send with messages as one request, and nothing it would
+// leave out. A nil client sends no replay state.
 func (c *Client) EstimateInputTokens(messages []Message, tools []ToolDefinition) (int64, bool) {
+	return c.estimateWithReplay(messages, tools, currentTurnStart(messages))
+}
+
+// EstimateHistoryTokens estimates messages as the history a new user prompt
+// will follow, which is what the next request sends while the session is
+// idle. That prompt starts a new Gemini turn, so no call in messages gets the
+// skip value; counting it would overstate the request (spec rule 14).
+func (c *Client) EstimateHistoryTokens(messages []Message) (int64, bool) {
+	return c.estimateWithReplay(messages, nil, len(messages))
+}
+
+// estimateWithReplay adds to the package-level estimate the replay text sent
+// for each message, given the index where the request's current turn starts.
+func (c *Client) estimateWithReplay(messages []Message, tools []ToolDefinition, turnStart int) (int64, bool) {
 	total, ok := EstimateInputTokens(c.Model(), messages, tools)
 	if !ok || c == nil {
 		return total, ok
 	}
-	turnStart := currentTurnStart(messages)
 	for i, message := range messages {
 		for _, text := range c.replaySentText(message, i >= turnStart) {
 			tokens, ok := estimateTextTokens(text)

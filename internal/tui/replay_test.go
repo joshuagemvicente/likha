@@ -48,3 +48,30 @@ func TestRejectedReplayTurnErrorCarriesHint(t *testing.T) {
 		})
 	}
 }
+
+// At idle the next request starts with a new prompt, which starts a new
+// Gemini turn, so a foreign tool call at the end of history gets no skip
+// value and the estimate must not count one (spec rule 14).
+func TestIdleContextEstimateCountsNoSkipValue(t *testing.T) {
+	client, err := model.New("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3-pro-preview", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The last turn ran a tool call on another provider, then /models
+	// switched to Gemini.
+	history := []model.Message{
+		{Role: "user", Content: "read the file"},
+		{Role: "assistant", ToolCalls: []model.ToolCall{{ID: "c1", Name: "read", Arguments: `{"path":"a.go"}`}}},
+		{Role: "tool", ToolCallID: "c1", Content: "package a"},
+		{Role: "assistant", Content: "done"},
+	}
+	want, ok := model.EstimateInputTokens(client.Model(), history, nil)
+	if !ok {
+		t.Fatal("base estimate unavailable")
+	}
+	m := NewUI("/sample", nil, client, "", providers.Connection{Provider: "Google Gemini", Verified: true}, t.TempDir(), nil, session.Snapshot{})
+	m.recalculateContext(history)
+	if !m.contextSeen || m.contextTokens != want {
+		t.Fatalf("idle estimate = %d (seen %v), want %d with no skip value", m.contextTokens, m.contextSeen, want)
+	}
+}
