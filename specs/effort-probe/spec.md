@@ -1,8 +1,9 @@
 # Feature: Effort probe (live evidence for enabling reasoning effort)
 
-**Status:** planned — decisions recorded 2026-10-06 (user delegated defaults);
-no implementation started. Requirement: v1-spec FR-40 (to be amended into
-[v1-spec.md](../v1-spec.md) by the coordinator before implementation).
+**Status:** implemented (local) 2026-10-06 — automated suite green; live
+probe outstanding (user-run, tasks T16), and Claude's native `output_config`
+shape waits for claude-native. Decisions recorded 2026-10-06 (user delegated
+defaults). Requirement: [v1-spec FR-40](../v1-spec.md).
 Gates [model-effort](../model-effort/spec.md) task T20 and the effort wire of
 [claude-native](../claude-native/spec.md) (FR-38, decision 8).
 

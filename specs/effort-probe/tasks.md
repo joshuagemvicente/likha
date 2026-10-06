@@ -10,7 +10,7 @@ Before M1: the coordinator amends FR-40 into `v1-spec.md`.
 
 ## M1 — Seams in `internal/model`
 
-- [ ] **T1. Reported-reasoning flag.** Add `reasoningSeen bool` to
+- [x] **T1. Reported-reasoning flag.** Add `reasoningSeen bool` to
       `usageDetail` and `ReasoningSeen bool` to `RequestUsage`, set when the
       usage object names a valid reasoning count
       (`completion_tokens_details.reasoning_tokens` or
@@ -19,7 +19,7 @@ Before M1: the coordinator amends FR-40 into `v1-spec.md`.
       (spec points 11–12).
       *Verify:* `usage_report` test cases: count present, count zero,
       field absent, on both the chat-completions and the Codex usage parser.
-- [ ] **T2. Observed fork.** Add `(*Client).ForkWithTransport(wrap
+- [x] **T2. Observed fork.** Add `(*Client).ForkWithTransport(wrap
       func(http.RoundTripper) http.RoundTripper) (*Client, error)` in
       `fork.go`, next to `ForkForTask`, which already wraps the transport.
       The probe uses it to see each request's status code, header latency
@@ -31,7 +31,7 @@ Before M1: the coordinator amends FR-40 into `v1-spec.md`.
       post-401 retry; the parent client's transport is unchanged; OAuth
       refresh requests (sent through the OAuth session's own HTTP client)
       do not pass through it.
-- [ ] **T3. No other change to model-effort code.** The probe forces the
+- [x] **T3. No other change to model-effort code.** The probe forces the
       wire with `SetEffort` on its own fork, and resolves levels by calling
       `EffortLevels` with a local copy of the provider whose `Effort` is set
       to the shape under test. `model.Providers` is never written. Claude's
@@ -44,7 +44,7 @@ Before M1: the coordinator amends FR-40 into `v1-spec.md`.
 Imports only `model` and `model/catalog`. No `providers`, `tui` or
 `bubbletea`: `app` resolves credentials and hands over a ready client.
 
-- [ ] **T4. Plan.** `type Plan struct` with provider row, model ID, shapes,
+- [x] **T4. Plan.** `type Plan struct` with provider row, model ID, shapes,
       levels (each with `Published bool`), level source, endpoint override
       flag and caps. `NewPlan(p model.Provider, modelID string, live
       []string, opts Options) (Plan, error)` applies spec points 3–5 and
@@ -64,19 +64,19 @@ Imports only `model` and `model/catalog`. No `providers`, `tui` or
       `--probe-wire` on `chatgpt` (error), `--probe-levels` with unpublished
       and invalid names, no levels, no provider, an endpoint override, and a
       plan that exceeds 17.
-- [ ] **T5. Probe task.** A versioned constant (`probeTaskVersion = 1`):
+- [x] **T5. Probe task.** A versioned constant (`probeTaskVersion = 1`):
       a system message, the user prompt (sum of primes below 60, report it
       with the tool), and one tool `record_answer` with an integer
       `answer` parameter. `EstimateInputTokens` gives the cost estimate's
       input size.
       *Verify:* the tool definition passes `Client.stream`'s validation and
       `BuildCodexRequest`; the estimate is positive.
-- [ ] **T6. Cost estimate.** `Estimate(plan) CostEstimate` uses
+- [x] **T6. Cost estimate.** `Estimate(plan) CostEstimate` uses
       `model.ModelPrice` and `model.IsSubscription` with the assumed 3,000
       output tokens per request. It returns one of: dollars, unknown price,
       or subscription. The text follows spec point 6.
       *Verify:* priced, unpriced and `chatgpt` cases.
-- [ ] **T7. Runner.** `Run(ctx, client *model.Client, plan Plan, out
+- [x] **T7. Runner.** `Run(ctx, client *model.Client, plan Plan, out
       Reporter) (Report, error)`:
       - forks the client per request with `ForkWithTransport`, wrapping a
         recorder that keeps the last status, time to headers and the effort
@@ -98,7 +98,7 @@ Imports only `model` and `model/catalog`. No `providers`, `tui` or
         are inconclusive with reason `skipped: <cause>`;
       - never retries a row (decision 10).
       *Verify:* httptest servers per case in T9.
-- [ ] **T8. Verdicts.** A pure function over the finished rows implements
+- [x] **T8. Verdicts.** A pure function over the finished rows implements
       spec points 12–20: per-shape signal choice, varied/flat/unmeasured
       (≤10% or ≤32 tokens), control result, `same as` notes, Default
       verdict, per-shape eligibility and the recommended shape.
@@ -109,7 +109,7 @@ Imports only `model` and `model/catalog`. No `providers`, `tui` or
       (completion fallback for the whole shape), no usage (unmeasured), one
       rejected level, one inconclusive level, Default 400 with a later
       success, both shapes eligible.
-- [ ] **T9. Engine tests with fake providers.** In
+- [x] **T9. Engine tests with fake providers.** In
       `internal/effortprobe/probe_test.go`, an `httptest` chat-completions
       server parameterised by behavior: *honors* (reasoning tokens scale
       with level), *rejects* a named level with 400, *ignores* (constant
@@ -127,12 +127,12 @@ Imports only `model` and `model/catalog`. No `providers`, `tui` or
 
 ## M3 — Output
 
-- [ ] **T10. Table.** Plain-text table on stdout, one row per request as it
+- [x] **T10. Table.** Plain-text table on stdout, one row per request as it
       ends, then the per-shape summary and the heuristic disclaimer
       (spec point 19). No color, no Nerd Font glyphs.
       *Verify:* golden test at a fixed clock with the T9 *honors* and
       *ignores* runs.
-- [ ] **T11. JSON report.** `report.go` with `formatVersion = 1`, fields of
+- [x] **T11. JSON report.** `report.go` with `formatVersion = 1`, fields of
       spec point 24, `json:"snake_case"` tags. Error text passes through
       `redact(text, secrets...)`, which replaces each secret (API key, OAuth
       access and refresh tokens) with `[redacted]`, then truncates to 1 KiB.
@@ -148,7 +148,7 @@ Imports only `model` and `model/catalog`. No `providers`, `tui` or
 
 ## M4 — CLI wiring (`internal/app`)
 
-- [ ] **T12. Flags.** In `run.go` add `--probe-effort`, `--probe-wire`,
+- [x] **T12. Flags.** In `run.go` add `--probe-effort`, `--probe-wire`,
       `--probe-levels`, `--yes`, and their help text in `usageFooter`. Branch
       to `effortProbeFlow` right after the `--login` branch, before the
       repository is resolved. Enforce spec points 1 and 3, including a
@@ -156,7 +156,7 @@ Imports only `model` and `model/catalog`. No `providers`, `tui` or
       *Verify:* `run_test.go` cases for each usage error, each exiting 2,
       including a stored `config.json` provider and model with no
       `--provider`/`--model`.
-- [ ] **T13. `effortProbeFlow`** in a new `internal/app/effort_probe.go`:
+- [x] **T13. `effortProbeFlow`** in a new `internal/app/effort_probe.go`:
       - resolve the state directory; take the provider and model from the
         flags (which carry `LIKHA_PROVIDER`/`LIKHA_MODEL`) only, never from
         `providers.LoadStoredConfig`;
@@ -176,7 +176,7 @@ Imports only `model` and `model/catalog`. No `providers`, `tui` or
       `--endpoint`: `config.json` and `providers.json` bytes unchanged,
       `--api-key` not stored, declined prompt sends no `POST`, a 401 run
       still writes a report.
-- [ ] **T14. Integration test.** In `tests/integration/cli_test.go`: exec
+- [x] **T14. Integration test.** In `tests/integration/cli_test.go`: exec
       `go run ./cmd/likha --probe-effort --provider openai --endpoint
       <httptest> --model gpt-5.5 --api-key test-key-… --yes` with a temp
       `LIKHA_STATE_DIR`; assert exit 0, a report under `effort-probes/` with
@@ -186,7 +186,7 @@ Imports only `model` and `model/catalog`. No `providers`, `tui` or
 
 ## M5 — Docs, then user-run probes
 
-- [ ] **T15. Docs.** `docs/providers.md` § Reasoning effort: how to run the
+- [x] **T15. Docs.** `docs/providers.md` § Reasoning effort: how to run the
       probe, what it costs, what the verdicts mean, and that it changes no
       setting. `docs/usage.md`: the flags. `--help` text matches.
       `CHANGELOG.md` **Unreleased**: the probe mode, verified by automated
@@ -217,3 +217,52 @@ Imports only `model` and `model/catalog`. No `providers`, `tui` or
       *Verify:* each recorded row names a report file the user produced;
       each enabling change cites a `passed` report without an endpoint
       override.
+
+## Implementation notes (2026-10-06)
+
+Landed M1–M4 and T15 on `feat/effort-probe`. T16 stays open: it records
+reports the user produces. Where the result differs from the plan:
+
+- **T7, budget.** A row whose request the provider answered with an error
+  status (400, 401, 429, 5xx…) counts 0 completion tokens, not 3,000: an
+  error status generated no output. The assumed 3,000 applies to rows that
+  may have generated without reporting it: an answer without usage, a
+  timeout, a dropped stream, or a lost connection.
+- **T7, retries.** model-recovery (FR-36) has not landed, so there is no
+  `model.WithoutRetry` or `StreamError` to adopt. `Client.stream` makes one
+  attempt today (its `stream_options` fallback counts as one row), so
+  decision 10 holds; the probe must adopt both when FR-36 lands.
+- **T3/T4, Claude native.** `EffortAnthropic` does not exist on this branch,
+  so `claude` is probed on the OpenAI-compatible endpoint with
+  `reasoning_effort` and the spec point 5 note. Probing `output_config:
+  {effort}` is a follow-up once claude-native lands; `--probe-wire` stays
+  allowed on `claude` until then, since the compat route is chat completions.
+- **T8, control and Default.** A control answered with 400/422 is
+  `validated` only when Default succeeded; otherwise it is inconclusive,
+  since the model's own default may be what the provider refused (point 13
+  applied to the control). A level's 400/422 while Default was inconclusive
+  (for example a 429) is inconclusive too: `rejected` needs a successful
+  Default.
+- **T8, unpublished levels.** Their rows carry the note
+  `unpublished level; never counts toward eligibility`.
+- **T10, output.** As each request ends, a one-line progress row goes to
+  stderr; the table with verdicts goes to stdout once the run ends, because
+  a row's verdict depends on its whole shape (reconciles spec points 10 and
+  22). The table is one block per request rather than columns, so
+  `not reported` fits at 80 columns.
+- **T11.** Redaction also replaces URL- and JSON-escaped forms of each
+  secret and any `Bearer <token>` value. OAuth tokens known when the probe
+  starts are redacted; a token rotated mid-run is caught only by the bearer
+  pattern.
+- **T12/T13.** `effortprobe.CheckWire` lets the CLI refuse `--probe-wire` on
+  ChatGPT before resolving credentials. `LIKHA_ENDPOINT` applies to a named
+  provider in a probe (spec decision 16), although a normal run ignores it
+  for named providers. On ChatGPT the model must belong to the signed-in
+  account (`discoverOAuthModel`); a failure exits 2 before any model request.
+- **T14.** The end-to-end tests live in
+  `tests/integration/effort_probe_test.go` instead of `cli_test.go`. `go
+  run` exits 1 for any failing program, so the refused run asserts the
+  child's `exit status 2` line.
+- **Not covered by automated tests.** Real Ctrl+C (SIGINT) at the prompt or
+  mid-run. The engine's interrupted path is tested with a cancelled context,
+  and the exit-code mapping by code review only.

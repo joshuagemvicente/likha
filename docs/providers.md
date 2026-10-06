@@ -93,6 +93,23 @@ Likha sends a reasoning-effort level only to providers whose live probe shows th
 
 A probe sends one tool-bearing request at each published level of one model and records whether each was accepted, rejected, or ignored.
 
+### Running an effort probe
+
+You run the probe yourself, with your own key, and you pay for its requests. Likha never runs one on its own, and the probe never changes a setting or enables a provider.
+
+```sh
+likha --probe-effort --provider openai --model gpt-5.5 --yes
+```
+
+- **What it sends.** One request with no effort field (Default), then one per published level for each wire shape, then one with the invalid level `likha-probe-invalid` per shape. Every request asks the model to sum the primes below 60 and report the answer through one tool, so tools are present as on a real turn. Providers with a documented field are probed with that field; the relays (`opencode-zen`, `opencode-go`, `dialagram`) are probed with both `reasoning_effort` and `reasoning: {effort}`; ChatGPT uses Responses `reasoning: {effort}`. `--probe-wire top|object|both` overrides the choice on chat-completions providers.
+- **What it costs.** Before anything is sent, the probe prints the plan, the request count and an estimate such as `about $0.63 (assumes up to 3,000 output tokens per request at $30.00/M; …)`. On ChatGPT it says the requests use your plan allowance. Nothing is sent until you pass `--yes` or answer `y`. The caps are fixed: at most 17 requests, no new request once 40,000 completion tokens have been used (a request without reported usage counts as 3,000), and 180 seconds per request. A single request's output is not capped. Requests are never retried.
+- **Levels.** The probe uses the model's published levels, from the provider's live model list when it has one and otherwise from the bundled catalog. `--probe-levels a,b` names the levels instead; a name the model does not publish is marked `unpublished` and never counts toward the result. A model with no published levels needs `--probe-levels`.
+- **Verdicts.** Default is `baseline` when it succeeds. A level is `rejected` when the provider answers HTTP 400 or 422 while Default succeeded, `accepted` when it succeeds, and `ignored-suspected` when every level used about the same reasoning and the invalid level was accepted too. That last verdict is a heuristic from one request per level, not proof. Anything the probe could not judge (rate limits, server errors, timeouts, skipped rows) is `inconclusive`. The invalid control level is `validated` when the provider rejects it, which shows the field is read.
+- **Result.** For each wire shape the probe prints whether the run supports enabling: `Eligible to enable reasoning_effort for openai: yes`, or `no` with the first reason. A run against `--endpoint` is labelled `endpoint override` and is not evidence for the provider's own endpoint.
+- **Report.** A JSON report is saved in the private state directory under `effort-probes/` (mode 0600, never overwritten), and its path is printed last. Neither the report nor the printed output contains your API key, OAuth tokens or authorization headers, even when a provider echoes the key in an error.
+
+To record a result, share the report or the printed table. A provider's effort wire is enabled only in a separate, reviewed change that cites a `passed` report against that provider's own endpoint; until then its row above stays `pending-probe`.
+
 ## First-run setup (no flags needed)
 
 Run `likha` without provider configuration:
