@@ -400,3 +400,67 @@ func mustParse(t *testing.T, data []byte) *catalog.File {
 	}
 	return f
 }
+
+func TestBuildKeepsEffortLevels(t *testing.T) {
+	const upstreamRaw = `{"openai": {"id": "openai", "models": {
+	  "effort": {"id": "effort", "tool_call": true, "reasoning": true,
+	    "reasoning_options": [{"type": "effort", "values": ["none", "low", "medium", "high", "xhigh"]}]},
+	  "budget": {"id": "budget", "tool_call": true, "reasoning": true,
+	    "reasoning_options": [{"type": "budget_tokens", "min": 1024}]},
+	  "toggle-effort": {"id": "toggle-effort", "tool_call": true, "reasoning": true,
+	    "reasoning_options": [{"type": "toggle"}, {"type": "effort", "values": ["low", "high", "max"]}]},
+	  "groq-default": {"id": "groq-default", "tool_call": true, "reasoning": true,
+	    "reasoning_options": [{"type": "effort", "values": ["none", "default", "low"]}]},
+	  "plain": {"id": "plain", "tool_call": true}
+	}}}`
+	var upstream map[string]upstreamProvider
+	if err := json.Unmarshal([]byte(upstreamRaw), &upstream); err != nil {
+		t.Fatal(err)
+	}
+	providers := []model.Provider{{Name: "openai"}}
+	mapping := map[string]string{"openai": "openai"}
+	file, err := build(upstream, overridesFile{}, providers, mapping, "2026-10-06", DefaultUpstream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		model string
+		want  string
+	}{
+		{"effort", "none,low,medium,high,xhigh"},
+		{"budget", ""},
+		{"toggle-effort", "low,high,max"},
+		{"groq-default", "none,low"},
+		{"plain", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			row, ok := file.Lookup("openai", tc.model)
+			if !ok {
+				t.Fatalf("row %s missing", tc.model)
+			}
+			if got := strings.Join(row.Efforts, ","); got != tc.want {
+				t.Fatalf("Efforts = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	o := overridesFrom(t, `{"providers": {"openai": {"models": {
+	  "budget": {"efforts": ["low", "medium", "high"], "ref": "https://example.test/mapping", "verified": "2026-10-06"}}}}}`)
+	file, err = build(upstream, o, providers, mapping, "2026-10-06", DefaultUpstream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budget, _ := file.Lookup("openai", "budget")
+	if strings.Join(budget.Efforts, ",") != "low,medium,high" || strings.Join(budget.Overridden, ",") != "efforts" {
+		t.Fatalf("effort override = %+v", budget)
+	}
+
+	for _, bad := range []string{`["High"]`, `["low", "low"]`, `["default"]`, `[""]`} {
+		o := overridesFrom(t, `{"providers": {"openai": {"models": {
+		  "budget": {"efforts": `+bad+`, "ref": "https://example.test/mapping", "verified": "2026-10-06"}}}}}`)
+		if _, err := build(upstream, o, providers, mapping, "2026-10-06", DefaultUpstream); err == nil {
+			t.Fatalf("override efforts %s was accepted", bad)
+		}
+	}
+}

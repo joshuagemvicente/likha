@@ -66,6 +66,7 @@ type Model struct {
 	Output     int64    `json:"output,omitempty"`  // max output tokens
 	Cost       *Cost    `json:"cost,omitempty"`
 	Reasoning  bool     `json:"reasoning,omitempty"`
+	Efforts    []string `json:"efforts,omitempty"`    // published reasoning-effort levels in upstream order (specs/model-effort)
 	Modalities []string `json:"modalities,omitempty"` // input modalities
 	Status     string   `json:"status,omitempty"`     // upstream status, e.g. "deprecated"
 	Updated    string   `json:"updated,omitempty"`    // upstream last_updated
@@ -218,6 +219,9 @@ func validateModel(m Model) error {
 	if m.Context < 0 || m.Input < 0 || m.Output < 0 {
 		return fmt.Errorf("negative limit")
 	}
+	if err := ValidateEfforts(m.Efforts); err != nil {
+		return err
+	}
 	if m.Cost == nil {
 		return nil
 	}
@@ -253,4 +257,25 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// ValidateEfforts checks an effort list: every level is a non-empty,
+// lower-case name without spaces, and none repeats. Levels are sent to the
+// provider verbatim and matched exactly by /effort, so a malformed name must
+// fail generation instead of reaching the picker.
+func ValidateEfforts(levels []string) error {
+	seen := make(map[string]bool, len(levels))
+	for _, level := range levels {
+		if level == "" || level != strings.ToLower(level) || strings.ContainsAny(level, " \t") {
+			return fmt.Errorf("effort level %q must be a non-empty lower-case name", level)
+		}
+		if level == "default" {
+			return fmt.Errorf("effort level %q is reserved for sending no effort", level)
+		}
+		if seen[level] {
+			return fmt.Errorf("effort level %q repeats", level)
+		}
+		seen[level] = true
+	}
+	return nil
 }

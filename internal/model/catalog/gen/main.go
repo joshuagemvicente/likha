@@ -163,12 +163,13 @@ type upstreamProvider struct {
 }
 
 type upstreamModel struct {
-	Name        string `json:"name"`
-	ToolCall    bool   `json:"tool_call"`
-	Reasoning   bool   `json:"reasoning"`
-	Status      string `json:"status"`
-	LastUpdated string `json:"last_updated"`
-	Modalities  struct {
+	Name             string                    `json:"name"`
+	ToolCall         bool                      `json:"tool_call"`
+	Reasoning        bool                      `json:"reasoning"`
+	ReasoningOptions []upstreamReasoningOption `json:"reasoning_options"`
+	Status           string                    `json:"status"`
+	LastUpdated      string                    `json:"last_updated"`
+	Modalities       struct {
 		Input []string `json:"input"`
 	} `json:"modalities"`
 	Limit struct {
@@ -177,6 +178,14 @@ type upstreamModel struct {
 		Output  float64 `json:"output"`
 	} `json:"limit"`
 	Cost *upstreamCost `json:"cost"`
+}
+
+// upstreamReasoningOption is one models.dev reasoning control. Only the
+// "effort" type carries named levels; "budget_tokens" and "toggle" are
+// outside specs/model-effort and are ignored.
+type upstreamReasoningOption struct {
+	Type   string   `json:"type"`
+	Values []string `json:"values"`
 }
 
 type upstreamRates struct {
@@ -221,6 +230,7 @@ type overrideModel struct {
 	Output     *int64        `json:"output,omitempty"`
 	Cost       *overrideCost `json:"cost,omitempty"`
 	Reasoning  *bool         `json:"reasoning,omitempty"`
+	Efforts    []string      `json:"efforts,omitempty"`
 	Modalities []string      `json:"modalities,omitempty"`
 	Status     *string       `json:"status,omitempty"`
 	Drop       bool          `json:"drop,omitempty"`
@@ -352,6 +362,7 @@ func convert(um upstreamModel) (catalog.Model, error) {
 		Context:    toTokens(um.Limit.Context),
 		Output:     toTokens(um.Limit.Output),
 		Reasoning:  um.Reasoning,
+		Efforts:    upstreamEfforts(um.ReasoningOptions),
 		Modalities: um.Modalities.Input,
 		Status:     um.Status,
 		Updated:    um.LastUpdated,
@@ -395,6 +406,26 @@ func convert(um upstreamModel) (catalog.Model, error) {
 		m.Cost = cost
 	}
 	return m, nil
+}
+
+// upstreamEfforts returns the named levels of the "effort" reasoning option,
+// in upstream order; nil when the model publishes none. An upstream
+// "default" level (Groq Qwen) is dropped: Likha's Default already means
+// "provider decides" by sending no effort at all.
+func upstreamEfforts(options []upstreamReasoningOption) []string {
+	for _, option := range options {
+		if option.Type != "effort" {
+			continue
+		}
+		var levels []string
+		for _, level := range option.Values {
+			if level != "default" {
+				levels = append(levels, level)
+			}
+		}
+		return levels
+	}
+	return nil
 }
 
 // rates converts upstream rates; a tier missing its input or output rate
@@ -475,6 +506,13 @@ func applyOverrides(file *catalog.File, overrides overridesFile) error {
 				m.Reasoning = *om.Reasoning
 				set = append(set, "reasoning")
 			}
+			if om.Efforts != nil {
+				if err := catalog.ValidateEfforts(om.Efforts); err != nil {
+					return fmt.Errorf("overrides: %s/%s: %w", providerID, modelID, err)
+				}
+				m.Efforts = om.Efforts
+				set = append(set, "efforts")
+			}
 			if om.Modalities != nil {
 				m.Modalities = om.Modalities
 				set = append(set, "modalities")
@@ -523,13 +561,16 @@ func writeReport(w io.Writer, previous, next *catalog.File, providers []model.Pr
 	fmt.Fprintf(w, "catalog %s from %s\n", next.Generated, next.Upstream.URL)
 	for _, id := range sortedKeys(next.Providers) {
 		p := next.Providers[id]
-		priced := 0
+		priced, efforts := 0, 0
 		for _, m := range p.Models {
 			if m.Cost != nil {
 				priced++
 			}
+			if len(m.Efforts) > 0 {
+				efforts++
+			}
 		}
-		line := fmt.Sprintf("  %-13s %4d models, %4d priced", id, len(p.Models), priced)
+		line := fmt.Sprintf("  %-13s %4d models, %4d priced, %4d with effort levels", id, len(p.Models), priced, efforts)
 		if previous != nil {
 			line += fmt.Sprintf(" (was %d)", len(previous.Providers[id].Models))
 		}

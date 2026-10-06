@@ -26,6 +26,13 @@
         "deepseek-v4-flash-vision-exp": {"cost": {"input": 0.3, "output": 1.2, "cache_read": 0.006}, "ref": "https://api-docs.deepseek.com/quick_start/pricing", "verified": "2026-10-04", "note": "Legacy name served and billed as deepseek-flash. Peak card; off-peak bills half, so estimates are an upper bound."},
         "deepseek-v4-pro": {"cost": {"input": 1.32, "output": 3.96, "cache_read": 0.044}, "ref": "https://api-docs.deepseek.com/quick_start/pricing", "verified": "2026-10-04", "note": "Peak card. Off-peak (all hours except 01:00-04:00 and 06:00-10:00 UTC on weekdays) bills half; time-of-day pricing is a non-goal, so estimates use the higher rate and are an upper bound."}
       }
+    },
+    "gemini": {
+      "models": {
+        "gemini-2.5-pro": {"efforts": ["low", "medium", "high"], "ref": "https://ai.google.dev/gemini-api/docs/openai", "verified": "2026-10-06", "note": "models.dev lists only a thinking budget; Google maps reasoning_effort low/medium/high to 1,024/8,192/24,576 budget tokens for Gemini 2.5. Reasoning cannot be turned off on 2.5 Pro, so none is not offered."},
+        "gemini-2.5-flash": {"efforts": ["none", "low", "medium", "high"], "ref": "https://ai.google.dev/gemini-api/docs/openai", "verified": "2026-10-06", "note": "models.dev lists only a toggle and thinking budget; Google maps reasoning_effort low/medium/high to 1,024/8,192/24,576 budget tokens and none disables thinking on 2.5 models."},
+        "gemini-2.5-flash-lite": {"efforts": ["none", "low", "medium", "high"], "ref": "https://ai.google.dev/gemini-api/docs/openai", "verified": "2026-10-06", "note": "models.dev lists only a toggle and thinking budget; Google maps reasoning_effort low/medium/high to 1,024/8,192/24,576 budget tokens and none disables thinking on 2.5 models."}
+      }
     }
   }
 }
