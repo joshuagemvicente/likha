@@ -163,6 +163,25 @@ func (c *Client) ReplaySource() ReplaySource {
 	return ReplaySource{Endpoint: c.url, Model: c.model}
 }
 
+// WithoutReplay returns a client that captures and sends no replay state, for
+// tool-less background requests (compaction, session naming). Their bodies
+// match a provider without replay: DeepSeek needs reasoning_content only
+// when tools are sent, and the request's closing user prompt starts a new
+// Gemini turn, which Google does not validate. Sending state there would
+// only let the provider reject the very request meant to recover from a
+// rejection (spec decision 8). A client without replay is returned as is.
+func (c *Client) WithoutReplay() (*Client, error) {
+	if c == nil || c.replayWire == ReplayNone {
+		return c, nil
+	}
+	child, err := c.Fork()
+	if err != nil {
+		return nil, fmt.Errorf("client without replay: %w", err)
+	}
+	child.replayWire = ReplayNone
+	return child, nil
+}
+
 // replayFor returns the replay state of m that this client may send, or nil.
 // State goes only to its issuer: the same endpoint, and for model-bound
 // forms the same model. A client whose provider records no replay sends
@@ -182,12 +201,20 @@ func (c *Client) replayFor(m Message) *ReasoningReplay {
 	return m.Replay
 }
 
-// replaySentText returns the replay text a request on wire carries for an
-// assistant message whose state passed replayFor. Anthropic blocks are left
-// to the native Claude client, whose blocks replace the message's content
-// and tool calls rather than adding to them.
-func replaySentText(wire ReplayWire, replay *ReasoningReplay, m Message) []string {
-	switch wire {
+// replaySentText returns the replay text a request carries for m, at a
+// current-turn position or not: the state that passed replayFor, or Gemini's
+// skip value. Anthropic blocks are left to the native Claude client, whose
+// blocks replace the message's content and tool calls rather than adding to
+// them.
+func (c *Client) replaySentText(m Message, currentTurn bool) []string {
+	if c.needsSkipSignature(m, currentTurn) {
+		return []string{skipThoughtSignature}
+	}
+	replay := c.replayFor(m)
+	if replay == nil {
+		return nil
+	}
+	switch c.replayWire {
 	case ReplayReasoningContent:
 		if replay.ReasoningContent != nil {
 			return []string{*replay.ReasoningContent}

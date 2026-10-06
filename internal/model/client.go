@@ -211,6 +211,10 @@ type requestMessage struct {
 	Content    string            `json:"content"`
 	ToolCalls  []requestToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string            `json:"tool_call_id,omitempty"`
+	// Replay fields stay unset unless replayEncoder fills them, so bodies
+	// without replay are unchanged. The pointer keeps "" sendable.
+	ReasoningContent *string         `json:"reasoning_content,omitempty"`
+	ReasoningDetails json.RawMessage `json:"reasoning_details,omitempty"`
 }
 
 type requestToolCall struct {
@@ -220,6 +224,7 @@ type requestToolCall struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
+	ExtraContent *requestExtraContent `json:"extra_content,omitempty"`
 }
 
 type requestTool struct {
@@ -284,7 +289,8 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 		}
 	}
 	body.StreamOptions = &streamOptions{IncludeUsage: true}
-	for _, m := range messages {
+	replay := c.newReplayEncoder(messages, len(tools) > 0)
+	for i, m := range messages {
 		if m.Role != "system" && m.Role != "developer" && m.Role != "user" && m.Role != "assistant" && m.Role != "tool" {
 			return result, usageReport{}, fmt.Errorf("invalid message role %q", m.Role)
 		}
@@ -300,6 +306,7 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 			rc.Function.Name, rc.Function.Arguments = call.Name, call.Arguments
 			rm.ToolCalls = append(rm.ToolCalls, rc)
 		}
+		replay.encode(i, m, &rm)
 		body.Messages = append(body.Messages, rm)
 	}
 	for _, t := range tools {
@@ -362,17 +369,19 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			return result, usageReport{}, fmt.Errorf("%w: %s", ErrUnauthorized, message)
 		}
+		failure := replay.rejected(resp.StatusCode, errors.New(message))
 		if effort != "" && effortRejectedStatus(resp.StatusCode) {
-			return result, usageReport{}, &EffortRejectedError{Level: effort, Err: errors.New(message)}
+			return result, usageReport{}, &EffortRejectedError{Level: effort, Err: failure}
 		}
-		return result, usageReport{}, errors.New(message)
+		return result, usageReport{}, failure
 	}
 	defer resp.Body.Close()
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || mediaType != "text/event-stream" {
 		return result, usageReport{}, fmt.Errorf("model returned incompatible content type %q (expected SSE)", resp.Header.Get("Content-Type"))
 	}
-	message, report, err := consumeStream(ctx, io.LimitReader(resp.Body, maxResponseBytes+1), onText, onReasoning)
+	capture := replayCapture{wire: c.replayWire, source: c.ReplaySource()}
+	message, report, err := consumeStream(ctx, io.LimitReader(resp.Body, maxResponseBytes+1), capture, onText, onReasoning)
 	if err != nil {
 		return message, usageReport{}, err
 	}
@@ -835,6 +844,8 @@ type streamChunk struct {
 			Reasoning *string `json:"reasoning"`
 			// DeepSeek-style reasoning field used by some providers.
 			ReasoningContent *string `json:"reasoning_content"`
+			// OpenRouter replay state; parsed only under its replay wire.
+			ReasoningDetails json.RawMessage `json:"reasoning_details"`
 			ToolCalls        []struct {
 				Index    *int   `json:"index"`
 				ID       string `json:"id"`
@@ -843,6 +854,8 @@ type streamChunk struct {
 					Name      string `json:"name"`
 					Arguments string `json:"arguments"`
 				} `json:"function"`
+				// Gemini thought signature; parsed only under its replay wire.
+				ExtraContent json.RawMessage `json:"extra_content"`
 			} `json:"tool_calls"`
 		} `json:"delta"`
 	} `json:"choices"`
@@ -851,6 +864,7 @@ type streamChunk struct {
 }
 type streamedToolCall struct {
 	id, name, arguments strings.Builder
+	signature           string // last non-empty Gemini thought signature for this call
 }
 
 // appendPiece adds one streamed id or name piece, skipping a piece that
@@ -862,8 +876,9 @@ func appendPiece(value *strings.Builder, piece string) {
 	value.WriteString(piece)
 }
 
-func consumeStream(ctx context.Context, reader io.Reader, onText func(string), onReasoning func(string)) (Message, usageReport, error) {
+func consumeStream(ctx context.Context, reader io.Reader, capture replayCapture, onText func(string), onReasoning func(string)) (Message, usageReport, error) {
 	result := Message{Role: "assistant"}
+	replay := replayCollector{capture: capture}
 	var lastUsage usageReport
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), maxEventLineBytes)
@@ -925,6 +940,9 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 				onReasoning(reasoningPiece)
 			}
 		}
+		if err := replay.addDelta(delta.ReasoningContent, delta.ReasoningDetails); err != nil {
+			return err
+		}
 		for _, fragment := range delta.ToolCalls {
 			// The reason names which rule the provider broke so a router's
 			// upstream quirk is diagnosable from the transcript alone.
@@ -964,6 +982,14 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 			if fragment.Function != nil {
 				appendPiece(&call.name, fragment.Function.Name)
 				call.arguments.WriteString(fragment.Function.Arguments)
+			}
+			signature, err := replay.thoughtSignature(fragment.ExtraContent)
+			if err != nil {
+				return err
+			}
+			if signature != "" {
+				// The last value wins, so a gateway repeating it cannot double it.
+				call.signature = signature
 			}
 		}
 		return nil
@@ -1020,7 +1046,7 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 	sort.Ints(indexes)
 	for _, index := range indexes {
 		fragment := calls[index]
-		call := ToolCall{ID: fragment.id.String(), Name: fragment.name.String(), Arguments: fragment.arguments.String()}
+		call := ToolCall{ID: fragment.id.String(), Name: fragment.name.String(), Arguments: fragment.arguments.String(), ThoughtSignature: fragment.signature}
 		if call.ID == "" || call.Name == "" || !json.Valid([]byte(call.Arguments)) {
 			return Message{}, usageReport{}, fmt.Errorf("incomplete structured tool call at index %d", index)
 		}
@@ -1028,5 +1054,10 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 	}
 	result.Content = text.String()
 	result.Reasoning = reasoning.String()
+	captured, err := replay.finish()
+	if err != nil {
+		return Message{}, usageReport{}, err
+	}
+	result.Replay = captured
 	return result, lastUsage, nil
 }

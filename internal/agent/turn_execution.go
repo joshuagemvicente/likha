@@ -152,11 +152,12 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		tokens, known := client.EstimateInputTokens(request, definitions)
 		emit(TurnEvent{Kind: "context", ContextTokens: tokens, ContextKnown: known, ContextEstimated: true})
 		roundCtx, stopRound := watchSteerNow(ctx, options.SteerNow, steer)
-		var partial strings.Builder
+		var partial, partialReasoning strings.Builder
 		assistant, usage, usageOK, err := client.StreamUsage(roundCtx, request, definitions, func(text string) {
 			partial.WriteString(text)
 			emit(TurnEvent{Kind: "text", Text: text})
 		}, func(reasoning string) {
+			partialReasoning.WriteString(reasoning)
 			emit(TurnEvent{Kind: "reasoning", Text: reasoning})
 		})
 		steered := stopRound()
@@ -164,12 +165,15 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 			if ctx.Err() == nil && steered {
 				// Steer now (specs/steering-prompts M2): only this request
 				// stopped. Visible text stays in history so the model does
-				// not repeat itself; partial reasoning, replay state and
-				// half-streamed tool calls are dropped (a cut-short signed
-				// payload would be rejected). Neither transport reports usage
-				// before its final frame, so the stopped request carries none.
+				// not repeat itself, and on DeepSeek so does the reasoning
+				// streamed so far, as unsigned replay text DeepSeek requires
+				// on every earlier turn (specs/reasoning-replay decision 6).
+				// Display reasoning, signed replay state and half-streamed
+				// tool calls are dropped (a cut-short signed payload would be
+				// rejected). Neither transport reports usage before its final
+				// frame, so the stopped request carries none.
 				if partial.Len() > 0 {
-					history = append(history, model.Message{Role: "assistant", Content: partial.String()})
+					history = append(history, client.PartialAssistant(partial.String(), partialReasoning.String()))
 				}
 				emit(TurnEvent{Kind: "stream_interrupted", History: append([]model.Message(nil), history...)})
 				continue
@@ -183,7 +187,6 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 			}
 			emit(TurnEvent{Kind: "usage", Usage: &usage})
 		}
-		assistant = replyHook(request, assistant)
 		if err := validateToolCallIDs(assistant.ToolCalls); err != nil {
 			dropToolCalls(&assistant)
 			history = append(history, assistant)
@@ -296,13 +299,6 @@ func watchSteerNow(ctx context.Context, steerNow <-chan struct{}, steer <-chan s
 		return steered
 	}
 }
-
-// replyHook sees each loop request and the reply it produced, and returns
-// the reply the loop continues with. Production keeps the identity. Tests
-// replace it to stand in for provider replay capture, which no shipped
-// provider row enables yet (specs/reasoning-replay T5–T7), so the loops'
-// replay invariants are checked where they run, not only in their helpers.
-var replyHook = func(_ []model.Message, reply model.Message) model.Message { return reply }
 
 // dropToolCalls removes a malformed batch of tool calls from an assistant
 // message that stays in history, together with its signed replay state.

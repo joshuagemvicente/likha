@@ -311,6 +311,29 @@ func TestForkCopiesReplayWire(t *testing.T) {
 	}
 }
 
+// Background requests fork a client without replay; the parent keeps its
+// wire, and a client that has none is reused.
+func TestWithoutReplay(t *testing.T) {
+	parent, err := New("https://api.deepseek.com/v1", "deepseek-flash", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	background, err := parent.WithoutReplay()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if background == parent || background.replayWire != ReplayNone {
+		t.Fatalf("WithoutReplay() = same %v, wire %d; want a fork with ReplayNone", background == parent, background.replayWire)
+	}
+	if parent.replayWire != ReplayReasoningContent {
+		t.Fatalf("parent wire = %d, want unchanged", parent.replayWire)
+	}
+	again, err := background.WithoutReplay()
+	if err != nil || again != background {
+		t.Fatalf("WithoutReplay() on a client without replay = %p, %v; want the same client", again, err)
+	}
+}
+
 // replayHistory holds every replay form, issued both by the test client and by
 // other issuers, so a body test covers matching and mismatched sources.
 func replayHistory(t *testing.T, own ReplaySource) []Message {
@@ -351,27 +374,13 @@ func TestRequestBodyUnchangedByReplayState(t *testing.T) {
 		`{"role":"assistant","content":"","tool_calls":[{"id":"c-other","type":"function","function":{"name":"read","arguments":"{}"}}]},` +
 		`{"role":"tool","content":"ok","tool_call_id":"c-other"}],` +
 		`"stream":true,"stream_options":{"include_usage":true}}`
-	cases := []struct {
-		name string
-		wire ReplayWire
-	}{
-		{"provider without replay", ReplayNone},
-		// Encoding belongs to the per-provider feature work; until it lands
-		// no wire may change the body.
-		{"reasoning content wire", ReplayReasoningContent},
-		{"thought signature wire", ReplayThoughtSignature},
+	// A client without replay sends none, whatever replay state the history
+	// holds and whoever issued it.
+	if _, err := client.Stream(context.Background(), replayHistory(t, client.ReplaySource()), nil, nil, nil); err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			bodies = nil
-			client.setReplayWire(tc.wire)
-			if _, err := client.Stream(context.Background(), replayHistory(t, client.ReplaySource()), nil, nil, nil); err != nil {
-				t.Fatal(err)
-			}
-			if len(bodies) != 1 || bodies[0] != golden {
-				t.Fatalf("body =\n%s\nwant\n%s", strings.Join(bodies, "\n"), golden)
-			}
-		})
+	if len(bodies) != 1 || bodies[0] != golden {
+		t.Fatalf("body =\n%s\nwant\n%s", strings.Join(bodies, "\n"), golden)
 	}
 }
 
@@ -388,6 +397,8 @@ func TestClientEstimateCountsOnlySentReplay(t *testing.T) {
 	ownText, _ := estimateTextTokens("hidden <reasoning>")
 	ownDetails, _ := estimateTextTokens(string(history[1].Replay.Details))
 	ownSignature, _ := estimateTextTokens("sig")
+	// The foreign call sits in the current turn, so Gemini gets the skip value.
+	skipValue, _ := estimateTextTokens(skipThoughtSignature)
 	cases := []struct {
 		name   string
 		client *Client
@@ -398,7 +409,7 @@ func TestClientEstimateCountsOnlySentReplay(t *testing.T) {
 		{"provider without replay", client, ReplayNone, base},
 		{"reasoning text from own endpoint", client, ReplayReasoningContent, base + ownText},
 		{"details from own model only", client, ReplayReasoningDetails, base + ownDetails},
-		{"signatures from own model only", client, ReplayThoughtSignature, base + ownSignature},
+		{"own signatures and the skip value", client, ReplayThoughtSignature, base + ownSignature + skipValue},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -410,6 +421,29 @@ func TestClientEstimateCountsOnlySentReplay(t *testing.T) {
 				t.Fatalf("estimate = %d, %v; want %d", got, ok, tc.want)
 			}
 		})
+	}
+}
+
+// The idle estimate is for the history a new prompt will follow: own
+// signatures are still sent, but the prompt starts a new Gemini turn, so no
+// call gets the skip value.
+func TestClientHistoryEstimateCountsNoSkipValue(t *testing.T) {
+	client, err := New("https://generativelanguage.googleapis.com/v1beta/openai", "local-model", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := replayHistory(t, client.ReplaySource())
+	base, ok := EstimateInputTokens(client.Model(), history, nil)
+	if !ok {
+		t.Fatal("base estimate unavailable")
+	}
+	ownSignature, _ := estimateTextTokens("sig")
+	skipValue, _ := estimateTextTokens(skipThoughtSignature)
+	if got, ok := client.EstimateHistoryTokens(history); !ok || got != base+ownSignature {
+		t.Fatalf("history estimate = %d, %v; want %d", got, ok, base+ownSignature)
+	}
+	if got, ok := client.EstimateInputTokens(history, nil); !ok || got != base+ownSignature+skipValue {
+		t.Fatalf("request estimate = %d, %v; want %d", got, ok, base+ownSignature+skipValue)
 	}
 }
 

@@ -93,6 +93,19 @@ Likha sends a reasoning-effort level only to providers whose live probe shows th
 
 A probe sends one tool-bearing request at each published level of one model and records whether each was accepted, rejected, or ignored.
 
+## Reasoning replay
+
+Some providers want their own reasoning state back on later requests and reject a tool loop without it ([reasoning-replay](../specs/reasoning-replay/spec.md)). Likha keeps that state with each assistant message and sends it back only to the endpoint that issued it, and for signed state only to the same model. Display reasoning is never sent.
+
+| Provider | What goes back | Status |
+| --- | --- | --- |
+| `deepseek` | each earlier turn's `reasoning_content`, also after switching between DeepSeek models | pending-probe |
+| `gemini` | each tool call's thought signature; a current-turn call another model issued gets Google's skip value | pending-probe |
+| `openrouter` | nothing yet: `reasoning_details` replay is built but stays off until its probe passes | pending-probe |
+| every other provider | nothing; requests are unchanged | — |
+
+If a provider rejects a request whose earlier turns lack this state or carry it, the error adds a hint: `/compact` continues from a summary without it. The summarize request (and automatic session naming) sends no reasoning state, so it is not rejected for it.
+
 ## First-run setup (no flags needed)
 
 Run `likha` without provider configuration:

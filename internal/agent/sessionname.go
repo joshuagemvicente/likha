@@ -46,8 +46,7 @@ func GenerateSessionNameUsage(ctx context.Context, client *model.Client, history
 	msgs = append(msgs, history...)
 	msgs = append(msgs, model.Message{Role: "user", Content: nameInstruction})
 
-	// Naming always uses the provider's default effort (specs/model-effort).
-	background, err := client.WithoutEffort()
+	background, err := backgroundClient(client)
 	if err != nil {
 		return "", usage, false, err
 	}
