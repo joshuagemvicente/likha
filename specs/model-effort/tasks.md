@@ -154,7 +154,9 @@ and every request is unchanged.
       `DefaultEffort string`). Absent fields leave both empty.
       *Verify:* decoder test with a captured OpenRouter fixture.
 - [ ] **T20. Probe and enable, one provider per change.** Probes are run by
-      the user. Per provider, record the result in
+      the user with `likha --probe-effort --provider NAME --model ID`
+      ([effort-probe](../effort-probe/spec.md)); recording a report follows
+      effort-probe tasks T16. Per provider, record the result in
       [context.md](context.md#provider-support-matrix) and
       `docs/providers.md`, then set `Provider.Effort`. Suggested order:
       openai, openrouter, gemini, xai, deepseek, then the rest. Before

@@ -27,7 +27,7 @@ func TestParseFinalUsageDetailedProviderShapes(t *testing.T) {
 				"prompt_tokens_details":{"cached_tokens":1920,"cache_write_tokens":64,"audio_tokens":0},
 				"completion_tokens_details":{"reasoning_tokens":192,"audio_tokens":0,"accepted_prediction_tokens":0}}`,
 			want: RequestUsage{Prompt: 2006, Completion: 300, PromptSeen: true, CompletionSeen: true,
-				CacheRead: 1920, CacheWrite: 64, Reasoning: 192},
+				CacheRead: 1920, CacheWrite: 64, Reasoning: 192, ReasoningSeen: true},
 		},
 		{
 			// OpenRouter usage accounting: OpenAI fields plus a top-level cost
@@ -41,7 +41,7 @@ func TestParseFinalUsageDetailedProviderShapes(t *testing.T) {
 				"prompt_tokens_details":{"cached_tokens":0},
 				"completion_tokens_details":{"reasoning_tokens":0}}`,
 			want: RequestUsage{Prompt: 194, Completion: 2, PromptSeen: true, CompletionSeen: true,
-				Cost: 19.95, CostSeen: true},
+				Cost: 19.95, CostSeen: true, ReasoningSeen: true},
 		},
 		{
 			name: "openrouter non-BYOK upstream cost is null or zero",
@@ -72,25 +72,25 @@ func TestParseFinalUsageDetailedProviderShapes(t *testing.T) {
 				"completion_tokens_details":{"reasoning_tokens":94,"audio_tokens":0,"accepted_prediction_tokens":0,"rejected_prediction_tokens":0},
 				"num_sources_used":0}`,
 			want: RequestUsage{Prompt: 32, Completion: 103, PromptSeen: true, CompletionSeen: true,
-				CacheRead: 6, Reasoning: 94},
+				CacheRead: 6, Reasoning: 94, ReasoningSeen: true},
 		},
 		{
 			name: "reasoning above completion is additive without total_tokens",
 			raw:  `{"prompt_tokens":32,"completion_tokens":9,"completion_tokens_details":{"reasoning_tokens":94}}`,
-			want: RequestUsage{Prompt: 32, Completion: 103, PromptSeen: true, CompletionSeen: true, Reasoning: 94},
+			want: RequestUsage{Prompt: 32, Completion: 103, PromptSeen: true, CompletionSeen: true, Reasoning: 94, ReasoningSeen: true},
 		},
 		{
 			// total = prompt + completion: reasoning is inside completion.
 			name: "reasoning inside completion stays a subset",
 			raw:  `{"prompt_tokens":32,"completion_tokens":100,"total_tokens":132,"completion_tokens_details":{"reasoning_tokens":94}}`,
-			want: RequestUsage{Prompt: 32, Completion: 100, PromptSeen: true, CompletionSeen: true, Reasoning: 94},
+			want: RequestUsage{Prompt: 32, Completion: 100, PromptSeen: true, CompletionSeen: true, Reasoning: 94, ReasoningSeen: true},
 		},
 		{
 			name: "xai cost_in_usd_ticks is the exact charge",
 			raw: `{"prompt_tokens":32,"completion_tokens":9,"total_tokens":135,"cost_in_usd_ticks":12500000000,
 				"completion_tokens_details":{"reasoning_tokens":94}}`,
 			want: RequestUsage{Prompt: 32, Completion: 103, PromptSeen: true, CompletionSeen: true,
-				Reasoning: 94, Cost: 1.25, CostSeen: true},
+				Reasoning: 94, ReasoningSeen: true, Cost: 1.25, CostSeen: true},
 		},
 		{
 			name: "cost wins over cost_in_usd_ticks",
@@ -195,7 +195,7 @@ func TestParseFinalUsageDetailedProviderShapes(t *testing.T) {
 			name: "prompt-only usage with reasoning detail keeps completion unseen",
 			raw: `{"prompt_tokens":500,"prompt_tokens_details":{"cached_tokens":100},
 				"completion_tokens_details":{"reasoning_tokens":40},"cost":0.01}`,
-			want: RequestUsage{Prompt: 500, PromptSeen: true, CacheRead: 100, Reasoning: 40, Cost: 0.01, CostSeen: true},
+			want: RequestUsage{Prompt: 500, PromptSeen: true, CacheRead: 100, Reasoning: 40, ReasoningSeen: true, Cost: 0.01, CostSeen: true},
 		},
 	}
 	for _, tc := range cases {
@@ -233,7 +233,7 @@ func TestParseCodexUsageDetailedResponsesShape(t *testing.T) {
 				"input_tokens_details":{"cached_tokens":4096},
 				"output_tokens_details":{"reasoning_tokens":640}}`,
 			want: RequestUsage{Prompt: 5000, Completion: 900, PromptSeen: true, CompletionSeen: true,
-				CacheRead: 4096, Reasoning: 640},
+				CacheRead: 4096, Reasoning: 640, ReasoningSeen: true},
 		},
 		{
 			name: "responses without details",
@@ -252,12 +252,12 @@ func TestParseCodexUsageDetailedResponsesShape(t *testing.T) {
 			raw: `{"input_tokens":32,"input_tokens_details":{"cached_tokens":8},"output_tokens":9,
 				"output_tokens_details":{"reasoning_tokens":110},"total_tokens":151}`,
 			want: RequestUsage{Prompt: 32, Completion: 119, PromptSeen: true, CompletionSeen: true,
-				CacheRead: 8, Reasoning: 110},
+				CacheRead: 8, Reasoning: 110, ReasoningSeen: true},
 		},
 		{
 			name: "input-only responses usage keeps completion unseen",
 			raw:  `{"input_tokens":12,"output_tokens_details":{"reasoning_tokens":7}}`,
-			want: RequestUsage{Prompt: 12, PromptSeen: true, Reasoning: 7},
+			want: RequestUsage{Prompt: 12, PromptSeen: true, Reasoning: 7, ReasoningSeen: true},
 		},
 	}
 	for _, tc := range cases {
@@ -293,7 +293,7 @@ func TestStreamUsageReturnsRequestBreakdown(t *testing.T) {
 		t.Fatalf("answer = %+v", answer)
 	}
 	want := RequestUsage{Prompt: 2006, Completion: 300, PromptSeen: true, CompletionSeen: true,
-		CacheRead: 1920, CacheWrite: 64, Reasoning: 192, Cost: 0.0123, CostSeen: true}
+		CacheRead: 1920, CacheWrite: 64, Reasoning: 192, ReasoningSeen: true, Cost: 0.0123, CostSeen: true}
 	if !ok || usage != want {
 		t.Fatalf("StreamUsage usage = (%+v, %v), want (%+v, true)", usage, ok, want)
 	}
@@ -395,7 +395,7 @@ func TestStreamUsageCodexWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := RequestUsage{Prompt: 5000, Completion: 900, PromptSeen: true, CompletionSeen: true, CacheRead: 4096, Reasoning: 640}
+	want := RequestUsage{Prompt: 5000, Completion: 900, PromptSeen: true, CompletionSeen: true, CacheRead: 4096, Reasoning: 640, ReasoningSeen: true}
 	if answer.Content != "ok" || !ok || usage != want {
 		t.Fatalf("StreamUsage = (%q, %+v, %v), want (ok, %+v, true)", answer.Content, usage, ok, want)
 	}

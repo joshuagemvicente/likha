@@ -102,6 +102,24 @@ Reasoning models accept an effort level that trades speed and tokens for deeper 
 
 **Which providers carry effort:** only providers whose live probe has passed. None has yet, so the effort step does not appear anywhere until probes are recorded (see [providers](providers.md#reasoning-effort)). Switching to a reasoning model on any other provider says why effort stays at the provider default. Claude now uses Anthropic's native Messages API, which carries effort as `output_config.effort`, but stays unverified for effort (`not yet verified for Anthropic Claude`) until its FR-40 live probe passes.
 
+## Effort probe (`--probe-effort`)
+
+`likha --probe-effort --provider NAME --model ID --yes` checks whether a provider honors each effort level the model publishes, then exits. It needs no repository and no TUI, and it changes no setting: it never enables effort for a provider. What the probe costs, what its verdicts mean, and how a report is recorded are in [providers](providers.md#running-an-effort-probe). The flags, as `likha --help` prints them:
+
+```text
+  --probe-effort    Probe whether --provider honors reasoning effort for
+                    --model (or LIKHA_PROVIDER/LIKHA_MODEL), then exit. Sends
+                    a few real, billed requests after printing the plan and
+                    estimated cost; changes no setting. No TUI or repository.
+  --probe-wire W    With --probe-effort: probe the top (reasoning_effort),
+                    object (reasoning.effort) or both wire shapes.
+  --probe-levels L  With --probe-effort: comma-separated levels to probe
+                    instead of the model's published levels.
+  --yes             With --probe-effort: confirm the spend without a prompt.
+```
+
+The provider and model must come from these flags or `LIKHA_PROVIDER`/`LIKHA_MODEL`; the provider stored by first-run setup is never probed. `--api-key` works as usual but is never stored by a probe. `--endpoint` (or `LIKHA_ENDPOINT`) may point the named provider elsewhere, and the result is then labelled `endpoint override`; nothing is sent there before you confirm, so the levels come from the bundled catalog or `--probe-levels`. Exit codes: 0 when the probe ran to the end and wrote its report, 1 when you declined, Default failed, the provider rejected the credentials, or the report could not be written, 2 for a usage error (nothing was sent), and 130 for Ctrl+C.
+
 ## Conversation compaction (`/compact`)
 
 Long sessions resend their entire history to the provider every turn, and eventually that exceeds the model's context window. `/compact` is the escape hatch: Likha makes **one** summarize model call over the conversation so far — preserving your goal, the decisions made, files changed and how, pending next steps, and open questions — and replaces the summarized turns with that brief, so the task continues without the transcript. Anything after `/compact` (for example `/compact focus on the approval flow refactor`) steers what the summary emphasizes without being stored as conversation content.

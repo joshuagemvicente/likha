@@ -102,6 +102,18 @@ of one model and records accepted, rejected or ignored.
 | opencode-zen, opencode-go, dialagram | unknown | pending-probe | relays; behavior undocumented |
 | claude | `output_config: {effort}` (native Messages API, `EffortAnthropic`) | pending-probe | native client landed (claude-native); row enabled only by an FR-40 probe |
 
+### Probe log
+
+One row per user-run `likha --probe-effort` report
+([effort-probe](../effort-probe/context.md#recording-format)). Verdicts are
+written in the report's words. A report with an endpoint override carries
+`(endpoint override)` after its file name and is never `passed` unless the
+override is a documented alternative endpoint of the same provider. No probe
+has been run yet.
+
+| Date | Provider | Model | Shape | Likha | Report | Levels (verdict) | Control | Outcome |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+
 ## Known gaps (not in this feature)
 
 - **Reasoning echo.** DeepSeek (thinking on by default) requires

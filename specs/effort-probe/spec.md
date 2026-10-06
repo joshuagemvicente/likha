@@ -1,8 +1,9 @@
 # Feature: Effort probe (live evidence for enabling reasoning effort)
 
-**Status:** planned — decisions recorded 2026-10-06 (user delegated defaults);
-no implementation started. Requirement: v1-spec FR-40 (to be amended into
-[v1-spec.md](../v1-spec.md) by the coordinator before implementation).
+**Status:** implemented (local) 2026-10-06, review fixes 2026-10-07 —
+automated suite green; live probe outstanding (user-run, tasks T16), and
+Claude's native `output_config` shape waits for claude-native. Decisions recorded 2026-10-06 (user delegated
+defaults). Requirement: [v1-spec FR-40](../v1-spec.md).
 Gates [model-effort](../model-effort/spec.md) task T20 and the effort wire of
 [claude-native](../claude-native/spec.md) (FR-38, decision 8).
 
@@ -108,22 +109,34 @@ Each was an open choice; the recommended option was taken.
      1 control). Any larger plan is refused.
    - At most **40,000 completion tokens** per run. Once reached, no new
      request starts; the remaining rows are recorded as skipped. The request
-     in flight can exceed the budget. A request that reports no usage
-     (including one cut off by a timeout or a dropped stream) counts as the
+     in flight can exceed the budget. A request that may have generated
+     output without reporting usage (an answer without usage, or one cut
+     off by a timeout, a dropped stream or a lost connection) counts as the
      cost estimate's 3,000 tokens, and the total is marked as partly
-     estimated.
+     estimated. A request the provider answered with an HTTP error status
+     (400, 401, 429, 5xx…) generated nothing and counts 0.
    - At most **180 seconds** per request. A request that runs longer is
      cancelled and recorded as inconclusive.
 9. **Spend needs consent.** Before the first model request the probe prints
    the plan, the caps and the estimated cost. It sends nothing until the
    user passes `--yes` or answers `y` at an interactive prompt. Listing
    models (an unbilled `GET /models`) may happen before consent, to learn
-   the levels.
+   the levels, but only from the provider's own endpoint: an endpoint
+   override (decision 16), which may come from an ambient
+   `LIKHA_ENDPOINT`, receives nothing, and so no credential, before
+   consent.
 10. **No retries.** Each planned request is sent once. A rate limit, server
     error, timeout or dropped stream makes that row inconclusive. A 401 or
     403 stops the run. The automatic retries of FR-36 are turned off for the
     probe's requests. Reason: a retried row would hide flaky behavior the
     report should show, and would spend more than the plan stated.
+    One exception keeps the probe on real request code (decision 2): Likha's
+    client re-sends a request once, exactly as on a real turn, after a
+    rejection that generated nothing, namely a provider refusing the
+    optional `stream_options` field, or a ChatGPT token refreshed after
+    HTTP 401. Such a row makes two HTTP attempts, spends nothing extra, and
+    records both (point 11); the plan's caps line says so. The 17-request
+    cap counts planned requests.
 11. **The verdict heuristic is stated, not hidden.** See points 12–19. The
     report and the table both say that `ignored-suspected` is a heuristic
     from one sample per level.
@@ -175,7 +188,8 @@ Each was an open choice; the recommended option was taken.
    ChatGPT or on Claude's native route, which have one shape.
 4. The levels come from the same place as in `/models`: the provider's live
    model list when it publishes them, else the bundled catalog, matched on
-   the exact provider and model. `--probe-levels` replaces the list; its
+   the exact provider and model. With an endpoint override the live list is
+   not fetched before consent (decision 9), so the catalog supplies them. `--probe-levels` replaces the list; its
    names follow the catalog's level rules (lower case, no spaces, no
    repeats, not `default`) and may not be `likha-probe-invalid`. A model
    with no levels and no `--probe-levels` exits 2 with
@@ -224,7 +238,9 @@ Each was an open choice; the recommended option was taken.
 
 11. For each request: the level and shape; the exact effort fragment that was
     sent, as seen in the outgoing body (for example
-    `"reasoning_effort":"high"`, or `none` at Default); the HTTP status; the
+    `"reasoning_effort":"high"`, or `none` at Default); the HTTP status, the
+    number of attempts, and the first attempt's status when decision 10's
+    re-send happened; the
     error text, cleaned of credentials and cut to 1 KiB; prompt, completion
     and reasoning tokens as the provider reported them (each marked
     `not reported` when the usage omits it); the reported or estimated cost;
@@ -242,8 +258,9 @@ Each was an open choice; the recommended option was taken.
 13. **inconclusive** — the row cannot be judged: a timeout, connection error,
     dropped or malformed stream, HTTP 401, 403, 408, 429, 5xx or any other
     HTTP error not covered by point 14, a request skipped by a cap or by an
-    earlier stop, or a 400/422 on a level when Default also got 400/422
-    (decision 4).
+    earlier stop, or a 400/422 on a level or on the control when Default
+    did not succeed (decision 4): the model's own default may be what the
+    provider refused.
 14. **rejected** — the provider answered HTTP 400 or 422 to a request that
     carried an effort level, while Default succeeded.
 15. A shape is **varied**, **flat** or **unmeasured**. It is unmeasured when
@@ -266,8 +283,8 @@ Each was an open choice; the recommended option was taken.
     Default are expected to match (research.md).
 18. The Default row's verdict is `baseline` when it succeeded, `failed` on
     400/422, or inconclusive as in point 13. The control row's verdict is
-    `validated` (HTTP 400 or 422), `unvalidated` (success), or inconclusive
-    as in point 13.
+    `validated` (HTTP 400 or 422 while Default succeeded), `unvalidated`
+    (success), or inconclusive as in point 13.
 19. The table and report state: `Verdicts come from one request per level;
     ignored-suspected is a heuristic, not proof. Re-run before relying on a
     borderline result.`
@@ -388,6 +405,7 @@ Each was an open choice; the recommended option was taken.
   same verdicts as the printed table.
 - A plan above 17 requests is refused before anything is sent, and a
   completion-token budget of 40,000 stops new requests and records the rest
-  as skipped; a row without usage counts 3,000 tokens toward it.
+  as skipped; a row that answered without usage counts 3,000 tokens toward
+  it, and a row answered with an HTTP error status counts 0.
 - On ChatGPT, requests go to the Responses wire with `reasoning: {effort}`,
   and reasoning tokens come from `output_tokens_details`.

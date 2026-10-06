@@ -18,7 +18,9 @@ import (
 // reported it. CacheRead and CacheWrite are subsets of Prompt; Reasoning is
 // a subset of Completion (usage parsing folds a provider's additive
 // reasoning count, such as xAI's, into Completion first). Cost is the
-// provider-charged amount in US dollars when CostSeen.
+// provider-charged amount in US dollars when CostSeen. ReasoningSeen is true
+// when the usage named a valid reasoning count, so Reasoning 0 with
+// ReasoningSeen false means "not reported" rather than "none".
 type RequestUsage struct {
 	Prompt         int64
 	Completion     int64
@@ -27,6 +29,7 @@ type RequestUsage struct {
 	CacheRead      int64
 	CacheWrite     int64
 	Reasoning      int64
+	ReasoningSeen  bool
 	Cost           float64
 	CostSeen       bool
 }

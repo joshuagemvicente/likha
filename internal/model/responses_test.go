@@ -146,7 +146,7 @@ func TestResponsesCanonicalNamespacedToolTurnAndReplay(t *testing.T) {
 	if strings.Join(text, "|") != "Checking |a.txt." || strings.Join(reason, "|") != "Checking files." {
 		t.Fatalf("incremental callbacks duplicated or lost text: text=%v reasoning=%v", text, reason)
 	}
-	wantUsage := RequestUsage{Prompt: 5000, Completion: 900, PromptSeen: true, CompletionSeen: true, CacheRead: 4096, Reasoning: 640}
+	wantUsage := RequestUsage{Prompt: 5000, Completion: 900, PromptSeen: true, CompletionSeen: true, CacheRead: 4096, Reasoning: 640, ReasoningSeen: true}
 	if !report.ok || report.request() != wantUsage {
 		t.Fatalf("usage metadata = %+v, want %+v", report.request(), wantUsage)
 	}
@@ -561,9 +561,9 @@ func TestResponsesDetailedPromptOnlyAndZeroUsage(t *testing.T) {
 		usage string
 		want  RequestUsage
 	}{
-		"prompt only":                  {`{"input_tokens":12,"input_tokens_details":{"cached_tokens":4},"output_tokens_details":{"reasoning_tokens":7}}`, RequestUsage{Prompt: 12, PromptSeen: true, CacheRead: 4, Reasoning: 7}},
+		"prompt only":                  {`{"input_tokens":12,"input_tokens_details":{"cached_tokens":4},"output_tokens_details":{"reasoning_tokens":7}}`, RequestUsage{Prompt: 12, PromptSeen: true, CacheRead: 4, Reasoning: 7, ReasoningSeen: true}},
 		"zero counts":                  {`{"input_tokens":0,"output_tokens":0}`, RequestUsage{PromptSeen: true, CompletionSeen: true}},
-		"aliases and billing metadata": {`{"prompt_tokens":20,"completion_tokens":3,"cost":0.001,"prompt_tokens_details":{"cached_tokens":5,"cache_write_tokens":2},"completion_tokens_details":{"reasoning_tokens":1}}`, RequestUsage{Prompt: 20, Completion: 3, PromptSeen: true, CompletionSeen: true, CacheRead: 5, CacheWrite: 2, Reasoning: 1, Cost: 0.001, CostSeen: true}},
+		"aliases and billing metadata": {`{"prompt_tokens":20,"completion_tokens":3,"cost":0.001,"prompt_tokens_details":{"cached_tokens":5,"cache_write_tokens":2},"completion_tokens_details":{"reasoning_tokens":1}}`, RequestUsage{Prompt: 20, Completion: 3, PromptSeen: true, CompletionSeen: true, CacheRead: 5, CacheWrite: 2, Reasoning: 1, ReasoningSeen: true, Cost: 0.001, CostSeen: true}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			sse := codexFrame("response.completed", `{"response":{"status":"completed","output":[],"usage":`+tc.usage+`}}`)
