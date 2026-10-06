@@ -39,7 +39,7 @@ The v1 goal is for someone other than the developer to install a release and com
 
 ### Out of scope
 
-- Built-in code editor, language-server integration, concurrent main/write-capable agents, unbounded/background agent trees, executable plugins, cloud sync, hosting or bundling any model or local inference server (Ollama, llama.cpp, and similar), protocol adapters beyond OpenAI chat-completions and the accepted list's documented exceptions (the Sign in with ChatGPT Responses surface). Configured stdio MCP is the existing external-tool exception; passive Markdown skills are prompt data.
+- Built-in code editor, language-server integration, concurrent main/write-capable agents, unbounded/background agent trees, executable plugins, cloud sync, hosting or bundling any model or local inference server (Ollama, llama.cpp, and similar), protocol adapters beyond OpenAI chat-completions and the accepted list's documented exceptions (the Sign in with ChatGPT Responses surface and the `claude` row's Anthropic Messages surface, FR-38). Configured stdio MCP is the existing external-tool exception; passive Markdown skills are prompt data.
 - Windows support until terminal behavior is tested.
 - An operating-system security sandbox for shell commands. A repository working directory does not constrain an approved command's filesystem or network access.
 
@@ -49,7 +49,7 @@ The v1 goal is for someone other than the developer to install a release and com
 | --- | --- | --- |
 | Application and agent runtime | Go | One codebase and distributable binaries for the supported targets. |
 | Terminal interface | Bubble Tea and Lip Gloss | Established Go tools for interactive terminal views and styling. |
-| Model integration | OpenAI-compatible chat API with a predefined accepted provider list; the accepted list may include documented non-chat-completions surfaces (the Sign in with ChatGPT Responses API) | One primary protocol surface; adding a provider is configuration; a documented exception (the ChatGPT Responses wire) is its own client surface. |
+| Model integration | OpenAI-compatible chat API with a predefined accepted provider list; the accepted list may include documented non-chat-completions surfaces (the Sign in with ChatGPT Responses API; the Anthropic Messages API for the `claude` row, FR-38) | One primary protocol surface; adding a provider is configuration; a documented exception (the ChatGPT Responses wire, the Anthropic Messages wire) is its own client surface. |
 | Predefined providers | OpenAI, OpenRouter, Amazon Bedrock, Dialagram, Opencode Zen, Opencode Go, ChatGPT (Plus/Pro), Groq, xAI, Together AI, Mistral AI, Cerebras, Anthropic Claude (hosted: BYOK key, except ChatGPT's OAuth login) | Every listed provider is hosted: it receives the user's key or login and the conversation content, and must pass the full probe (streamed text, structured tool calls, mid-stream cancellation, tool-result fidelity) before it is described as accepted. Providers added without probe results remain pending-probe. Likha hosts no models. |
 | Persistence | Local configuration and SQLite session database | Keeps repository-associated, resumable history in private local state without requiring a cloud service. |
 

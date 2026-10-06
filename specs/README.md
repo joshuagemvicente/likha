@@ -62,7 +62,7 @@ was authorized during the specification interview.
 | Prompt line editor, native selection, image attachments | [prompt-editor/](prompt-editor/spec.md) | planned |
 | Conversation compaction (/compact) | [conversation-compaction/](conversation-compaction/spec.md) | implemented (local) |
 | Model effort (per-model reasoning levels; effort step in `/models`, `/effort`) | [model-effort/](model-effort/spec.md) | in progress — implemented (local) 2026-10-06, automated suite green; no provider enabled until live probes pass; real-TUI walkthrough outstanding |
-| Native Claude client (Anthropic Messages API, adaptive thinking, effort via `output_config.effort`) | [claude-native/](claude-native/spec.md) | planned — decisions recorded 2026-10-06 (FR-38); live admission probe outstanding |
+| Native Claude client (Anthropic Messages API, adaptive thinking, effort via `output_config.effort`) | [claude-native/](claude-native/spec.md) | implemented (local) 2026-10-06 — automated suite green; live admission probe and FR-36 retry wiring outstanding |
 | Reasoning replay (send provider-issued reasoning state back to its issuer; amends FR-15) | [reasoning-replay/](reasoning-replay/spec.md) | in progress — foundation (data model, send gate, persistence) implemented (local) 2026-10-06; capture/encode and live probes outstanding (FR-39) |
 | Chunked message content (Mistral thinking/text chunk lists) | [chunked-content/](chunked-content/spec.md) | planned — decisions recorded 2026-10-06; no new FR |
 | Reasoning-effort probe (`likha --probe-effort`) | [effort-probe/](effort-probe/spec.md) | planned — decisions recorded 2026-10-06 (FR-40) |

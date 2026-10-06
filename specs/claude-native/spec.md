@@ -1,8 +1,10 @@
 # Feature: Native Claude client (Anthropic Messages API)
 
-**Status:** planned — decisions recorded 2026-10-06 (user delegated defaults);
-no implementation started. Requirement: v1-spec FR-38 (to be amended into
-[v1-spec.md](../v1-spec.md) before implementation). Uses the replay data
+**Status:** implemented (local) 2026-10-06 — automated suite green; live
+admission probe outstanding (the provider stays pending-probe); FR-36
+automatic retries await model-recovery, which this wire classifies for but
+does not run. Decisions recorded 2026-10-06 (user delegated defaults).
+Requirement: v1-spec FR-38 ([v1-spec.md](../v1-spec.md)). Uses the replay data
 model owned by [reasoning-replay](../reasoning-replay/spec.md) (FR-39).
 Effort on this wire is enabled only by the effort probe (FR-40).
 Supersedes the "one table row, no client changes" decision of
