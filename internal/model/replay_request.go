@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"net/http"
 )
 
@@ -22,6 +23,48 @@ type requestGoogleContent struct {
 
 func thoughtSignatureContent(signature string) *requestExtraContent {
 	return &requestExtraContent{Google: requestGoogleContent{ThoughtSignature: signature}}
+}
+
+// requestContent is a request message's content: the plain string every
+// provider gets, or, when replayEncoder sends Mistral thinking back, a chunk
+// list that leads with the reply's thinking (specs/chunked-content M2).
+type requestContent struct {
+	text     string
+	thinking *requestThinkingChunk // nil sends text as a plain string
+}
+
+type requestTextChunk struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type requestThinkingChunk struct {
+	Type      string             `json:"type"`
+	Thinking  []requestTextChunk `json:"thinking"`
+	Signature string             `json:"signature,omitempty"`
+}
+
+// MarshalJSON writes the plain string unless thinking goes back, so every
+// request without Mistral replay is byte-identical to a string field.
+func (c requestContent) MarshalJSON() ([]byte, error) {
+	if c.thinking == nil {
+		return json.Marshal(c.text)
+	}
+	// Mistral accepts at most one leading thinking chunk, so all of the
+	// reply's thinking rides in this one, ahead of the answer text.
+	chunks := []any{c.thinking}
+	if c.text != "" {
+		chunks = append(chunks, requestTextChunk{Type: "text", Text: c.text})
+	}
+	return json.Marshal(chunks)
+}
+
+func thinkingChunk(replay *ReasoningReplay) *requestThinkingChunk {
+	return &requestThinkingChunk{
+		Type:      "thinking",
+		Thinking:  []requestTextChunk{{Type: "text", Text: *replay.Thinking}},
+		Signature: replay.ThinkingSignature,
+	}
 }
 
 // ReplayRejectedError marks an HTTP 400 on a request whose replay state may
@@ -80,7 +123,9 @@ func (e *replayEncoder) encode(index int, m Message, rm *requestMessage) {
 
 // fillReplayFields copies replay into rm's field for wire and reports whether
 // it added anything. Thought signatures go only on the calls that carry one:
-// for parallel calls Gemini signs the first call only.
+// for parallel calls Gemini signs the first call only. Mistral thinking turns
+// rm's content into a chunk list; a reply without a thinking chunk keeps its
+// plain string.
 func fillReplayFields(wire ReplayWire, replay *ReasoningReplay, m Message, rm *requestMessage) bool {
 	switch wire {
 	case ReplayReasoningContent:
@@ -89,6 +134,12 @@ func fillReplayFields(wire ReplayWire, replay *ReasoningReplay, m Message, rm *r
 	case ReplayReasoningDetails:
 		rm.ReasoningDetails = replay.Details
 		return len(replay.Details) > 0
+	case ReplayThinkingChunk:
+		if replay.Thinking == nil {
+			return false
+		}
+		rm.Content.thinking = thinkingChunk(replay)
+		return true
 	case ReplayThoughtSignature:
 		sent := false
 		for i, call := range m.ToolCalls {

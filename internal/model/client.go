@@ -207,8 +207,10 @@ func (c *Client) APIKey() string {
 }
 
 type requestMessage struct {
-	Role       string            `json:"role"`
-	Content    string            `json:"content"`
+	Role string `json:"role"`
+	// Content encodes as a plain string unless replayEncoder adds Mistral
+	// thinking, which turns it into a chunk list.
+	Content    requestContent    `json:"content"`
 	ToolCalls  []requestToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string            `json:"tool_call_id,omitempty"`
 	// Replay fields stay unset unless replayEncoder fills them, so bodies
@@ -297,7 +299,7 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 		if m.Role == "tool" && m.ToolCallID == "" {
 			return result, usageReport{}, errors.New("tool result requires a tool call ID")
 		}
-		rm := requestMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
+		rm := requestMessage{Role: m.Role, Content: requestContent{text: m.Content}, ToolCallID: m.ToolCallID}
 		for _, call := range m.ToolCalls {
 			if m.Role != "assistant" || call.ID == "" || call.Name == "" || !json.Valid([]byte(call.Arguments)) {
 				return result, usageReport{}, errors.New("invalid assistant tool call")
@@ -840,8 +842,10 @@ func (c *Client) markConnected() {
 type streamChunk struct {
 	Choices []struct {
 		Delta *struct {
-			Content   *string `json:"content"`
-			Reasoning *string `json:"reasoning"`
+			// Content is a string on most providers and a list of typed
+			// chunks on Mistral's reasoning models (specs/chunked-content).
+			Content   streamContent `json:"content"`
+			Reasoning *string       `json:"reasoning"`
 			// DeepSeek-style reasoning field used by some providers.
 			ReasoningContent *string `json:"reasoning_content"`
 			// OpenRouter replay state; parsed only under its replay wire.
@@ -880,6 +884,9 @@ func consumeStream(ctx context.Context, reader io.Reader, capture replayCapture,
 	result := Message{Role: "assistant"}
 	replay := replayCollector{capture: capture}
 	var lastUsage usageReport
+	// skipped holds the first chunk type the reply skipped; it matters only
+	// when the reply shows nothing else (specs/chunked-content decision 3).
+	var skipped *string
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), maxEventLineBytes)
 	calls := make(map[int]*streamedToolCall)
@@ -922,12 +929,25 @@ func consumeStream(ctx context.Context, reader io.Reader, capture replayCapture,
 		if delta == nil {
 			return nil // finish_reason-only event
 		}
-		if delta.Content != nil {
-			text.WriteString(*delta.Content)
-			if onText != nil && *delta.Content != "" {
-				onText(*delta.Content)
+		for _, piece := range delta.Content.pieces {
+			switch piece.kind {
+			case pieceAnswer:
+				text.WriteString(piece.text)
+				if onText != nil && piece.text != "" {
+					onText(piece.text)
+				}
+			case pieceThinking:
+				reasoning.WriteString(piece.text)
+				if onReasoning != nil && piece.text != "" {
+					onReasoning(piece.text)
+				}
+			case pieceSkipped:
+				if skipped == nil {
+					skipped = &piece.text
+				}
 			}
 		}
+		replay.addContent(delta.Content)
 		var reasoningPiece string
 		if delta.Reasoning != nil {
 			reasoningPiece = *delta.Reasoning
@@ -1051,6 +1071,11 @@ func consumeStream(ctx context.Context, reader io.Reader, capture replayCapture,
 			return Message{}, usageReport{}, fmt.Errorf("incomplete structured tool call at index %d", index)
 		}
 		result.ToolCalls = append(result.ToolCalls, call)
+	}
+	if skipped != nil && text.Len() == 0 && reasoning.Len() == 0 && len(result.ToolCalls) == 0 {
+		// Before chunked content parsed, such a reply failed as malformed;
+		// a silent empty answer would report an unread reply as a success.
+		return Message{}, usageReport{}, fmt.Errorf("%w (type %q)", errUnshowableContent, *skipped)
 	}
 	result.Content = text.String()
 	result.Reasoning = reasoning.String()

@@ -6,28 +6,39 @@ spec. Decisions live in [spec.md](spec.md); sources in
 
 ## Code
 
-- `internal/model/client.go`
-  - `streamChunk.Choices[].Delta.Content` is `*string`. A list-shaped
-    `content` makes `json.Unmarshal` fail. `consumeStream`'s `process` then
-    returns `malformed model stream event: json: cannot unmarshal array …`,
-    and the turn ends with that error.
+- `internal/model/client.go` (as implemented, 2026-10-06; before this
+  feature `Delta.Content` was `*string`, so a list-shaped `content` failed
+  as `malformed model stream event: json: cannot unmarshal array …`)
+  - `streamChunk.Choices[].Delta.Content` is a `streamContent`
+    (`stream_content.go`), which decodes string, `null` and chunk-list
+    content into ordered answer, thinking and skipped pieces.
   - `consumeStream`:
-    - writes `Delta.Content` to `text` and calls `onText` when the piece is
-      non-empty;
+    - writes answer pieces to `text` and thinking pieces to `reasoning`,
+      calling `onText`/`onReasoning` for non-empty pieces, and remembers
+      the first skipped type (top-level chunk or item inside `thinking`);
     - then reads `Delta.Reasoning`, else `Delta.ReasoningContent`, into
       `reasoning` and calls `onReasoning`;
     - then reads tool-call fragments.
 
-    At the end, `result.Content = text.String()` and
-    `result.Reasoning = reasoning.String()`.
+    At the end, a reply with no text, reasoning or tool call that skipped
+    something fails with `errUnshowableContent`; otherwise
+    `result.Content = text.String()`, `result.Reasoning = reasoning.String()`
+    and `result.Replay` comes from reasoning-replay's `replayCollector`,
+    which also accumulates Mistral thinking chunks under the thinking-chunk
+    wire (`addContent`).
   - The same function rejects a tool-call fragment whose `type` is not
     `function`, clipping the type to 32 bytes in the error. The
     only-unshowable-content error (spec point 8) clips the chunk type the
     same way.
-  - `Message.Reasoning` is commented "never sent back to the provider", and
-    `requestMessage.Content` is a string. Both stay as they are here; the
-    replay foundation changes them.
-  - `Client.stream` builds the request. It is unchanged by this feature.
+  - `Message.Reasoning` is display reasoning and is never sent.
+    `requestMessage.Content` is a `requestContent` (`replay_request.go`):
+    it marshals as the plain string, byte for byte, unless Mistral thinking
+    replay goes back, in which case it is a chunk list led by one thinking
+    chunk.
+  - `Client.stream` sets each message's content as plain text, and
+    reasoning-replay's `replayEncoder` adds the thinking chunk for the
+    thinking-chunk wire (`fillReplayFields`), counting it as sent replay;
+    `consumeStream` gets a `replayCapture{wire, source}`.
 - `internal/model/codex.go`, `responses_stream.go`: the ChatGPT Responses
   path. Not touched.
 - Callers that inherit the fix through `Stream`/`StreamUsage`:
@@ -51,7 +62,9 @@ spec. Decisions live in [spec.md](spec.md); sources in
   after resume today.
 - `internal/model/provider.go`: the `mistral` row
   (`https://api.mistral.ai/v1`, `LIKHA_MISTRAL_API_KEY`, no default model,
-  `Effort` zero value). It is unchanged by this feature.
+  `Effort` zero value). Its `Replay` stays the zero value (`ReplayNone`)
+  until reasoning-replay T12 lands FR-39's rejection hint (tasks T10);
+  tests turn the `ReplayThinkingChunk` wire on with `setReplayWire`.
 
 ## Tests
 
@@ -76,9 +89,10 @@ spec. Decisions live in [spec.md](spec.md); sources in
   - its spec.md Scope lists Mistral as out of scope ("Mistral thinking
     chunks belong to the chunked-content spec"), and its context.md matrix
     shows `mistral | none (chunked-content spec)`;
-  - so this spec's M2 sets the `mistral` row's replay flag, fills the state
-    for Mistral thinking, and adds the list-`content` encoding. The needs
-    are listed in [tasks.md](tasks.md) M2.
+  - so this spec's M2 fills the state for Mistral thinking and adds the
+    list-`content` encoding (done), and turns the `mistral` row's replay
+    flag on once reasoning-replay T12 has landed FR-39's rejection hint
+    (tasks T10, open). The needs are listed in [tasks.md](tasks.md) M2.
 - [model-effort](../model-effort/context.md#provider-support-matrix):
   - the matrix row `mistral | reasoning_effort | blocked | chunk-list
     content must parse first` becomes

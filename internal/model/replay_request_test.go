@@ -326,6 +326,14 @@ func TestReplayRejectedError(t *testing.T) {
 		}
 		return []Message{{Role: "user", Content: "go"}, {Role: "assistant", Content: "a", Replay: replay}, {Role: "user", Content: "more"}}
 	}
+	ownThinking := func(client *Client) []Message {
+		replay, err := NewReasoningReplay(client.ReplaySource(), nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		replay.Thinking = strPtr("trace")
+		return []Message{{Role: "user", Content: "go"}, {Role: "assistant", Content: "a", Replay: replay}, {Role: "user", Content: "more"}}
+	}
 	foreignToolTurn := func(*Client) []Message {
 		return []Message{
 			{Role: "user", Content: "go"},
@@ -347,6 +355,8 @@ func TestReplayRejectedError(t *testing.T) {
 	}{
 		{"DeepSeek turn from another issuer", ReplayReasoningContent, http.StatusBadRequest, foreignToolTurn, testTools, "", 1, 0, true, false},
 		{"own replay sent", ReplayReasoningContent, http.StatusBadRequest, own, testTools, "", 0, 1, true, false},
+		{"Mistral thinking chunk sent", ReplayThinkingChunk, http.StatusBadRequest, ownThinking, nil, "", 0, 1, true, false},
+		{"Mistral reply without thinking sends nothing", ReplayThinkingChunk, http.StatusBadRequest, own, nil, "", 0, 0, false, false},
 		{"Gemini skip value", ReplayThoughtSignature, http.StatusBadRequest, foreignToolTurn, testTools, "", 1, 0, true, false},
 		{"effort and replay", ReplayReasoningContent, http.StatusBadRequest, own, testTools, "high", 0, 1, true, true},
 		{"provider without replay", ReplayNone, http.StatusBadRequest, own, testTools, "", 0, 0, false, false},
@@ -396,6 +406,7 @@ func TestPartialAssistantKeepsOnlyUnsignedReasoning(t *testing.T) {
 		{"DeepSeek keeps the reasoning text", client, ReplayReasoningContent, &ReasoningReplay{Source: client.ReplaySource(), ReasoningContent: strPtr("half a thou")}},
 		{"Gemini keeps nothing signed", client, ReplayThoughtSignature, nil},
 		{"OpenRouter keeps nothing signed", client, ReplayReasoningDetails, nil},
+		{"Mistral keeps no thinking", client, ReplayThinkingChunk, nil},
 		{"no replay", client, ReplayNone, nil},
 		{"nil client", nil, ReplayNone, nil},
 	}

@@ -159,8 +159,9 @@ and every request is unchanged.
       `docs/providers.md`, then set `Provider.Effort`. Suggested order:
       openai, openrouter, gemini, xai, deepseek, then the rest. Before
       enabling `openai`, the probe must cover a GPT-6 model with tools at a
-      level above `none` (research.md). Mistral stays blocked until its
-      chunk-list content parses.
+      level above `none` (research.md). Mistral may be probed once
+      chunked-content M1 lands, and is enabled only after its M2 lands
+      (chunked-content decision 10).
 - [x] **T21. Docs and changelog.** `docs/usage.md` covers `/effort` and the
       effort step; `docs/providers.md` gets an effort column. Add an
       **Unreleased** entry in `CHANGELOG.md` that states which providers were

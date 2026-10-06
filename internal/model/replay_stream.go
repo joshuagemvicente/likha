@@ -23,6 +23,12 @@ type replayCollector struct {
 	reasoningContent     strings.Builder
 	reasoningContentSeen bool
 	details              []json.RawMessage
+	// Mistral thinking chunks (specs/chunked-content M2), kept apart from
+	// display reasoning, which also takes "reasoning" fields and which
+	// explore and profile children clip.
+	thinking          strings.Builder
+	thinkingSeen      bool
+	thinkingSignature string
 }
 
 // addDelta records one delta's replay parts for the captured wire. A
@@ -46,6 +52,24 @@ func (r *replayCollector) addDelta(reasoningContent *string, details json.RawMes
 		r.details = append(r.details, elements...)
 	}
 	return nil
+}
+
+// addContent records one delta's Mistral thinking chunks under the
+// thinking-chunk wire. A thinking chunk without text still counts, so the
+// reply records "" rather than nothing; the last non-empty signature wins.
+func (r *replayCollector) addContent(content streamContent) {
+	if r.capture.wire != ReplayThinkingChunk || !content.thinking {
+		return
+	}
+	r.thinkingSeen = true
+	for _, piece := range content.pieces {
+		if piece.kind == pieceThinking {
+			r.thinking.WriteString(piece.text)
+		}
+	}
+	if content.signature != "" {
+		r.thinkingSignature = content.signature
+	}
 }
 
 // thoughtSignature reads a tool-call fragment's
@@ -93,6 +117,13 @@ func (r *replayCollector) finish() (*ReasoningReplay, error) {
 	replay, err := NewReasoningReplay(r.capture.source, reasoningContent, details, nil)
 	if err != nil {
 		return nil, fmt.Errorf("capture replay state: %w", err)
+	}
+	if r.thinkingSeen {
+		// The value is still private to this function, so filling it here
+		// does not break the immutability of shared replay values.
+		text := r.thinking.String()
+		replay.Thinking = &text
+		replay.ThinkingSignature = r.thinkingSignature
 	}
 	return replay, nil
 }

@@ -1,7 +1,12 @@
 # Feature: Chunked message content (Mistral thinking and text chunks)
 
-**Status:** planned — decisions recorded 2026-10-06 (user delegated defaults);
-no implementation started. No new functional requirement: this is
+**Status:** implemented (local) 2026-10-06 — M1 (parsing) and M2's
+Mistral thinking capture and wire encoding landed; automated suite green.
+The `mistral` row's replay flag stays off until reasoning-replay T12 lands
+FR-39's rejection hint (tasks T10), so no request carries Mistral thinking
+yet. Live Mistral probe (tasks T9) outstanding, so nothing claims Mistral
+works. Decisions recorded
+2026-10-06 (user delegated defaults). No new functional requirement: this is
 conformance to [v1-spec FR-03](../v1-spec.md) (responses stream, and
 assistant text is distinguished from other output) and FR-15 (thinking-model
 reasoning renders in the muted role). Replay builds on
@@ -142,6 +147,10 @@ Out of scope:
    shape, one leading `thinking` chunk followed by the answer text, sent
    only to the endpoint and model that produced it. Reason: the wire shape
    changes `content` itself, which only this spec defines.
+   *Amended 2026-10-06 (review):* the row's flag is turned on only after
+   [reasoning-replay](../reasoning-replay/spec.md) T12 lands FR-39's
+   rejection hint, so a 400 against replayed thinking names `/compact`
+   instead of repeating as a bare error on every later turn (tasks T10).
 9. **No new FR.** The feature makes an existing stream shape conform to
    FR-03 and FR-15. It adds no command and no setting. Its one new message,
    the error for a reply made only of unshowable content, is an ordinary

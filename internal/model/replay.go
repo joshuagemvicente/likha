@@ -27,6 +27,12 @@ const (
 	// ReplayAnthropicBlocks sends Anthropic content blocks; only the native
 	// Claude client uses it.
 	ReplayAnthropicBlocks
+	// ReplayThinkingChunk sends Mistral thinking back as one leading
+	// "thinking" chunk inside a list-shaped content (specs/chunked-content
+	// M2). The mistral row stays off until FR-39's rejection hint exists
+	// (chunked-content T10), since a rejected replay would repeat on every
+	// later turn with no way out named.
+	ReplayThinkingChunk
 )
 
 // modelBound reports whether state of this form goes back only to the model
@@ -72,6 +78,12 @@ type ReasoningReplay struct {
 	// interleaved thinking keeps its position. claude-native owns how it is
 	// produced and sent.
 	Blocks json.RawMessage `json:",omitempty"`
+	// Thinking is Mistral's thinking-chunk text for the whole reply, joined
+	// in arrival order and never clipped. Nil means the reply held no
+	// thinking chunk; a pointer to "" means it held one without text.
+	Thinking *string `json:",omitempty"`
+	// ThinkingSignature is the last non-empty signature of those chunks.
+	ThinkingSignature string `json:",omitempty"`
 }
 
 // NewReasoningReplay builds replay state issued by source. Details and Blocks
@@ -133,7 +145,18 @@ func (r *ReasoningReplay) Equal(other *ReasoningReplay) bool {
 	if r.ReasoningContent != nil && *r.ReasoningContent != *other.ReasoningContent {
 		return false
 	}
+	if !equalText(r.Thinking, other.Thinking) || r.ThinkingSignature != other.ThinkingSignature {
+		return false
+	}
 	return bytes.Equal(r.Details, other.Details) && bytes.Equal(r.Blocks, other.Blocks)
+}
+
+// equalText compares optional texts by value; nil equals only nil.
+func equalText(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // UnsignedOnly returns the part of r that stays valid after the message it
@@ -144,14 +167,22 @@ func (r *ReasoningReplay) Equal(other *ReasoningReplay) bool {
 // which the caller clears) describe the exact turn the issuer returned, so
 // they go. It returns nil when nothing unsigned remains rather than a
 // Source-only value, which would claim the issuer sent nothing and so keep
-// Gemini's skip value off an unsigned call (tasks T11). Later unsigned forms
-// add their field here.
+// Gemini's skip value off an unsigned call (tasks T11). Mistral thinking is
+// unsigned text only while no signature came with it; a signed trace
+// describes the exact turn, so it goes like the other signed forms.
 func (r *ReasoningReplay) UnsignedOnly() *ReasoningReplay {
-	if r == nil || r.ReasoningContent == nil {
+	if r == nil {
 		return nil
 	}
-	// Sharing the string pointer is safe: replay values are immutable.
-	return &ReasoningReplay{Source: r.Source, ReasoningContent: r.ReasoningContent}
+	// Sharing the string pointers is safe: replay values are immutable.
+	kept := &ReasoningReplay{Source: r.Source, ReasoningContent: r.ReasoningContent}
+	if r.ThinkingSignature == "" {
+		kept.Thinking = r.Thinking
+	}
+	if kept.ReasoningContent == nil && kept.Thinking == nil {
+		return nil
+	}
+	return kept
 }
 
 // ReplaySource identifies this client as an issuer of replay state. It is
@@ -222,6 +253,10 @@ func (c *Client) replaySentText(m Message, currentTurn bool) []string {
 	case ReplayReasoningDetails:
 		if len(replay.Details) != 0 {
 			return []string{string(replay.Details)}
+		}
+	case ReplayThinkingChunk:
+		if replay.Thinking != nil {
+			return []string{*replay.Thinking, replay.ThinkingSignature}
 		}
 	case ReplayThoughtSignature:
 		var signatures []string
