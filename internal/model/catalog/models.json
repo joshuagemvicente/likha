@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated": "2026-10-04",
+  "generated": "2026-10-06",
   "upstream": {
     "name": "models.dev",
     "url": "https://models.dev/api.json"
@@ -20,6 +20,11 @@
             "cache_write": 0.33
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -94,6 +99,13 @@
             "cache_write": 12.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -113,6 +125,13 @@
             "cache_write": 12.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -171,6 +190,11 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -190,6 +214,12 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -209,6 +239,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -228,6 +265,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -247,6 +291,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -266,6 +317,13 @@
             "cache_write": 5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -304,6 +362,12 @@
             "cache_write": 4.125
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -323,6 +387,13 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -342,6 +413,13 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -454,6 +532,12 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -473,6 +557,13 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -492,6 +583,13 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -511,6 +609,13 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -530,6 +635,13 @@
             "cache_write": 5.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -568,6 +680,12 @@
             "cache_write": 4.125
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -587,6 +705,13 @@
             "cache_write": 2.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -655,6 +780,11 @@
             "cache_write": 0.374
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -729,6 +859,13 @@
             "cache_write": 13.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -767,6 +904,11 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -786,6 +928,12 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -805,6 +953,13 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -824,6 +979,13 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -843,6 +1005,13 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -862,6 +1031,13 @@
             "cache_write": 5.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -920,6 +1096,12 @@
             "cache_write": 4.125
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -939,6 +1121,13 @@
             "cache_write": 2.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -958,6 +1147,13 @@
             "cache_write": 2.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -992,6 +1188,11 @@
             "cache_write": 0.3
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1012,6 +1213,13 @@
             "cache_write": 12.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1031,6 +1239,13 @@
             "cache_write": 12.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1069,6 +1284,11 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1088,6 +1308,12 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1107,6 +1333,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1126,6 +1359,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1145,6 +1385,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1164,6 +1411,13 @@
             "cache_write": 5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1222,6 +1476,12 @@
             "cache_write": 3.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1241,6 +1501,13 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1260,6 +1527,13 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1307,6 +1581,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -1335,6 +1617,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -1363,6 +1653,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -1391,6 +1689,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -1419,6 +1724,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -1447,6 +1760,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -1475,6 +1796,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -1492,6 +1820,12 @@
             "cache_read": 0.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -1509,6 +1843,12 @@
             "cache_read": 0.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1526,6 +1866,10 @@
             "output": 0.4
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1543,6 +1887,10 @@
             "output": 0.4
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1560,6 +1908,10 @@
             "output": 0.08
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1599,6 +1951,13 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1618,6 +1977,13 @@
             "cache_write": 2.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1647,6 +2013,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1676,6 +2050,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1695,6 +2077,11 @@
             "cache_write": 0.396
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1734,6 +2121,13 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1753,6 +2147,13 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1772,6 +2173,13 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1791,6 +2199,13 @@
             "cache_write": 5.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1829,6 +2244,12 @@
             "cache_write": 4.125
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -1848,6 +2269,13 @@
             "cache_write": 2.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2208,6 +2636,13 @@
             "cache_read": 0.275
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2226,6 +2661,13 @@
             "cache_read": 0.55
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2255,6 +2697,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2284,6 +2734,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2313,6 +2771,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2342,6 +2808,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2371,6 +2844,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2400,6 +2881,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2429,6 +2918,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2446,6 +2942,11 @@
             "output": 0.6
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -2461,6 +2962,11 @@
             "output": 0.6
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -2476,6 +2982,11 @@
             "output": 0.3
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -2491,6 +3002,11 @@
             "output": 0.3
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -2506,6 +3022,11 @@
             "output": 0.6
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -2521,6 +3042,11 @@
             "output": 0.2
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -2636,6 +3162,11 @@
             "output": 0.72
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -2651,6 +3182,11 @@
             "output": 0.36
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -2668,6 +3204,11 @@
             "cache_write": 0.33
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2762,6 +3303,13 @@
             "cache_write": 13.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2781,6 +3329,13 @@
             "cache_write": 13.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2839,6 +3394,11 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2858,6 +3418,12 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2877,6 +3443,13 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2896,6 +3469,13 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2915,6 +3495,13 @@
             "cache_write": 6.875
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2934,6 +3521,13 @@
             "cache_write": 5.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -2992,6 +3586,12 @@
             "cache_write": 4.125
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3011,6 +3611,13 @@
             "cache_write": 2.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3030,6 +3637,13 @@
             "cache_write": 2.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3164,6 +3778,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3192,6 +3814,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3220,6 +3850,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3248,6 +3886,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3276,6 +3921,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3304,6 +3957,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3332,6 +3993,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3379,6 +4047,12 @@
             "cache_read": 0.55
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3396,6 +4070,12 @@
             "cache_read": 0.55
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3444,6 +4124,12 @@
             "cache_read": 0.2
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3461,6 +4147,12 @@
             "cache_read": 0.55
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3527,6 +4219,11 @@
             "output": 0.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -3543,6 +4240,12 @@
             "cache_read": 0.99
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3607,6 +4310,13 @@
             "cache_write": 12.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3626,6 +4336,13 @@
             "cache_write": 12.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3683,6 +4400,11 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3702,6 +4424,11 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3721,6 +4448,12 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3740,6 +4473,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3759,6 +4499,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3778,6 +4525,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3797,6 +4551,13 @@
             "cache_write": 5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3866,6 +4627,12 @@
             "cache_write": 3.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3885,6 +4652,13 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3904,6 +4678,13 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -3927,6 +4708,11 @@
             "cache_read": 0.006
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3950,6 +4736,11 @@
             "cache_read": 0.006
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3974,6 +4765,11 @@
             "cache_read": 0.006
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -3998,6 +4794,11 @@
             "cache_read": 0.044
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -4107,6 +4908,12 @@
             "cache_read": 0.03
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4115,7 +4922,13 @@
             "pdf"
           ],
           "updated": "2025-06-17",
-          "source": "models.dev"
+          "source": "override",
+          "ref": "https://ai.google.dev/gemini-api/docs/openai",
+          "verified": "2026-10-06",
+          "note": "models.dev lists only a toggle and thinking budget; Google maps reasoning_effort low/medium/high to 1,024/8,192/24,576 budget tokens and none disables thinking on 2.5 models.",
+          "overridden": [
+            "efforts"
+          ]
         },
         "gemini-2.5-flash-lite": {
           "name": "Gemini 2.5 Flash-Lite",
@@ -4127,6 +4940,12 @@
             "cache_read": 0.01
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4135,7 +4954,13 @@
             "pdf"
           ],
           "updated": "2025-06-17",
-          "source": "models.dev"
+          "source": "override",
+          "ref": "https://ai.google.dev/gemini-api/docs/openai",
+          "verified": "2026-10-06",
+          "note": "models.dev lists only a toggle and thinking budget; Google maps reasoning_effort low/medium/high to 1,024/8,192/24,576 budget tokens and none disables thinking on 2.5 models.",
+          "overridden": [
+            "efforts"
+          ]
         },
         "gemini-2.5-pro": {
           "name": "Gemini 2.5 Pro",
@@ -4155,6 +4980,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4163,7 +4993,13 @@
             "pdf"
           ],
           "updated": "2025-06-17",
-          "source": "models.dev"
+          "source": "override",
+          "ref": "https://ai.google.dev/gemini-api/docs/openai",
+          "verified": "2026-10-06",
+          "note": "models.dev lists only a thinking budget; Google maps reasoning_effort low/medium/high to 1,024/8,192/24,576 budget tokens for Gemini 2.5. Reasoning cannot be turned off on 2.5 Pro, so none is not offered.",
+          "overridden": [
+            "efforts"
+          ]
         },
         "gemini-3-flash-preview": {
           "name": "Gemini 3 Flash Preview",
@@ -4175,6 +5011,12 @@
             "cache_read": 0.05
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4195,6 +5037,12 @@
             "cache_read": 0.025
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4214,6 +5062,10 @@
             "output": 30
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -4231,6 +5083,12 @@
             "cache_read": 0.025
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4251,6 +5109,12 @@
             "output": 4.5
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4278,6 +5142,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4306,6 +5175,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4326,6 +5200,12 @@
             "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4346,6 +5226,12 @@
             "cache_read": 0.03
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4366,6 +5252,12 @@
             "cache_read": 0.075
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4386,6 +5278,11 @@
             "cache_read": 0.075
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4406,6 +5303,11 @@
             "cache_read": 0.075
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4426,6 +5328,11 @@
             "cache_read": 0.075
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4446,6 +5353,12 @@
             "cache_read": 0.03
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -4523,6 +5436,11 @@
             "cache_read": 0.075
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -4539,6 +5457,11 @@
             "cache_read": 0.0375
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -4554,6 +5477,11 @@
             "output": 0.3
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -4571,6 +5499,9 @@
             "cache_read": 0.3
           },
           "reasoning": true,
+          "efforts": [
+            "none"
+          ],
           "modalities": [
             "text",
             "image"
@@ -4587,6 +5518,12 @@
             "output": 4
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -4849,6 +5786,10 @@
             "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -4866,6 +5807,10 @@
             "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -4912,6 +5857,10 @@
             "cache_read": 0.015
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -4929,6 +5878,10 @@
             "cache_read": 0.015
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5048,6 +6001,11 @@
             "cache_read": 0.14
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -5065,6 +6023,11 @@
             "cache_read": 0.14
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -5251,6 +6214,12 @@
             "cache_read": 0.125
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5269,6 +6238,12 @@
             "cache_read": 0.025
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5287,6 +6262,12 @@
             "cache_read": 0.005
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5304,6 +6285,9 @@
             "output": 120
           },
           "reasoning": true,
+          "efforts": [
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5322,6 +6306,12 @@
             "cache_read": 0.125
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5340,6 +6330,13 @@
             "cache_read": 0.175
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5357,6 +6354,9 @@
             "cache_read": 0.175
           },
           "reasoning": true,
+          "efforts": [
+            "medium"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5375,6 +6375,11 @@
             "output": 168
           },
           "reasoning": true,
+          "efforts": [
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5410,6 +6415,13 @@
             "cache_read": 0.175
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5429,6 +6441,13 @@
             "cache_read": 0.175
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5456,6 +6475,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5475,6 +6501,13 @@
             "cache_read": 0.075
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5493,6 +6526,13 @@
             "cache_read": 0.02
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5517,6 +6557,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5543,6 +6588,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5568,6 +6620,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5597,6 +6654,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5626,6 +6691,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5655,6 +6728,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5684,6 +6765,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5713,6 +6802,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5742,6 +6838,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5771,6 +6875,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5800,6 +6912,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5829,6 +6948,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5849,6 +6976,14 @@
             "cache_write": 15.625
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5867,6 +7002,13 @@
             "cache_read": 0.4
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "audio",
@@ -5885,6 +7027,11 @@
             "cache_read": 7.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5903,6 +7050,11 @@
             "output": 600
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5921,6 +7073,11 @@
             "cache_read": 0.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -5939,6 +7096,11 @@
             "cache_read": 0.55
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -5955,6 +7117,11 @@
             "output": 80
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5972,6 +7139,11 @@
             "cache_read": 0.275
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -5995,6 +7167,11 @@
             "cache_read": 0.003
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -6011,6 +7188,11 @@
             "cache_read": 0.003
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -6028,6 +7210,10 @@
             "cache_read": 0.022
           },
           "reasoning": true,
+          "efforts": [
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -6044,6 +7230,11 @@
             "cache_read": 0.003
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -6061,6 +7252,10 @@
             "cache_read": 0.26
           },
           "reasoning": true,
+          "efforts": [
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -6077,6 +7272,11 @@
             "cache_read": 0.26
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -6093,6 +7293,11 @@
             "cache_read": 0.03
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6123,6 +7328,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6152,6 +7365,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6178,6 +7399,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -6204,6 +7430,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -6229,6 +7461,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6248,6 +7486,11 @@
             "cache_read": 0.035
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -6264,6 +7507,10 @@
             "cache_read": 0.042
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -6317,6 +7564,9 @@
             "cache_read": 0.3
           },
           "reasoning": true,
+          "efforts": [
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6484,6 +7734,13 @@
             "cache_read": 0.002
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6504,6 +7761,13 @@
             "cache_read": 0.002
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6600,6 +7864,11 @@
             "cache_write": 0.2
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6619,12 +7888,44 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
             "video"
           ],
           "updated": "2026-08-03",
+          "source": "models.dev"
+        },
+        "space-bunny": {
+          "name": "Space Bunny",
+          "context": 1048576,
+          "input": 524288,
+          "output": 524288,
+          "cost": {
+            "input": 0.15,
+            "output": 0.6,
+            "cache_read": 0.03,
+            "cache_write": 0
+          },
+          "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "modalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "updated": "2026-09-23",
           "source": "models.dev"
         },
         "space-bunny-free": {
@@ -6639,11 +7940,19 @@
             "cache_write": 0
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
             "video"
           ],
+          "status": "deprecated",
           "updated": "2026-09-23",
           "source": "models.dev"
         }
@@ -6700,6 +8009,13 @@
             "cache_write": 12.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6719,6 +8035,13 @@
             "cache_write": 12.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6777,6 +8100,11 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6796,6 +8124,12 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6815,6 +8149,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6834,6 +8175,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6853,6 +8201,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6872,6 +8227,13 @@
             "cache_write": 5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6947,6 +8309,12 @@
             "cache_write": 3.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6966,6 +8334,13 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -6985,6 +8360,13 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7003,6 +8385,11 @@
             "cache_read": 0.028
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -7019,6 +8406,11 @@
             "cache_read": 0
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -7036,6 +8428,11 @@
             "cache_read": 0.028
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -7053,6 +8450,10 @@
             "cache_read": 0.145
           },
           "reasoning": true,
+          "efforts": [
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -7069,6 +8470,11 @@
             "cache_read": 0.006
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -7085,6 +8491,11 @@
             "output": 0
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -7102,6 +8513,12 @@
             "cache_read": 0.05
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7130,6 +8547,10 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7159,6 +8580,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7179,6 +8605,12 @@
             "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7199,6 +8631,12 @@
             "cache_read": 0.03
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7219,6 +8657,12 @@
             "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7239,6 +8683,11 @@
             "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7259,6 +8708,11 @@
             "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7379,6 +8833,10 @@
             "cache_read": 0.26
           },
           "reasoning": true,
+          "efforts": [
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -7395,6 +8853,11 @@
             "cache_read": 0.26
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -7411,6 +8874,11 @@
             "cache_read": 0.03
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7431,6 +8899,12 @@
             "cache_read": 0.107
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -7449,6 +8923,11 @@
             "cache_read": 0.107
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -7467,6 +8946,12 @@
             "cache_read": 0.005
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -7485,6 +8970,12 @@
             "cache_read": 0.107
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -7503,6 +8994,11 @@
             "cache_read": 0.107
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -7521,6 +9017,12 @@
             "cache_read": 0.125
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -7539,6 +9041,11 @@
             "cache_read": 0.025
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -7557,6 +9064,13 @@
             "cache_read": 0.175
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -7575,6 +9089,12 @@
             "cache_read": 0.175
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7594,6 +9114,13 @@
             "cache_read": 0.175
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7612,6 +9139,12 @@
             "cache_read": 0.175
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text"
           ],
@@ -7637,6 +9170,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7656,6 +9196,13 @@
             "cache_read": 0.075
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7675,6 +9222,13 @@
             "cache_read": 0.02
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7694,6 +9248,11 @@
             "cache_read": 30
           },
           "reasoning": true,
+          "efforts": [
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7721,6 +9280,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7740,6 +9306,11 @@
             "cache_read": 30
           },
           "reasoning": true,
+          "efforts": [
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7769,6 +9340,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7798,6 +9377,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7827,6 +9414,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7856,6 +9451,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7885,6 +9487,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7914,6 +9524,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7943,6 +9561,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -7969,6 +9594,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -7994,6 +9624,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -8019,6 +9655,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -8073,6 +9715,11 @@
             "cache_read": 0
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -8213,6 +9860,9 @@
             "cache_read": 0.3
           },
           "reasoning": true,
+          "efforts": [
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -8231,6 +9881,11 @@
             "cache_read": 0
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -8279,6 +9934,11 @@
             "cache_read": 0
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -8575,6 +10235,13 @@
             "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -8595,6 +10262,13 @@
             "cache_read": 0
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -8616,6 +10290,13 @@
             "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -8636,6 +10317,13 @@
             "cache_read": 0
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -8704,6 +10392,10 @@
             "output": 0
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -8794,6 +10486,11 @@
             "cache_write": 0.2
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -8848,6 +10545,13 @@
             "cache_write": 0
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -8881,6 +10585,11 @@
             "cache_read": 0
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -8953,6 +10662,11 @@
             "cache_read": 0.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -8969,6 +10683,11 @@
             "cache_read": 0.18
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -9064,6 +10783,13 @@
             "cache_write": 12.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -9083,6 +10809,13 @@
             "cache_write": 12.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -9168,6 +10901,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -9196,6 +10935,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -9215,6 +10961,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -9234,6 +10987,13 @@
             "cache_write": 6.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -9253,6 +11013,13 @@
             "cache_write": 5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -9337,6 +11104,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -9356,6 +11129,13 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -9375,6 +11155,13 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -9495,6 +11282,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -9519,6 +11311,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -9543,6 +11341,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -9628,10 +11432,11 @@
         "deepseek/deepseek-chat-v3-0324": {
           "name": "DeepSeek V3 0324",
           "context": 163840,
-          "output": 147456,
+          "output": 115200,
           "cost": {
-            "input": 0.25,
-            "output": 1
+            "input": 0.29,
+            "output": 1.14,
+            "cache_read": 0.11
           },
           "modalities": [
             "text"
@@ -9737,11 +11542,15 @@
           "context": 1048576,
           "output": 943718,
           "cost": {
-            "input": 0.0224,
+            "input": 0.0204,
             "output": 1.28,
-            "cache_read": 0.0224
+            "cache_read": 0.0204
           },
           "reasoning": true,
+          "efforts": [
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text"
           ],
@@ -9753,11 +11562,16 @@
           "context": 1048576,
           "output": 943718,
           "cost": {
-            "input": 0.0152,
+            "input": 0.0069,
             "output": 1.28,
-            "cache_read": 0.0152
+            "cache_read": 0.0069
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -9774,6 +11588,11 @@
             "cache_read": 0.00686
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -9791,6 +11610,10 @@
             "cache_read": 0.0174
           },
           "reasoning": true,
+          "efforts": [
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text"
           ],
@@ -9800,13 +11623,18 @@
         "deepseek/deepseek-v4-pro-0813": {
           "name": "DeepSeek V4 Pro 0813",
           "context": 1048576,
-          "output": 943718,
+          "output": 393216,
           "cost": {
-            "input": 0.85,
-            "output": 5,
-            "cache_read": 0.7
+            "input": 0.66,
+            "output": 1.98,
+            "cache_read": 0.022
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -9818,11 +11646,16 @@
           "context": 1048576,
           "output": 943718,
           "cost": {
-            "input": 0.003,
-            "output": 2.4,
-            "cache_read": 0.003
+            "input": 0.012563,
+            "output": 1.32,
+            "cache_read": 0.012563
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -9856,6 +11689,11 @@
             "cache_read": 0.3
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -9978,6 +11816,12 @@
             "reasoning": 3
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10019,6 +11863,12 @@
             "reasoning": 1.5
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10041,6 +11891,12 @@
             "reasoning": 1.5
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10071,6 +11927,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10101,6 +11962,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10123,6 +11989,12 @@
             "reasoning": 9
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10145,6 +12017,12 @@
             "reasoning": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10167,6 +12045,12 @@
             "reasoning": 3.75
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10189,6 +12073,11 @@
             "reasoning": 3.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10211,6 +12100,11 @@
             "reasoning": 3.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10257,9 +12151,9 @@
           "context": 262144,
           "output": 235929,
           "cost": {
-            "input": 0.0675,
-            "output": 0.225,
-            "cache_read": 0.0375
+            "input": 0.09,
+            "output": 0.3,
+            "cache_read": 0.05
           },
           "reasoning": true,
           "modalities": [
@@ -10332,6 +12226,11 @@
             "cache_read": 0.015
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -10348,6 +12247,12 @@
             "cache_read": 0.025
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -10364,6 +12269,12 @@
             "cache_read": 0.004
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -10573,13 +12484,19 @@
         "meta/muse-glimmer-30b": {
           "name": "Muse Glimmer 30B",
           "context": 131072,
-          "output": 117964,
+          "output": 16384,
           "cost": {
-            "input": 0.35,
-            "output": 1.5,
+            "input": 0.3,
+            "output": 1.2,
             "cache_read": 0.04
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -10597,6 +12514,13 @@
             "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10616,6 +12540,13 @@
             "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10635,6 +12566,13 @@
             "cache_read": 0.002
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10654,6 +12592,14 @@
             "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10673,6 +12619,14 @@
             "cache_read": 0.002
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10933,6 +12887,10 @@
             "output": 7.5
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -10998,6 +12956,10 @@
             "cache_read": 0.015
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -11167,11 +13129,16 @@
           "context": 1048576,
           "output": 943718,
           "cost": {
-            "input": 0.72,
-            "output": 13,
-            "cache_read": 0.7
+            "input": 0.95,
+            "output": 14,
+            "cache_read": 0.31
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -11190,6 +13157,11 @@
             "cache_read": 0.015
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -11240,6 +13212,10 @@
             "output": 0.45
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium"
+          ],
           "modalities": [
             "text"
           ],
@@ -11255,6 +13231,10 @@
             "output": 0
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium"
+          ],
           "modalities": [
             "text"
           ],
@@ -11271,6 +13251,10 @@
             "cache_read": 0.1
           },
           "reasoning": true,
+          "efforts": [
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -11286,6 +13270,10 @@
             "output": 0
           },
           "reasoning": true,
+          "efforts": [
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -11295,11 +13283,11 @@
         "nvidia/nemotron-3.5-lightning": {
           "name": "Nemotron 3.5 Lightning 30B A3B",
           "context": 262144,
-          "output": 131072,
+          "output": 32768,
           "cost": {
-            "input": 0.0595,
-            "output": 0.17,
-            "cache_read": 0.02975
+            "input": 0.06,
+            "output": 0.16,
+            "cache_read": 0.03
           },
           "reasoning": true,
           "modalities": [
@@ -11557,6 +13545,12 @@
             "cache_read": 0.125
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -11576,6 +13570,12 @@
             "cache_read": 0.025
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -11595,6 +13595,12 @@
             "cache_read": 0.005
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -11613,6 +13619,9 @@
             "output": 120
           },
           "reasoning": true,
+          "efforts": [
+            "high"
+          ],
           "modalities": [
             "image",
             "text",
@@ -11632,6 +13641,12 @@
             "cache_read": 0.125
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "image",
             "text",
@@ -11651,6 +13666,11 @@
             "cache_read": 0.13
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -11669,6 +13689,12 @@
             "cache_read": 0.125
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -11687,6 +13713,11 @@
             "cache_read": 0.03
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image"
@@ -11705,6 +13736,13 @@
             "cache_read": 0.175
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "pdf",
             "image",
@@ -11741,6 +13779,12 @@
             "cache_read": 0.175
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -11758,6 +13802,11 @@
             "output": 168
           },
           "reasoning": true,
+          "efforts": [
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "image",
             "text",
@@ -11777,6 +13826,13 @@
             "cache_read": 0.175
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -11804,6 +13860,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -11823,6 +13886,13 @@
             "cache_read": 0.075
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "pdf",
             "image",
@@ -11842,6 +13912,13 @@
             "cache_read": 0.02
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "pdf",
             "image",
@@ -11867,6 +13944,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -11894,6 +13976,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -11919,6 +14008,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -11948,6 +14042,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -11977,6 +14079,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -12006,6 +14116,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -12020,21 +14138,29 @@
           "input": 922000,
           "output": 128000,
           "cost": {
-            "input": 4,
-            "output": 20,
-            "cache_read": 0.4,
-            "cache_write": 5,
+            "input": 2,
+            "output": 10,
+            "cache_read": 0.2,
+            "cache_write": 2.5,
             "tiers": [
               {
                 "above": 272000,
-                "input": 8,
-                "output": 30,
-                "cache_read": 0.8,
-                "cache_write": 10
+                "input": 4,
+                "output": 15,
+                "cache_read": 0.4,
+                "cache_write": 5
               }
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -12064,6 +14190,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -12093,6 +14227,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -12122,6 +14264,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -12150,6 +14299,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "pdf",
             "image",
@@ -12179,6 +14335,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -12207,6 +14371,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "pdf",
             "image",
@@ -12236,6 +14408,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -12264,6 +14444,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "pdf",
             "image",
@@ -12293,6 +14481,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -12321,6 +14516,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "pdf",
             "image",
@@ -12385,6 +14587,11 @@
             "output": 0.17
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -12401,6 +14608,11 @@
             "cache_read": 0.009
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -12417,6 +14629,11 @@
             "cache_read": 0.0375
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -12486,6 +14703,9 @@
             "cache_read": 0.55
           },
           "reasoning": true,
+          "efforts": [
+            "high"
+          ],
           "modalities": [
             "text",
             "pdf"
@@ -12538,6 +14758,9 @@
             "cache_read": 0.275
           },
           "reasoning": true,
+          "efforts": [
+            "high"
+          ],
           "modalities": [
             "image",
             "text",
@@ -12586,6 +14809,13 @@
             "output": 1.5
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -12667,6 +14897,10 @@
             "cache_read": 0.0375
           },
           "reasoning": true,
+          "efforts": [
+            "medium",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image"
@@ -12781,11 +15015,10 @@
         "qwen/qwen3-235b-a22b-2507": {
           "name": "Qwen3 235B A22B Instruct 2507",
           "context": 262144,
-          "output": 235929,
+          "output": 16384,
           "cost": {
-            "input": 0.0875,
-            "output": 0.35,
-            "cache_read": 0.0175
+            "input": 0.09,
+            "output": 0.55
           },
           "modalities": [
             "text"
@@ -12826,10 +15059,10 @@
         "qwen/qwen3-30b-a3b-instruct-2507": {
           "name": "Qwen3 30B A3B Instruct 2507",
           "context": 262144,
-          "output": 32000,
+          "output": 235929,
           "cost": {
-            "input": 0.04815,
-            "output": 0.19305
+            "input": 0.1,
+            "output": 0.3
           },
           "modalities": [
             "text"
@@ -13225,11 +15458,11 @@
         "qwen/qwen3.5-35b-a3b": {
           "name": "Qwen3.5 35B-A3B",
           "context": 262144,
-          "output": 235929,
+          "output": 32768,
           "cost": {
-            "input": 0.15,
-            "output": 1,
-            "cache_read": 0.05
+            "input": 0.08,
+            "output": 0.75,
+            "cache_read": 0.04
           },
           "reasoning": true,
           "modalities": [
@@ -13243,11 +15476,11 @@
         "qwen/qwen3.5-397b-a17b": {
           "name": "Qwen3.5 397B-A17B",
           "context": 262144,
-          "output": 235929,
+          "output": 81920,
           "cost": {
-            "input": 0.55,
-            "output": 3.5,
-            "cache_read": 0.225
+            "input": 0.45,
+            "output": 3,
+            "cache_read": 0.22
           },
           "reasoning": true,
           "modalities": [
@@ -13345,10 +15578,11 @@
         "qwen/qwen3.6-27b": {
           "name": "Qwen3.6 27B",
           "context": 262144,
-          "output": 81920,
+          "output": 262140,
           "cost": {
             "input": 0.32,
-            "output": 3.2
+            "output": 3.25,
+            "cache_read": 0.03
           },
           "reasoning": true,
           "modalities": [
@@ -13543,6 +15777,11 @@
             "cache_read": 0.25
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "xhigh"
+          ],
           "modalities": [
             "text"
           ],
@@ -13560,23 +15799,11 @@
             "cache_write": 0.53125
           },
           "reasoning": true,
-          "modalities": [
-            "text",
-            "image",
-            "video"
+          "efforts": [
+            "low",
+            "medium",
+            "xhigh"
           ],
-          "updated": "2026-08-14",
-          "source": "models.dev"
-        },
-        "qwen/qwen3.8-27b:free": {
-          "name": "Qwen3.8 27B (free)",
-          "context": 262144,
-          "output": 235929,
-          "cost": {
-            "input": 0,
-            "output": 0
-          },
-          "reasoning": true,
           "modalities": [
             "text",
             "image",
@@ -13615,6 +15842,13 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -13633,6 +15867,13 @@
             "cache_read": 0.5
           },
           "reasoning": true,
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -13700,6 +15941,11 @@
             "cache_read": 0.25
           },
           "reasoning": true,
+          "efforts": [
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -13726,6 +15972,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -13751,6 +16002,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -13769,6 +16025,10 @@
             "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -13789,23 +16049,6 @@
             "text"
           ],
           "updated": "2024-08-28",
-          "source": "models.dev"
-        },
-        "stealth/space-bunny-alpha": {
-          "name": "Space Bunny Alpha",
-          "context": 1000000,
-          "output": 524288,
-          "cost": {
-            "input": 0,
-            "output": 0
-          },
-          "reasoning": true,
-          "modalities": [
-            "text",
-            "image",
-            "video"
-          ],
-          "updated": "2026-09-23",
           "source": "models.dev"
         },
         "stepfun/step-3.5-flash": {
@@ -13834,6 +16077,11 @@
             "cache_read": 0.04
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -13853,6 +16101,11 @@
             "cache_read": 0.033
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -13869,6 +16122,11 @@
             "cache_read": 0.06
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -13885,6 +16143,11 @@
             "cache_read": 0.042
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -13901,6 +16164,14 @@
             "cache_read": 0.16
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -13919,6 +16190,14 @@
             "cache_read": 0.1
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -13936,6 +16215,14 @@
             "output": 0
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -13953,6 +16240,14 @@
             "output": 0
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14003,6 +16298,15 @@
             "cache_read": 0.005
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -14019,6 +16323,13 @@
             "cache_read": 0.015
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -14035,6 +16346,15 @@
             "cache_read": 0.018
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -14085,6 +16405,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14111,6 +16437,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14137,6 +16468,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14163,6 +16500,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14454,13 +16797,17 @@
         "z-ai/glm-5.2": {
           "name": "GLM-5.2",
           "context": 1048576,
-          "output": 943718,
+          "output": 131072,
           "cost": {
-            "input": 0.38,
-            "output": 3.49,
-            "cache_read": 0.26
+            "input": 0.152,
+            "output": 12,
+            "cache_read": 0.15
           },
           "reasoning": true,
+          "efforts": [
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text"
           ],
@@ -14470,13 +16817,18 @@
         "z-ai/glm-5.3": {
           "name": "GLM-5.3",
           "context": 1048576,
-          "output": 131072,
+          "output": 943718,
           "cost": {
-            "input": 1.4,
-            "output": 4.4,
-            "cache_read": 0.14
+            "input": 0.07,
+            "output": 7,
+            "cache_read": 0.065
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -14493,6 +16845,11 @@
             "cache_read": 0.03
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14511,6 +16868,11 @@
             "cache_read": 0.09
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14529,6 +16891,11 @@
             "cache_read": 0.56
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -14564,6 +16931,13 @@
             "cache_write": 12.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14602,6 +16976,13 @@
             "cache_write": 5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14621,6 +17002,13 @@
             "cache_write": 2.5
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14634,11 +17022,16 @@
           "context": 1048576,
           "output": 943718,
           "cost": {
-            "input": 0.003,
-            "output": 2.4,
-            "cache_read": 0.003
+            "input": 0.012563,
+            "output": 1.32,
+            "cache_read": 0.012563
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -14651,11 +17044,16 @@
           "context": 1048576,
           "output": 393216,
           "cost": {
-            "input": 0.1901,
+            "input": 0.2597,
             "output": 4.2,
-            "cache_read": 0.19
+            "cache_read": 0.26
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -14667,11 +17065,16 @@
           "context": 1048576,
           "output": 943718,
           "cost": {
-            "input": 0.0152,
+            "input": 0.0069,
             "output": 1.28,
-            "cache_read": 0.0152
+            "cache_read": 0.0069
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -14690,6 +17093,11 @@
             "reasoning": 3.75
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14720,6 +17128,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "audio",
             "pdf",
@@ -14735,11 +17148,16 @@
           "context": 1048576,
           "output": 943718,
           "cost": {
-            "input": 0.6518,
+            "input": 0.83,
             "output": 13,
             "cache_read": 0.45
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14768,6 +17186,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "pdf",
             "image",
@@ -14796,6 +17221,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "pdf",
             "image",
@@ -14814,6 +17247,13 @@
             "cache_read": 0.075
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "pdf",
             "image",
@@ -14842,6 +17282,13 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "pdf",
             "image",
@@ -14870,6 +17317,14 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "modalities": [
             "pdf",
             "image",
@@ -14896,6 +17351,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14909,11 +17370,16 @@
           "context": 1048576,
           "output": 131072,
           "cost": {
-            "input": 0.0352,
+            "input": 0.0278,
             "output": 0.5,
-            "cache_read": 0.0352
+            "cache_read": 0.0278
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -14925,13 +17391,18 @@
         "~z-ai/glm-latest": {
           "name": "GLM Latest",
           "context": 1048576,
-          "output": 943718,
+          "output": 131072,
           "cost": {
-            "input": 0.05,
-            "output": 5,
-            "cache_read": 0.04
+            "input": 0.03,
+            "output": 12,
+            "cache_read": 0.03
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -15157,6 +17628,10 @@
             "cache_read": 0.03
           },
           "reasoning": true,
+          "efforts": [
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -15173,6 +17648,11 @@
             "cache_read": 0.13
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -15189,6 +17669,11 @@
             "cache_read": 0.006
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image"
@@ -15235,6 +17720,11 @@
             "cache_read": 0.3
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -15268,6 +17758,11 @@
             "output": 0.6
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text"
           ],
@@ -15284,6 +17779,14 @@
             "cache_read": 0.17
           },
           "reasoning": true,
+          "efforts": [
+            "max",
+            "xhigh",
+            "high",
+            "medium",
+            "low",
+            "none"
+          ],
           "modalities": [
             "text",
             "image",
@@ -15335,6 +17838,10 @@
             "cache_read": 0.26
           },
           "reasoning": true,
+          "efforts": [
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -15351,6 +17858,11 @@
             "cache_read": 0.26
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text"
           ],
@@ -15367,6 +17879,11 @@
             "cache_read": 0.03
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
           "modalities": [
             "text",
             "image",
@@ -15449,6 +17966,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -15475,6 +17998,11 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
           "modalities": [
             "text",
             "image",
@@ -15501,6 +18029,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
@@ -15527,6 +18061,12 @@
             ]
           },
           "reasoning": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
           "modalities": [
             "text",
             "image",
