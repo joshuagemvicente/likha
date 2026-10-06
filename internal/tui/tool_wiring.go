@@ -95,6 +95,9 @@ func (m *ui) toolRunOptions(runID uint64) agent.RunOptions {
 	// private config file, never UI state, because tool goroutines call them.
 	options.CommandGrants = m.commandGrants
 	options.EditGrant = m.editGrant
+	// Steer now (steering-prompts M2): the signal channel is created with
+	// the turn's steer channel and written only on the UI goroutine.
+	options.SteerNow = m.steerNow
 	if stateDir, root := m.stateDir, m.root; stateDir != "" {
 		options.CommandTrusted = func(check, fingerprint string) bool {
 			return providers.CommandTrusted(stateDir, root, check, fingerprint)

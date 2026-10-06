@@ -221,7 +221,7 @@ func (m *ui) composerTextViewport() composerViewport {
 	if view.placeholder {
 		text := "Ask Likha… // escapes a slash"
 		if m.working {
-			text = "Type to queue… (Enter queues, Esc cancels)"
+			text = "Type to queue… (Enter queues · Ctrl+Enter steers now)"
 		} else if n := len(m.queue); n > 0 {
 			text = "Enter sends the queued message… (Esc clears)"
 			if n > 1 {

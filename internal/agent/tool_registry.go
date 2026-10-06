@@ -66,6 +66,11 @@ type RunOptions struct {
 	CommandGrants  *cmdpolicy.Grants
 	CommandTrusted func(check, fingerprint string) bool
 	TrustChecks    func(checks map[string]string) error
+	// SteerNow (specs/steering-prompts M2) stops only the in-flight model
+	// request so queued steering prompts are delivered at once. The UI sends
+	// after queueing the text; a signal that arrives while tools execute is
+	// discarded at the next boundary, where the ordinary drain delivers.
+	SteerNow <-chan struct{}
 	// EditGrant is the session's Approve always for edits
 	// (specs/approve-always). Nil: every edit asks and no edit review offers
 	// Approve always.

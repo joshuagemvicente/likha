@@ -141,6 +141,9 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 			fail(err)
 			return
 		}
+		// A steer-now press that landed while tools executed is delivered
+		// by the ordinary drain below; it must not stop the next request.
+		discardSteerNow(options.SteerNow)
 		applySteer(drainSteer(steer))
 		request := append(append([]model.Message(nil), mainHarness...), history...)
 		if continuation != nil {
@@ -148,12 +151,28 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		}
 		tokens, known := model.EstimateInputTokens(client.Model(), request, definitions)
 		emit(TurnEvent{Kind: "context", ContextTokens: tokens, ContextKnown: known, ContextEstimated: true})
-		assistant, usage, usageOK, err := client.StreamUsage(ctx, request, definitions, func(text string) {
+		roundCtx, stopRound := watchSteerNow(ctx, options.SteerNow, steer)
+		var partial strings.Builder
+		assistant, usage, usageOK, err := client.StreamUsage(roundCtx, request, definitions, func(text string) {
+			partial.WriteString(text)
 			emit(TurnEvent{Kind: "text", Text: text})
 		}, func(reasoning string) {
 			emit(TurnEvent{Kind: "reasoning", Text: reasoning})
 		})
+		steered := stopRound()
 		if err != nil {
+			if ctx.Err() == nil && steered {
+				// Steer now (specs/steering-prompts M2): only this request
+				// stopped. Visible text stays in history so the model does
+				// not repeat itself; partial reasoning and half-streamed tool
+				// calls are dropped. Neither transport reports usage before
+				// its final frame, so the stopped request carries none.
+				if partial.Len() > 0 {
+					history = append(history, model.Message{Role: "assistant", Content: partial.String()})
+				}
+				emit(TurnEvent{Kind: "stream_interrupted", History: append([]model.Message(nil), history...)})
+				continue
+			}
 			fail(err)
 			return
 		}
@@ -224,6 +243,55 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 			emit(TurnEvent{Kind: "notice", Text: fmt.Sprintf("Tool-round checkpoint reached (%d); continuing.", round), History: append([]model.Message(nil), history...)})
 			continuation = &model.Message{Role: "developer", Content: fmt.Sprintf("Main tool-round checkpoint %d reached. Continue the user's requested work in this same run, within the existing tool and approval rules. This checkpoint grants no permission and does not reset child budgets.", round)}
 		}
+	}
+}
+
+// discardSteerNow drops a steer-now signal still buffered from a press that
+// landed while no request was in flight.
+func discardSteerNow(steerNow <-chan struct{}) {
+	select {
+	case <-steerNow:
+	default:
+	}
+}
+
+// watchSteerNow derives one model request's context. A steer-now signal
+// cancels only that context, and only while steering text is waiting in the
+// queue: a signal with nothing to deliver never stops a response. stop ends
+// the watch, waits for the watcher goroutine, and reports whether a steer
+// cancelled the request. The run context's own cancellation is never
+// reported as a steer.
+func watchSteerNow(ctx context.Context, steerNow <-chan struct{}, steer <-chan string) (context.Context, func() bool) {
+	roundCtx, cancel := context.WithCancel(ctx)
+	if steerNow == nil {
+		return roundCtx, func() bool { cancel(); return false }
+	}
+	finished := make(chan struct{})
+	result := make(chan bool, 1)
+	go func() {
+		for {
+			select {
+			case <-steerNow:
+				if len(steer) == 0 {
+					continue
+				}
+				cancel()
+				result <- true
+				return
+			case <-roundCtx.Done():
+				result <- false
+				return
+			case <-finished:
+				result <- false
+				return
+			}
+		}
+	}()
+	return roundCtx, func() bool {
+		close(finished)
+		steered := <-result
+		cancel()
+		return steered
 	}
 }
 

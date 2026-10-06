@@ -127,6 +127,8 @@ type ui struct {
 	promptHistory      promptHistory
 	queue              []string       // steering prompts typed while a run is active; UI mirror of the delivery channel
 	steer              chan string    // the active turn's steering input; nil while idle
+	steerNow           chan struct{}  // the active turn's steer-now signal (steering-prompts M2); nil while idle and during compaction
+	steering           bool           // a steer-now press is waiting for the fresh request's first output
 	priorLen           int            // m.history length at the active run's start (turn or compaction); reconcile baseline
 	turnSent           map[string]int // steer deliveries the UI processed this turn, by text
 	store              *session.Store
@@ -453,6 +455,8 @@ func (m *ui) startTurnDisplay(display, prompt string, queued []string) tea.Cmd {
 	}
 	m.queue = append([]string(nil), queued...)
 	m.steer = steer
+	m.steerNow = make(chan struct{}, 1)
+	m.steering = false
 	if m.client == nil {
 		m.entries = append(m.entries, entry{role: "Error", content: "No provider configured; complete first-run setup before prompting."})
 		m.input = []rune(display)
@@ -586,6 +590,7 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		// after content started are dropped so thinking cannot be
 		// mistaken for the answer.
 		m.hideActivity()
+		m.endSteeringStatus()
 		if m.streaming >= 0 {
 			return nil
 		}
@@ -596,6 +601,7 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		m.entries[m.reasoningStream].content = m.reasoningBuf.String()
 	case "text":
 		m.hideActivity()
+		m.endSteeringStatus()
 		m.closeReasoning() // content after thinking closes the reasoning stream
 		if m.streaming < 0 {
 			m.entries = append(m.entries, entry{role: "Assistant"})
@@ -698,6 +704,8 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 			m.showActivity()
 			return m.activityTickCmd()
 		}
+	case "stream_interrupted":
+		m.applyStreamInterrupted(v)
 	case "compacted":
 		m.hideActivity()
 		m.closeReasoning()
@@ -717,7 +725,7 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		m.persist()
 		m.layoutWidth = 0
 		// A finished compaction holds any queue for an explicit Enter.
-		m.steer = nil
+		m.steer, m.steerNow, m.steering = nil, nil, false
 		return nil
 	case "done", "error":
 		if cmd := m.finishRun(v); cmd != nil {
@@ -786,7 +794,7 @@ func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
 	m.reconcileQueue()
 	m.persist()
 	m.refreshStatusSessionTitle()
-	m.steer = nil
+	m.steer, m.steerNow, m.steering = nil, nil, false
 	return m.autoNameAfterFirstTurn(v.Kind)
 }
 
@@ -893,6 +901,117 @@ func (m *ui) enqueue(text string) {
 	}
 	m.input = nil
 	m.edit.endCaret(nil)
+	m.layoutWidth = 0
+}
+
+// runDraftCommandRefusal is shown when a slash command is submitted while a
+// run is active; the draft is kept.
+const runDraftCommandRefusal = "Commands are inactive while a run is active. Esc cancels the run; // queues a literal slash."
+
+// streamInterruptedNote follows a response a steer-now stopped
+// (steering-prompts M2).
+const streamInterruptedNote = "Response interrupted to deliver your message."
+
+// queueRunDraft applies the run-draft rules Enter and steer now share while
+// a run is active (FR-21): typed newlines flatten to spaces, a leading / is
+// refused with the draft kept, // queues the literal remainder, and queued
+// text joins prompt history. It reports whether the draft was queued.
+func (m *ui) queueRunDraft() bool {
+	prompt := strings.TrimSpace(strings.ReplaceAll(string(m.input), "\n", " "))
+	switch {
+	case prompt == "":
+		return false
+	case strings.HasPrefix(prompt, "//"):
+		prompt = prompt[2:]
+		if prompt == "" {
+			return false
+		}
+	case strings.HasPrefix(prompt, "/"):
+		m.entries = append(m.entries, entry{role: "Error", content: runDraftCommandRefusal})
+		m.layoutWidth = 0
+		return false
+	}
+	m.promptHistory.append(prompt)
+	m.enqueue(prompt)
+	m.persist()
+	return true
+}
+
+// steerNowPress handles Ctrl+Enter during a run (steering-prompts M2): a
+// draft joins the end of the queue under the run-draft rules, then the
+// signal asks the engine to stop the in-flight model request and deliver
+// the whole queue. A refused or empty draft with an empty queue steers
+// nothing. Without a steer-now channel (compaction) or while cancelling,
+// the message stays queued and is held.
+func (m *ui) steerNowPress() {
+	if strings.TrimSpace(string(m.input)) != "" {
+		if !m.queueRunDraft() {
+			return
+		}
+	} else if len(m.queue) == 0 {
+		return
+	}
+	if m.steerNow == nil || m.cancelling {
+		return
+	}
+	select {
+	case m.steerNow <- struct{}{}:
+	default:
+	}
+	m.steering = true
+	if len(m.liveToolCalls) > 0 {
+		m.status = "Steer waits for the running tool"
+	} else {
+		m.status = "Steering…"
+	}
+}
+
+// endSteeringStatus returns the status to the model wait once the fresh
+// request after a steer-now starts producing output.
+func (m *ui) endSteeringStatus() {
+	if !m.steering {
+		return
+	}
+	m.steering = false
+	if !m.cancelling && (m.status == "Steering…" || m.status == "Steer waits for the running tool") {
+		m.status = "Waiting for model"
+	}
+}
+
+// applyStreamInterrupted folds the engine's stream_interrupted event: the
+// stopped response keeps its visible text (an empty bubble is dropped),
+// the note follows it, and the streams close so the steered message and
+// the next answer open fresh entries. Unreported usage marks spend
+// approximate (the event's own usage, when present, was already added).
+func (m *ui) applyStreamInterrupted(v agent.TurnEvent) {
+	m.hideActivity()
+	if v.History != nil {
+		m.history = v.History
+	}
+	if v.Usage == nil {
+		m.spendEstimated = true
+	}
+	if m.streaming >= 0 && m.streaming < len(m.entries) && strings.TrimSpace(m.entries[m.streaming].content) == "" {
+		m.entries = append(m.entries[:m.streaming], m.entries[m.streaming+1:]...)
+		m.adjustToolRecordsAfterRemoval(m.streaming)
+	}
+	m.streaming = -1
+	m.streamBuf.Reset()
+	m.closeReasoning()
+	// The note belongs right after the stopped response, above the Queued
+	// rows the steer just added, so the transcript reads partial answer →
+	// note → steered message once the rows flip.
+	at := len(m.entries)
+	for at > 0 && m.entries[at-1].role == "Queued" {
+		at--
+	}
+	m.entries = append(m.entries[:at], append([]entry{{role: "Likha", content: streamInterruptedNote}}, m.entries[at:]...)...)
+	for i := range m.toolRecords {
+		if m.toolRecords[i].EntryIndex >= at {
+			m.toolRecords[i].EntryIndex++
+		}
+	}
+	m.persist()
 	m.layoutWidth = 0
 }
 
@@ -1762,10 +1881,20 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.promptHistory.resetNavigation()
 			}
 		case "ctrl+j", "alt+enter", "ctrl+enter", "shift+enter":
-			// Newline insertion (the Return-modifier family). ctrl+enter
-			// reaches most terminals as the LF byte, reported "ctrl+j";
+			// The Return-modifier family. ctrl+enter and shift+enter reach
+			// most terminals as the LF byte, reported "ctrl+j", so the
+			// three cannot be told apart: during a run they steer now
+			// (steering-prompts M2); otherwise they insert a newline.
 			// alt+enter arrives ESC-combined or through the ESC decay
-			// window on "enter" below (probe table in tasks.md).
+			// window on "enter" below and always inserts a newline (probe
+			// table in tool-rendering-terminal-keys/tasks.md).
+			if v.String() != "alt+enter" && m.working {
+				if m.editable() && !m.mention.open && !m.commandPopup.open {
+					m.steerNowPress()
+					m.layoutWidth = 0
+				}
+				break
+			}
 			if m.editable() && !m.mention.open && !m.commandPopup.open {
 				m.caretNote()
 				insertNewline(&m.input, &m.edit)
@@ -1786,29 +1915,10 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			prompt := strings.TrimSpace(strings.ReplaceAll(string(m.input), "\n", " "))
 			if m.working {
 				// Live composer (FR-21): Enter turns the draft into a
-				// steering prompt. A leading / is refused with the draft
-				// kept, while // queues the literal remainder. These paths
-				// carry no min-size guard.
-				switch {
-				case prompt == "":
-					return m, nil
-				case strings.HasPrefix(prompt, "//"):
-					if rest := prompt[2:]; rest != "" {
-						m.promptHistory.append(rest)
-						m.enqueue(rest)
-						m.persist()
-					}
-					return m, nil
-				case strings.HasPrefix(prompt, "/"):
-					m.entries = append(m.entries, entry{role: "Error", content: "Commands are inactive while a run is active. Esc cancels the run; // queues a literal slash."})
-					m.layoutWidth = 0
-					return m, nil
-				default:
-					m.promptHistory.append(prompt)
-					m.enqueue(prompt)
-					m.persist()
-					return m, nil
-				}
+				// steering prompt under the shared run-draft rules. These
+				// paths carry no min-size guard.
+				m.queueRunDraft()
+				return m, nil
 			}
 			if m.width < minWidth || m.height < minHeight {
 				return m, nil
