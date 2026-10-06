@@ -338,19 +338,23 @@ func (c *anthropicConversation) acceptedReplay(m Message) []any {
 	if !ok {
 		return nil
 	}
-	return blocks
+	verbatim := make([]any, len(blocks))
+	for i, block := range blocks {
+		verbatim[i] = block
+	}
+	return verbatim
 }
 
 // replayBlocksMatching splits a stored content array and checks it against
 // the message: its text blocks concatenate to Content and its tool_use
 // blocks equal ToolCalls in order. An agent that clipped the text or dropped
 // calls changed the turn, so its blocks no longer apply.
-func replayBlocksMatching(raw json.RawMessage, m Message) ([]any, bool) {
+func replayBlocksMatching(raw json.RawMessage, m Message) ([]json.RawMessage, bool) {
 	var blocks []json.RawMessage
 	if json.Unmarshal(raw, &blocks) != nil || len(blocks) == 0 {
 		return nil, false
 	}
-	verbatim := make([]any, 0, len(blocks))
+	verbatim := make([]json.RawMessage, 0, len(blocks))
 	var text strings.Builder
 	calls := 0
 	for _, block := range blocks {
@@ -388,6 +392,33 @@ func replayBlocksMatching(raw json.RawMessage, m Message) ([]any, bool) {
 		return nil, false
 	}
 	return verbatim, true
+}
+
+// replayedThinkingText returns the thinking text of the stored blocks a
+// tool-declaring request sends for m, or nil when the blocks no longer
+// describe m and the turn is rebuilt without thinking. Their text and
+// tool_use blocks repeat m's Content and ToolCalls, which a context estimate
+// already counts, so only thinking is extra. Signatures and redacted data are
+// opaque payloads rather than text, so they are left out.
+func replayedThinkingText(raw json.RawMessage, m Message) []string {
+	blocks, ok := replayBlocksMatching(raw, m)
+	if !ok {
+		return nil
+	}
+	var texts []string
+	for _, block := range blocks {
+		var thinking struct {
+			Type     string `json:"type"`
+			Thinking string `json:"thinking"`
+		}
+		// replayBlocksMatching already decoded every block, so this cannot
+		// fail; a block that somehow did would only be left uncounted.
+		if json.Unmarshal(block, &thinking) != nil || thinking.Type != "thinking" || thinking.Thinking == "" {
+			continue
+		}
+		texts = append(texts, thinking.Thinking)
+	}
+	return texts
 }
 
 // sameToolUse compares a stored tool_use block with a tool call, arguments in

@@ -236,11 +236,12 @@ func (c *Client) replayFor(m Message) *ReasoningReplay {
 }
 
 // replaySentText returns the replay text a request carries for m, at a
-// current-turn position or not: the state that passed replayFor, or Gemini's
-// skip value. Anthropic blocks are left to the native Claude client, whose
-// blocks replace the message's content and tool calls rather than adding to
-// them.
-func (c *Client) replaySentText(m Message, currentTurn bool) []string {
+// current-turn position or not and with tools declared or not: the state
+// that passed replayFor, or Gemini's skip value. Anthropic blocks replace the
+// message's content and tool calls rather than adding to them, so only their
+// thinking text is extra, and the native Claude client sends them only when
+// tools are declared and they still describe m (claude-native tasks T13).
+func (c *Client) replaySentText(m Message, currentTurn, toolsDeclared bool) []string {
 	if c.needsSkipSignature(m, currentTurn) {
 		return []string{skipThoughtSignature}
 	}
@@ -260,6 +261,10 @@ func (c *Client) replaySentText(m Message, currentTurn bool) []string {
 	case ReplayThinkingChunk:
 		if replay.Thinking != nil {
 			return []string{*replay.Thinking, replay.ThinkingSignature}
+		}
+	case ReplayAnthropicBlocks:
+		if toolsDeclared && c.nativeAnthropic() && len(replay.Blocks) != 0 {
+			return replayedThinkingText(replay.Blocks, m)
 		}
 	case ReplayThoughtSignature:
 		var signatures []string
