@@ -1,0 +1,704 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<!--[if IE 6]><html class="ie6" xmlns="http://www.w3.org/1999/xhtml"><![endif]-->
+<!--[if IE 7]><html class="lt-ie8 lt-ie9" xmlns="http://www.w3.org/1999/xhtml"><![endif]-->
+<!--[if IE 8]><html class="lt-ie9" xmlns="http://www.w3.org/1999/xhtml"><![endif]-->
+<!--[if gt IE 8]><!--><html xmlns="http://www.w3.org/1999/xhtml"><!--<![endif]-->
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0, user-scalable=1" />
+  <meta name="referrer" content="origin" />
+  <meta name="HandheldFriendly" content="true" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>golang at DuckDuckGo</title>
+  <link title="DuckDuckGo (HTML)" type="application/opensearchdescription+xml" rel="search" href="//duckduckgo.com/opensearch_html_v2.xml" />
+  <link href="//duckduckgo.com/favicon.ico" rel="shortcut icon" />
+  <link rel="icon" href="//duckduckgo.com/favicon.ico" type="image/x-icon" />
+  <link id="icon60" rel="apple-touch-icon" href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_60x60.png?v=2"/>
+  <link id="icon76" rel="apple-touch-icon" sizes="76x76" href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_76x76.png?v=2"/>
+  <link id="icon120" rel="apple-touch-icon" sizes="120x120" href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_120x120.png?v=2"/>
+  <link id="icon152" rel="apple-touch-icon" sizes="152x152" href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_152x152.png?v=2"/>
+  <link rel="image_src" href="//duckduckgo.com/assets/icons/meta/DDG-icon_256x256.png">
+  <link rel="stylesheet" media="handheld, all" href="//duckduckgo.com/dist/h.12e359033b8c1146e5f7.css" type="text/css"/>
+</head>
+
+<body class="body--html">
+  <a name="top" id="top"></a>
+
+  <form action="/html/" method="post">
+    <input type="text" name="state_hidden" id="state_hidden" />
+  </form>
+
+  <div>
+    <div class="site-wrapper-border"></div>
+
+    <div id="header" class="header cw header--html">
+      <a title="DuckDuckGo" href="/html/" class="header__logo-wrap"></a>
+
+      <form name="x" class="header__form" action="/html/" method="post">
+        <div class="search search--header">
+          <input name="q" autocomplete="off" class="search__input" id="search_form_input_homepage" type="text" value="golang" />
+          <input name="b" id="search_button_homepage" class="search__button search__button--html" value="" title="Search" alt="Search" type="submit" />
+        </div>
+
+        
+        
+        
+        
+
+        <div class="frm__select">
+          <select name="kl">
+            
+              <option value="" >All Regions</option>
+            
+              <option value="ar-es" >Argentina</option>
+            
+              <option value="au-en" >Australia</option>
+            
+              <option value="at-de" >Austria</option>
+            
+              <option value="be-fr" >Belgium (fr)</option>
+            
+              <option value="be-nl" >Belgium (nl)</option>
+            
+              <option value="br-pt" >Brazil</option>
+            
+              <option value="bg-bg" >Bulgaria</option>
+            
+              <option value="ca-en" >Canada (en)</option>
+            
+              <option value="ca-fr" >Canada (fr)</option>
+            
+              <option value="ct-ca" >Catalonia</option>
+            
+              <option value="cl-es" >Chile</option>
+            
+              <option value="cn-zh" >China</option>
+            
+              <option value="co-es" >Colombia</option>
+            
+              <option value="hr-hr" >Croatia</option>
+            
+              <option value="cz-cs" >Czech Republic</option>
+            
+              <option value="dk-da" >Denmark</option>
+            
+              <option value="ee-et" >Estonia</option>
+            
+              <option value="fi-fi" >Finland</option>
+            
+              <option value="fr-fr" >France</option>
+            
+              <option value="de-de" >Germany</option>
+            
+              <option value="gr-el" >Greece</option>
+            
+              <option value="hk-tzh" >Hong Kong</option>
+            
+              <option value="hu-hu" >Hungary</option>
+            
+              <option value="is-is" >Iceland</option>
+            
+              <option value="in-en" >India (en)</option>
+            
+              <option value="id-en" >Indonesia (en)</option>
+            
+              <option value="ie-en" >Ireland</option>
+            
+              <option value="il-en" >Israel (en)</option>
+            
+              <option value="it-it" >Italy</option>
+            
+              <option value="jp-jp" >Japan</option>
+            
+              <option value="kr-kr" >Korea</option>
+            
+              <option value="lv-lv" >Latvia</option>
+            
+              <option value="lt-lt" >Lithuania</option>
+            
+              <option value="my-en" >Malaysia (en)</option>
+            
+              <option value="mx-es" >Mexico</option>
+            
+              <option value="nl-nl" >Netherlands</option>
+            
+              <option value="nz-en" >New Zealand</option>
+            
+              <option value="no-no" >Norway</option>
+            
+              <option value="pk-en" >Pakistan (en)</option>
+            
+              <option value="pe-es" >Peru</option>
+            
+              <option value="ph-en" >Philippines (en)</option>
+            
+              <option value="pl-pl" >Poland</option>
+            
+              <option value="pt-pt" >Portugal</option>
+            
+              <option value="ro-ro" >Romania</option>
+            
+              <option value="ru-ru" >Russia</option>
+            
+              <option value="xa-ar" >Saudi Arabia</option>
+            
+              <option value="sg-en" >Singapore</option>
+            
+              <option value="sk-sk" >Slovakia</option>
+            
+              <option value="sl-sl" >Slovenia</option>
+            
+              <option value="za-en" >South Africa</option>
+            
+              <option value="es-ca" >Spain (ca)</option>
+            
+              <option value="es-es" >Spain (es)</option>
+            
+              <option value="se-sv" >Sweden</option>
+            
+              <option value="ch-de" >Switzerland (de)</option>
+            
+              <option value="ch-fr" >Switzerland (fr)</option>
+            
+              <option value="tw-tzh" >Taiwan</option>
+            
+              <option value="th-en" >Thailand (en)</option>
+            
+              <option value="tr-tr" >Turkey</option>
+            
+              <option value="us-en" >US (English)</option>
+            
+              <option value="us-es" >US (Spanish)</option>
+            
+              <option value="ua-uk" >Ukraine</option>
+            
+              <option value="uk-en" >United Kingdom</option>
+            
+              <option value="vn-en" >Vietnam (en)</option>
+            
+          </select>
+        </div>
+
+        <div class="frm__select frm__select--last">
+          <select class="" name="df">
+            
+              <option value="" selected>Any Time</option>
+            
+              <option value="d" >Past Day</option>
+            
+              <option value="w" >Past Week</option>
+            
+              <option value="m" >Past Month</option>
+            
+              <option value="y" >Past Year</option>
+            
+          </select>
+        </div>
+      </form>
+    </div>
+
+    
+      <!-- If zero click results are present -->
+      <div class="zci-wrapper">
+        <div class="zci">
+          <h1 class="zci__heading">
+            <a rel="nofollow" href="https://en.wikipedia.org/wiki/Go_(programming_language)">Go (programming language)</a>
+          </h1>
+
+          
+            <div class="zci__result" id="zero_click_abstract">
+              
+                <a rel="nofollow" href="https://en.wikipedia.org/wiki/Go_(programming_language)">
+                  <img alt="" title="" id="i0" class="zci__image" src="https://i.duckduckgo.com/i/77cac52781feeb4a.png" name="i0" />
+                </a>
+              
+
+              Go is a high-level, general-purpose programming language that is statically typed and compiled. Originally designed in 2007 by Robert Griesemer, Rob Pike, and Ken Thompson, Go was publicly announced in November 2009, and is developed by Google and community contributors. Go has a simple syntax similar to C++, as well as garbage collection, structural typing, CSP-style concurrency, and a broad standard library.
+              
+                <a rel="nofollow" href="https://en.wikipedia.org/wiki/Go_(programming_language)" >More at <q>Wikipedia</q></a>
+              
+            </div>
+          
+        </div>
+      </div>
+    
+
+    
+      <!-- Web results are present -->
+      <div>
+        <div class="serp__results">
+          <div id="links" class="results">
+            
+
+            
+              
+                
+                  <div class="result results_links results_links_deep result--ad ">
+                    <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                      <h2 class="result__title">
+                        
+                          <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fduckduckgo.com%2Fy.js%3Fad_domain%3Dudemy.com%26ad_provider%3Dbingv7aa%26ad_type%3Dtxad%26click_metadata%3DQV9IYgu6k8h5uihnBA0RF%252DaLUL6_dcHqG1dCAjkbHPz_r1aMlH85muAWHXuAVIqZ56P_peL7K2lqgkGgbyQKhgL6h3k_ZQdbe8_esTRIIptzwiC4TcVEcCa_J0Cz7E40ulHRIvQEZ26QNTV1pAoIPifYIx%252D1QFf%252DOtdwmP_Nx6Q.vz4aCAlRKzYqxa7LvaXLOA%26rut%3Dfeae6f578f3fabcf3f3f5c5d3c9055bdbcaba3c1cfddc6891cbd942a31e5fa7a%26u3%3Dhttps%253A%252F%252Fwww.bing.com%252Faclick%253Fld%253De8ccya7MjMHeOHIK7j4%252DyU6DVUCUzrqTMYx2g6oeWeP19uRe7zh0Duwe0wRJkaNPZv44_tDhxPSBCwUwc0txYvu8EAjCV_Kp52bMz9WiRpAGUNovMvxQMSZYAIRvowKWh93gmU4koUcPRArF9ZzlEyHgwPNhK_pWLdwEjH78PujvbIJr8W70tT_WX8ynqjUbmGv0L4EP2eN%252DACffj7dN9idx1eVGw%2526u%253DaHR0cHMlM2ElMmYlMmZ3d3cudWRlbXkuY29tJTJmY291cnNlJTJmbGVhcm4tZ28tdGhlLWNvbXBsZXRlLWJvb3RjYW1wLWNvdXJzZS1nb2xhbmclMmYlM2Z1dG1fY2FtcGFpZ24lM2RCRy1TZWFyY2hfS2V5d29yZF9CZXRhX1Byb2ZfbGEuRU5fY2MuUk9XLUVuZ2xpc2glMjZ1dG1fc291cmNlJTNkYmluZyUyNnV0bV9tZWRpdW0lM2RwYWlkLXNlYXJjaCUyNnBvcnRmb2xpbyUzZEJpbmctUk9XLUVuZ2xpc2glMjZ1dG1fYXVkaWVuY2UlM2RteCUyNnV0bV90YWN0aWMlM2RuYiUyNnV0bV90ZXJtJTNkXy5fYWdfMTMyNjAxMzQxMTY3NzM0MF8uX2FkX18uX2t3X2dvbGFuZyUyNTIwd2ViJTI1MjBkZXZlbG9wbWVudCUyNTIwdHV0b3JpYWwlMjZ1dG1fY29udGVudCUzZHMlMjZmdW5uZWwlM2QlMjZ0ZXN0JTNkJTI2dXRtX2NhbXBhaWduX2lkJTNkNjM4NTk2MjMyJTI2bXNjbGtpZCUzZDkyODAyZjkwYjU1NjFjNmMzYTEyNDU1MzI4MjU1Yzc3%2526rlid%253D92802f90b5561c6c3a12455328255c77%26vqd%3D4%2D68695386072198864451553557763192328531%26iurl%3D%257B1%257DIG%253DF424D855A76F4F68BFC0E097642E7F54%2526CID%253D380C06A681F9650C1250114F80E26472%2526ID%253DDevEx%252C5037.1&amp;rut=939ba845bcce4ed572177edc489e65e9651e44a8cc3b7f460fb7fc738fc39cbb">Best Golang Course - Best-Selling Online Courses</a>
+                        
+                        <div class="result__badge-wrap">
+                          <button class="badge--ad">Ad</button>
+                          <div class="badge--ad__tooltip-wrap">
+                            <div class="tooltip tooltip--right">
+                              <div class="tooltip__triangle-outer"></div>
+                              <div class="tooltip__triangle-inner"></div>
+                              Viewing ads is privacy protected by DuckDuckGo. Ad clicks are managed by Microsoft's ad network (<a href="https://duckduckgo.com/duckduckgo-help-pages/company/ads-by-microsoft-on-duckduckgo-private-search" class="tooltip-link">more info</a>).
+                            </div>
+                          </div>
+                        </div>
+                      </h2>
+
+                      
+
+                      
+                        <div class="result__extras">
+                          <div class="result__extras__url">
+                            <!-- Disable Ad Favicon
+                            <span class="result__icon">
+                              
+                                <a rel="nofollow" class="result__icon__img" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fduckduckgo.com%2Fy.js%3Fad_domain%3Dudemy.com%26ad_provider%3Dbingv7aa%26ad_type%3Dtxad%26click_metadata%3DQV9IYgu6k8h5uihnBA0RF%252DaLUL6_dcHqG1dCAjkbHPz_r1aMlH85muAWHXuAVIqZ56P_peL7K2lqgkGgbyQKhgL6h3k_ZQdbe8_esTRIIptzwiC4TcVEcCa_J0Cz7E40ulHRIvQEZ26QNTV1pAoIPifYIx%252D1QFf%252DOtdwmP_Nx6Q.vz4aCAlRKzYqxa7LvaXLOA%26rut%3Dfeae6f578f3fabcf3f3f5c5d3c9055bdbcaba3c1cfddc6891cbd942a31e5fa7a%26u3%3Dhttps%253A%252F%252Fwww.bing.com%252Faclick%253Fld%253De8ccya7MjMHeOHIK7j4%252DyU6DVUCUzrqTMYx2g6oeWeP19uRe7zh0Duwe0wRJkaNPZv44_tDhxPSBCwUwc0txYvu8EAjCV_Kp52bMz9WiRpAGUNovMvxQMSZYAIRvowKWh93gmU4koUcPRArF9ZzlEyHgwPNhK_pWLdwEjH78PujvbIJr8W70tT_WX8ynqjUbmGv0L4EP2eN%252DACffj7dN9idx1eVGw%2526u%253DaHR0cHMlM2ElMmYlMmZ3d3cudWRlbXkuY29tJTJmY291cnNlJTJmbGVhcm4tZ28tdGhlLWNvbXBsZXRlLWJvb3RjYW1wLWNvdXJzZS1nb2xhbmclMmYlM2Z1dG1fY2FtcGFpZ24lM2RCRy1TZWFyY2hfS2V5d29yZF9CZXRhX1Byb2ZfbGEuRU5fY2MuUk9XLUVuZ2xpc2glMjZ1dG1fc291cmNlJTNkYmluZyUyNnV0bV9tZWRpdW0lM2RwYWlkLXNlYXJjaCUyNnBvcnRmb2xpbyUzZEJpbmctUk9XLUVuZ2xpc2glMjZ1dG1fYXVkaWVuY2UlM2RteCUyNnV0bV90YWN0aWMlM2RuYiUyNnV0bV90ZXJtJTNkXy5fYWdfMTMyNjAxMzQxMTY3NzM0MF8uX2FkX18uX2t3X2dvbGFuZyUyNTIwd2ViJTI1MjBkZXZlbG9wbWVudCUyNTIwdHV0b3JpYWwlMjZ1dG1fY29udGVudCUzZHMlMjZmdW5uZWwlM2QlMjZ0ZXN0JTNkJTI2dXRtX2NhbXBhaWduX2lkJTNkNjM4NTk2MjMyJTI2bXNjbGtpZCUzZDkyODAyZjkwYjU1NjFjNmMzYTEyNDU1MzI4MjU1Yzc3%2526rlid%253D92802f90b5561c6c3a12455328255c77%26vqd%3D4%2D68695386072198864451553557763192328531%26iurl%3D%257B1%257DIG%253DF424D855A76F4F68BFC0E097642E7F54%2526CID%253D380C06A681F9650C1250114F80E26472%2526ID%253DDevEx%252C5037.1&amp;rut=939ba845bcce4ed572177edc489e65e9651e44a8cc3b7f460fb7fc738fc39cbb">
+                                  <img width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/.ico" name="i15" />
+                                </a>
+                              
+                            </span>
+                            -->
+                            <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fduckduckgo.com%2Fy.js%3Fad_domain%3Dudemy.com%26ad_provider%3Dbingv7aa%26ad_type%3Dtxad%26click_metadata%3DQV9IYgu6k8h5uihnBA0RF%252DaLUL6_dcHqG1dCAjkbHPz_r1aMlH85muAWHXuAVIqZ56P_peL7K2lqgkGgbyQKhgL6h3k_ZQdbe8_esTRIIptzwiC4TcVEcCa_J0Cz7E40ulHRIvQEZ26QNTV1pAoIPifYIx%252D1QFf%252DOtdwmP_Nx6Q.vz4aCAlRKzYqxa7LvaXLOA%26rut%3Dfeae6f578f3fabcf3f3f5c5d3c9055bdbcaba3c1cfddc6891cbd942a31e5fa7a%26u3%3Dhttps%253A%252F%252Fwww.bing.com%252Faclick%253Fld%253De8ccya7MjMHeOHIK7j4%252DyU6DVUCUzrqTMYx2g6oeWeP19uRe7zh0Duwe0wRJkaNPZv44_tDhxPSBCwUwc0txYvu8EAjCV_Kp52bMz9WiRpAGUNovMvxQMSZYAIRvowKWh93gmU4koUcPRArF9ZzlEyHgwPNhK_pWLdwEjH78PujvbIJr8W70tT_WX8ynqjUbmGv0L4EP2eN%252DACffj7dN9idx1eVGw%2526u%253DaHR0cHMlM2ElMmYlMmZ3d3cudWRlbXkuY29tJTJmY291cnNlJTJmbGVhcm4tZ28tdGhlLWNvbXBsZXRlLWJvb3RjYW1wLWNvdXJzZS1nb2xhbmclMmYlM2Z1dG1fY2FtcGFpZ24lM2RCRy1TZWFyY2hfS2V5d29yZF9CZXRhX1Byb2ZfbGEuRU5fY2MuUk9XLUVuZ2xpc2glMjZ1dG1fc291cmNlJTNkYmluZyUyNnV0bV9tZWRpdW0lM2RwYWlkLXNlYXJjaCUyNnBvcnRmb2xpbyUzZEJpbmctUk9XLUVuZ2xpc2glMjZ1dG1fYXVkaWVuY2UlM2RteCUyNnV0bV90YWN0aWMlM2RuYiUyNnV0bV90ZXJtJTNkXy5fYWdfMTMyNjAxMzQxMTY3NzM0MF8uX2FkX18uX2t3X2dvbGFuZyUyNTIwd2ViJTI1MjBkZXZlbG9wbWVudCUyNTIwdHV0b3JpYWwlMjZ1dG1fY29udGVudCUzZHMlMjZmdW5uZWwlM2QlMjZ0ZXN0JTNkJTI2dXRtX2NhbXBhaWduX2lkJTNkNjM4NTk2MjMyJTI2bXNjbGtpZCUzZDkyODAyZjkwYjU1NjFjNmMzYTEyNDU1MzI4MjU1Yzc3%2526rlid%253D92802f90b5561c6c3a12455328255c77%26vqd%3D4%2D68695386072198864451553557763192328531%26iurl%3D%257B1%257DIG%253DF424D855A76F4F68BFC0E097642E7F54%2526CID%253D380C06A681F9650C1250114F80E26472%2526ID%253DDevEx%252C5037.1&amp;rut=939ba845bcce4ed572177edc489e65e9651e44a8cc3b7f460fb7fc738fc39cbb">udemy.com</a>
+                            
+                          </div>
+                        </div>
+                      
+
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fduckduckgo.com%2Fy.js%3Fad_domain%3Dudemy.com%26ad_provider%3Dbingv7aa%26ad_type%3Dtxad%26click_metadata%3DQV9IYgu6k8h5uihnBA0RF%252DaLUL6_dcHqG1dCAjkbHPz_r1aMlH85muAWHXuAVIqZ56P_peL7K2lqgkGgbyQKhgL6h3k_ZQdbe8_esTRIIptzwiC4TcVEcCa_J0Cz7E40ulHRIvQEZ26QNTV1pAoIPifYIx%252D1QFf%252DOtdwmP_Nx6Q.vz4aCAlRKzYqxa7LvaXLOA%26rut%3Dfeae6f578f3fabcf3f3f5c5d3c9055bdbcaba3c1cfddc6891cbd942a31e5fa7a%26u3%3Dhttps%253A%252F%252Fwww.bing.com%252Faclick%253Fld%253De8ccya7MjMHeOHIK7j4%252DyU6DVUCUzrqTMYx2g6oeWeP19uRe7zh0Duwe0wRJkaNPZv44_tDhxPSBCwUwc0txYvu8EAjCV_Kp52bMz9WiRpAGUNovMvxQMSZYAIRvowKWh93gmU4koUcPRArF9ZzlEyHgwPNhK_pWLdwEjH78PujvbIJr8W70tT_WX8ynqjUbmGv0L4EP2eN%252DACffj7dN9idx1eVGw%2526u%253DaHR0cHMlM2ElMmYlMmZ3d3cudWRlbXkuY29tJTJmY291cnNlJTJmbGVhcm4tZ28tdGhlLWNvbXBsZXRlLWJvb3RjYW1wLWNvdXJzZS1nb2xhbmclMmYlM2Z1dG1fY2FtcGFpZ24lM2RCRy1TZWFyY2hfS2V5d29yZF9CZXRhX1Byb2ZfbGEuRU5fY2MuUk9XLUVuZ2xpc2glMjZ1dG1fc291cmNlJTNkYmluZyUyNnV0bV9tZWRpdW0lM2RwYWlkLXNlYXJjaCUyNnBvcnRmb2xpbyUzZEJpbmctUk9XLUVuZ2xpc2glMjZ1dG1fYXVkaWVuY2UlM2RteCUyNnV0bV90YWN0aWMlM2RuYiUyNnV0bV90ZXJtJTNkXy5fYWdfMTMyNjAxMzQxMTY3NzM0MF8uX2FkX18uX2t3X2dvbGFuZyUyNTIwd2ViJTI1MjBkZXZlbG9wbWVudCUyNTIwdHV0b3JpYWwlMjZ1dG1fY29udGVudCUzZHMlMjZmdW5uZWwlM2QlMjZ0ZXN0JTNkJTI2dXRtX2NhbXBhaWduX2lkJTNkNjM4NTk2MjMyJTI2bXNjbGtpZCUzZDkyODAyZjkwYjU1NjFjNmMzYTEyNDU1MzI4MjU1Yzc3%2526rlid%253D92802f90b5561c6c3a12455328255c77%26vqd%3D4%2D68695386072198864451553557763192328531%26iurl%3D%257B1%257DIG%253DF424D855A76F4F68BFC0E097642E7F54%2526CID%253D380C06A681F9650C1250114F80E26472%2526ID%253DDevEx%252C5037.1&amp;rut=939ba845bcce4ed572177edc489e65e9651e44a8cc3b7f460fb7fc738fc39cbb">Learn Go Programming online at your own pace. Start today and improve your skills. Professional skills that position you at the top of the candidate list.</a>
+                      
+
+                      <div class="clear"></div>
+                    </div>
+                  </div>
+                
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgo.dev%2F&amp;rut=baf47f00b406b4ac7e7519a1f44e7f85b974ac68636190d87b76c980913fd716">The Go Programming Language</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgo.dev%2F&amp;rut=baf47f00b406b4ac7e7519a1f44e7f85b974ac68636190d87b76c980913fd716">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/go.dev.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgo.dev%2F&amp;rut=baf47f00b406b4ac7e7519a1f44e7f85b974ac68636190d87b76c980913fd716">
+                            go.dev
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgo.dev%2F&amp;rut=baf47f00b406b4ac7e7519a1f44e7f85b974ac68636190d87b76c980913fd716">Go is an open source programming language that makes it simple to build secure, scalable systems.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgo.dev%2Fdoc%2Finstall&amp;rut=46e567c76a2d6f789cebbcf4c14d9ac88d7cc2814bf7f29f459e39267b00ffbf">Download and install - The Go Programming Language</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgo.dev%2Fdoc%2Finstall&amp;rut=46e567c76a2d6f789cebbcf4c14d9ac88d7cc2814bf7f29f459e39267b00ffbf">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/go.dev.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgo.dev%2Fdoc%2Finstall&amp;rut=46e567c76a2d6f789cebbcf4c14d9ac88d7cc2814bf7f29f459e39267b00ffbf">
+                            go.dev/doc/install
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgo.dev%2Fdoc%2Finstall&amp;rut=46e567c76a2d6f789cebbcf4c14d9ac88d7cc2814bf7f29f459e39267b00ffbf">Documentation Download and install Download and install Download and install Go quickly with the steps described here. For other content on installing, you might be interested in: Managing Go installations -- How to install multiple versions and uninstall. Installing Go from source -- How to check out the sources, build them on your own machine, and run them. Download (1.27.1) Go installation ...</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fgolang%2Fgo&amp;rut=12babc15b9ed0ec7c7ef34b6e3afa87085eb1726bd192ac7d11424fb5d8a7255">GitHub - golang/go: The Go programming language · GitHub</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fgolang%2Fgo&amp;rut=12babc15b9ed0ec7c7ef34b6e3afa87085eb1726bd192ac7d11424fb5d8a7255">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/github.com.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fgolang%2Fgo&amp;rut=12babc15b9ed0ec7c7ef34b6e3afa87085eb1726bd192ac7d11424fb5d8a7255">
+                            github.com/golang/go
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fgolang%2Fgo&amp;rut=12babc15b9ed0ec7c7ef34b6e3afa87085eb1726bd192ac7d11424fb5d8a7255">The Go programming language. Contribute to <b>golang</b>/go development by creating an account on GitHub.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FGo_(programming_language)&amp;rut=9fae67479b3cbc5e13915b8869db1fffcfd87b2e1f81fa16fc334256945304da">Go (programming language) - Wikipedia</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FGo_(programming_language)&amp;rut=9fae67479b3cbc5e13915b8869db1fffcfd87b2e1f81fa16fc334256945304da">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/en.wikipedia.org.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FGo_(programming_language)&amp;rut=9fae67479b3cbc5e13915b8869db1fffcfd87b2e1f81fa16fc334256945304da">
+                            en.wikipedia.org/wiki/Go_(programming_language)
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FGo_(programming_language)&amp;rut=9fae67479b3cbc5e13915b8869db1fffcfd87b2e1f81fa16fc334256945304da">Go (often referred to as <b>Golang</b>) [15]: 2 is a high-level, general-purpose programming language that is statically typed and compiled. Originally designed in 2007 by Robert Griesemer, Rob Pike, and Ken Thompson, Go was publicly announced in November 2009, [16][4] and is developed by Google [5] and community contributors.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.w3schools.com%2Fgo%2Findex.php&amp;rut=44960d791c8015e126b366b9c2d531905ad4506bbbe8df370796acae60d0c0c6">Go Tutorial - W3Schools</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.w3schools.com%2Fgo%2Findex.php&amp;rut=44960d791c8015e126b366b9c2d531905ad4506bbbe8df370796acae60d0c0c6">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/www.w3schools.com.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.w3schools.com%2Fgo%2Findex.php&amp;rut=44960d791c8015e126b366b9c2d531905ad4506bbbe8df370796acae60d0c0c6">
+                            www.w3schools.com/go/index.php
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.w3schools.com%2Fgo%2Findex.php&amp;rut=44960d791c8015e126b366b9c2d531905ad4506bbbe8df370796acae60d0c0c6">Go is a popular programming language. Go is used to create computer programs.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.geeksforgeeks.org%2Fblogs%2F100%2Ddays%2Dof%2Dgolang%2F&amp;rut=230bd3f385539b1e24b590a36181c67ce68bcd5f3ae52f8728baff3dddb315e3">100 Days of Golang: A Complete Guide For Beginners</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.geeksforgeeks.org%2Fblogs%2F100%2Ddays%2Dof%2Dgolang%2F&amp;rut=230bd3f385539b1e24b590a36181c67ce68bcd5f3ae52f8728baff3dddb315e3">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/www.geeksforgeeks.org.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.geeksforgeeks.org%2Fblogs%2F100%2Ddays%2Dof%2Dgolang%2F&amp;rut=230bd3f385539b1e24b590a36181c67ce68bcd5f3ae52f8728baff3dddb315e3">
+                            www.geeksforgeeks.org/blogs/100-days-of-golang/
+                          </a>
+                          
+                            <span>&nbsp; &nbsp; 2025-07-23T00:00:00.0000000</span>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.geeksforgeeks.org%2Fblogs%2F100%2Ddays%2Dof%2Dgolang%2F&amp;rut=230bd3f385539b1e24b590a36181c67ce68bcd5f3ae52f8728baff3dddb315e3">What is <b>Golang</b> Go or <b>Golang</b> is an open-source programming language, developed by Google and simplifies the development of efficient and reliable software applications. <b>Golang</b> is well known for its features such as simplicity, and ease of learning. <b>Golang</b> is used by many huge tech giants such as Google, Dropbox, Netflix, and more.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.geeksforgeeks.org%2Fgo%2Dlanguage%2Fgo%2F&amp;rut=2c57239be56443d8153113cabf17a4ea31f892347e37774d276d87e016cc9d06">Go Tutorial - GeeksforGeeks</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.geeksforgeeks.org%2Fgo%2Dlanguage%2Fgo%2F&amp;rut=2c57239be56443d8153113cabf17a4ea31f892347e37774d276d87e016cc9d06">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/www.geeksforgeeks.org.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.geeksforgeeks.org%2Fgo%2Dlanguage%2Fgo%2F&amp;rut=2c57239be56443d8153113cabf17a4ea31f892347e37774d276d87e016cc9d06">
+                            www.geeksforgeeks.org/go-language/go/
+                          </a>
+                          
+                            <span>&nbsp; &nbsp; 2025-09-03T00:00:00.0000000</span>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.geeksforgeeks.org%2Fgo%2Dlanguage%2Fgo%2F&amp;rut=2c57239be56443d8153113cabf17a4ea31f892347e37774d276d87e016cc9d06">Go (or <b>Golang</b>) is a modern programming language developed by Google, designed for building fast and reliable applications, especially in cloud, DevOps, and distributed systems. Nowadays, many big tech companies have also adopted and rely on it, including: Google uses for services behind YouTube and Google Cloud. Uber moved parts of their real-time ride systems to Go for speed. Netflix uses it ...</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgolangdoc.github.io%2F&amp;rut=ab34b68a2a3a02f6fe625b9318039c3841763c471d1cdde888e5c11b65840eae">The Go Programming Language</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgolangdoc.github.io%2F&amp;rut=ab34b68a2a3a02f6fe625b9318039c3841763c471d1cdde888e5c11b65840eae">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/golangdoc.github.io.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgolangdoc.github.io%2F&amp;rut=ab34b68a2a3a02f6fe625b9318039c3841763c471d1cdde888e5c11b65840eae">
+                            golangdoc.github.io
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgolangdoc.github.io%2F&amp;rut=ab34b68a2a3a02f6fe625b9318039c3841763c471d1cdde888e5c11b65840eae">Go is an open source programming language that makes it easy to build simple, reliable, and efficient software.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.youtube.com%2F%40golang&amp;rut=1fc7bd26f2a6fb55f077cd6e4d0736270e79dd536f0ee2f3c4dc225f4246ef54">The Go Programming Language - YouTube</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.youtube.com%2F%40golang&amp;rut=1fc7bd26f2a6fb55f077cd6e4d0736270e79dd536f0ee2f3c4dc225f4246ef54">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/www.youtube.com.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.youtube.com%2F%40golang&amp;rut=1fc7bd26f2a6fb55f077cd6e4d0736270e79dd536f0ee2f3c4dc225f4246ef54">
+                            www.youtube.com/@golang
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.youtube.com%2F%40golang&amp;rut=1fc7bd26f2a6fb55f077cd6e4d0736270e79dd536f0ee2f3c4dc225f4246ef54">Welcome to the Go channel, where we hope to make you love programming again! Go is an open-source programming language supported by Google. Join our community and learn about working with the Go ...</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                <div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fpkg.go.dev%2F&amp;rut=8ed3e6f17820499bf7bc0736e48f5c1439d386adbfb1c5216093a325b01a2612">Go Packages - Go Packages</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fpkg.go.dev%2F&amp;rut=8ed3e6f17820499bf7bc0736e48f5c1439d386adbfb1c5216093a325b01a2612">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/pkg.go.dev.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fpkg.go.dev%2F&amp;rut=8ed3e6f17820499bf7bc0736e48f5c1439d386adbfb1c5216093a325b01a2612">
+                            pkg.go.dev
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fpkg.go.dev%2F&amp;rut=8ed3e6f17820499bf7bc0736e48f5c1439d386adbfb1c5216093a325b01a2612">Go is an open source programming language that makes it easy to build simple, reliable, and efficient software.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+
+            
+              
+              
+                <div class="nav-link">
+                  <form action="/html/" method="post">
+                    <input type="submit" class='btn btn--alt' value="Next" />
+                    <input type="hidden" name="q" value="golang" />
+                    <input type="hidden" name="s" value="10" />
+                    <input type="hidden" name="nextParams" value="" />
+                    <input type="hidden" name="v" value="l" />
+                    <input type="hidden" name="o" value="json" />
+                    <input type="hidden" name="dc" value="12" />
+                    <input type="hidden" name="api" value="d.js" />
+                    <input type="hidden" name="vqd" value="4-318286708587476192266138902657324110714" />
+
+                    
+                    
+                    
+                      <input name="kl" value="wt-wt" type="hidden" />
+                    
+                    
+                    
+                    
+                  </form>
+                </div>
+              
+            
+
+            <div class="feedback-btn">
+              <a rel="nofollow" href="//duckduckgo.com/feedback.html" target="_new">Feedback</a>
+            </div>
+            <div class="clear"></div>
+          </div>
+        </div>
+      </div> <!-- links wrapper //-->
+    
+  </div>
+
+  <div id="bottom_spacing2"></div>
+
+  
+    <img src="//duckduckgo.com/t/sl_h"/>
+  
+</body>
+</html>
