@@ -42,8 +42,15 @@ and deviations from the task text:
   added here; until it lands, a Claude 400 with replayed thinking is typed
   but shows no hint. *Merged 2026-10-07:* one copy kept in
   `replay_error.go` (reasoning-replay's duplicate in `replay_request.go`
-  removed), so the TUI hint now applies to Claude 400s; no Claude-specific
-  TUI test was added. model-recovery's `StreamError` has not landed either, so
+  removed), so the TUI hint now applies to Claude 400s. *Follow-up
+  2026-10-07:* `internal/tui/claude_replay_test.go` drives a real turn from
+  the composer through the agent and the native client against a local
+  Messages server (the default transport rerouted, as in the agent tests): a
+  400 on the second request, which replays the first turn's signed thinking,
+  shows the `/compact` hint, and with effort set on the client
+  (`EffortAnthropic` + `high`, as FR-40's flip would allow) the effort hint
+  before it; a 400 on a first request, which carries no replayed thinking,
+  shows no `/compact` hint. model-recovery's `StreamError` has not landed either, so
   the error is the unexported `anthropicAPIError` (status, status line, type,
   message, `error.details.error_code`, request ID). A 429 whose error code is
   `enforced_spend_limit_reached` is shown as a quota (`spend limit reached (a
@@ -80,10 +87,25 @@ and deviations from the task text:
   history; with tools, `null` arguments are sent as `{}` (they decode the
   same) and other non-objects fail before sending with an error naming the
   call and `/compact`.
-- **Known gap.** `EstimateInputTokens` still estimates Claude requests with
-  the chat shape and does not count replayed thinking bytes
-  (`replaySentText` belongs to reasoning-replay). Usage reported by the API
-  is exact; only the pre-send estimate is low.
+- **Context estimate (follow-up 2026-10-07).** `replaySentText` now returns,
+  for `ReplayAnthropicBlocks` on the native client, the thinking text of the
+  stored blocks the request will send: only when tools are declared, the
+  `replayFor` gate passes, and `replayBlocksMatching` still accepts the
+  blocks against `Content` and `ToolCalls` (the T13 rule, shared code via
+  `replayedThinkingText` in `anthropic_request.go`). Text and `tool_use`
+  blocks repeat `Content` and `ToolCalls`, which the base estimate already
+  counts. `Client.EstimateInputTokens` counts thinking when its `tools` are
+  non-empty; `EstimateHistoryTokens` (the idle estimate the TUI shows after
+  resume, `/models` and similar) counts it as for a tool-declaring request,
+  because the next prompt's request declares the agent's tools; its figure
+  still leaves the tool definitions out, as before.
+  `anthropic_estimate_test.go` checks each case against the body
+  `buildAnthropicRequest` builds. **Remaining gap:** signatures and
+  `redacted_thinking` data are opaque and not counted, and Likha requests
+  summarized display, so the stored thinking text is only a summary of the
+  reasoning the signature carries. The pre-send estimate for a replayed
+  Claude turn can therefore still be low (not measured; no live request has
+  been sent). Usage reported by the API is exact.
 
 ## M1 — Request body (`internal/model/anthropic_request.go`)
 
