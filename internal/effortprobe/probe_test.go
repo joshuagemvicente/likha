@@ -528,3 +528,40 @@ func TestRunNeverChangesTheCallersClient(t *testing.T) {
 		t.Fatal("probe requests ran on the caller's client instead of forks")
 	}
 }
+
+// A reply that is only a tool call, with hidden reasoning, is the expected
+// answer to the probe task; its first tool-call delta is the first token
+// (spec point 11).
+func TestRunToolCallOnlyReplyRecordsFirstToken(t *testing.T) {
+	toolOnly := func(effort string, carried bool) reply {
+		answer := honors(effort, carried)
+		answer.toolOnly = true
+		return answer
+	}
+	chatGPTFake := newFakeProvider(t, toolOnly)
+	chatGPTPlan, err := NewPlan(lookupProvider("chatgpt"), probeModel, nil, Options{Levels: []string{"low", "high"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := map[string]probeRun{
+		"chat completions": runFake(t, "openai", probeModel, Options{}, toolOnly, nil),
+		"responses":        runPlan(t, chatGPTClient(t, chatGPTFake, probeModel), chatGPTPlan, chatGPTFake),
+	}
+	for name, run := range runs {
+		t.Run(name, func(t *testing.T) {
+			answeredRows := 0
+			for _, row := range run.report.Rows {
+				if row.Outcome != OutcomeOK {
+					continue
+				}
+				answeredRows++
+				if !row.ToolCalled || row.FirstTokenMS == nil || row.TotalMS == nil || *row.FirstTokenMS > *row.TotalMS {
+					t.Fatalf("row %d: tool %t, first token %v, total %v", row.Index, row.ToolCalled, row.FirstTokenMS, row.TotalMS)
+				}
+			}
+			if answeredRows == 0 {
+				t.Fatalf("no row was answered:\n%s", run.table)
+			}
+		})
+	}
+}

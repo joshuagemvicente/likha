@@ -26,6 +26,7 @@ type reply struct {
 	completion int64
 	noUsage    bool // send no usage object at all
 	stall      bool // hold the response until the client gives up
+	toolOnly   bool // answer with the tool call only: no text, no reasoning
 }
 
 // behavior decides the reply from the effort a request carried; carried is
@@ -156,10 +157,14 @@ func usageJSON(answer reply, chat bool) string {
 
 func writeChatStream(w http.ResponseWriter, answer reply) {
 	w.Header().Set("Content-Type", "text/event-stream")
-	events := []string{
-		`{"choices":[{"delta":{"content":"The sum is 440."}}]}`,
-		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"record_answer","arguments":"{\"answer\":440}"}}]}}]}`,
+	// A role-only opening chunk and a keepalive comment carry no output.
+	fmt.Fprint(w, ": keepalive\n\n")
+	events := []string{`{"choices":[{"delta":{"role":"assistant","content":""}}]}`}
+	if !answer.toolOnly {
+		events = append(events, `{"choices":[{"delta":{"content":"The sum is 440."}}]}`)
 	}
+	events = append(events,
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"record_answer","arguments":"{\"answer\":440}"}}]}}]}`)
 	if !answer.noUsage {
 		events = append(events, `{"choices":[],"usage":`+usageJSON(answer, true)+`}`)
 	}
@@ -171,7 +176,9 @@ func writeChatStream(w http.ResponseWriter, answer reply) {
 
 func writeResponsesStream(w http.ResponseWriter, answer reply) {
 	w.Header().Set("Content-Type", "text/event-stream")
-	fmt.Fprint(w, "event: response.output_text.delta\ndata: {\"delta\":\"The sum is 440.\"}\n\n")
+	if !answer.toolOnly {
+		fmt.Fprint(w, "event: response.output_text.delta\ndata: {\"delta\":\"The sum is 440.\"}\n\n")
+	}
 	fmt.Fprint(w, "event: response.output_item.added\n")
 	fmt.Fprint(w, `data: {"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"record_answer","arguments":""}}`+"\n\n")
 	fmt.Fprint(w, "event: response.function_call_arguments.delta\n")

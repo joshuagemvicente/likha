@@ -184,9 +184,9 @@ func (r runner) send(ctx context.Context, index int, req Request) Row {
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, r.plan.Caps.RequestTimeout)
 	defer cancel()
-	first := &firstToken{}
 	rec.start(time.Now())
-	reply, usage, usageOK, err := fork.StreamUsage(reqCtx, probeMessages(), probeTools(), first.mark, first.mark)
+	// The recorder times the first token from the wire, so no callback.
+	reply, usage, usageOK, err := fork.StreamUsage(reqCtx, probeMessages(), probeTools(), nil, nil)
 	total := rec.since()
 	obs := rec.snapshot()
 	row.Sent, row.HTTPStatus = obs.fragment, obs.status
@@ -194,8 +194,8 @@ func (r runner) send(ctx context.Context, index int, req Request) Row {
 	if obs.attempts > 0 && obs.status != 0 {
 		row.HeadersMS = millis(obs.headers)
 	}
-	if at, ok := first.since(obs.began); ok {
-		row.FirstTokenMS = millis(at)
+	if obs.firstTokenSeen {
+		row.FirstTokenMS = millis(obs.firstToken)
 	}
 	if err != nil {
 		row.Outcome = classify(ctx, reqCtx, err, obs)
@@ -277,32 +277,9 @@ func int64Ptr(v int64) *int64 { return &v }
 
 func millis(d time.Duration) *int64 { return int64Ptr(d.Milliseconds()) }
 
-// firstToken records when the first streamed text or reasoning arrived.
-type firstToken struct {
-	mu sync.Mutex
-	at time.Time
-}
-
-func (f *firstToken) mark(string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.at.IsZero() {
-		f.at = time.Now()
-	}
-}
-
-func (f *firstToken) since(start time.Time) (time.Duration, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.at.IsZero() || start.IsZero() {
-		return 0, false
-	}
-	return f.at.Sub(start), true
-}
-
 // recorder observes one row's HTTP attempts through ForkWithTransport. It
-// keeps the last attempt's status, its header latency and the effort
-// fragment of the outgoing body. It never reads request headers, which
+// keeps the last attempt's status, its header latency, the effort fragment
+// of the outgoing body and the time to the first streamed output. It never reads request headers, which
 // carry the credential, and reads the body only through GetBody so the
 // forwarded request keeps its own.
 type recorder struct {
@@ -316,6 +293,9 @@ type observation struct {
 	status   int
 	headers  time.Duration
 	fragment string
+
+	firstToken     time.Duration
+	firstTokenSeen bool
 }
 
 func (r *recorder) wrap(next http.RoundTripper) http.RoundTripper {
@@ -332,6 +312,15 @@ func (r *recorder) since() time.Duration {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return time.Since(r.obs.began)
+}
+
+// markFirstToken records the first streamed output of the row.
+func (r *recorder) markFirstToken() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.obs.firstTokenSeen {
+		r.obs.firstToken, r.obs.firstTokenSeen = time.Since(r.obs.began), true
+	}
 }
 
 func (r *recorder) snapshot() observation {
@@ -359,6 +348,9 @@ func (t *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	if err == nil {
 		t.rec.obs.status = resp.StatusCode
 		t.rec.obs.headers = time.Since(t.rec.obs.began)
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			resp.Body = &tokenWatch{ReadCloser: resp.Body, mark: t.rec.markFirstToken}
+		}
 	}
 	return resp, err
 }
