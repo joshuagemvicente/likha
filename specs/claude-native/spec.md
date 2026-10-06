@@ -1,9 +1,12 @@
 # Feature: Native Claude client (Anthropic Messages API)
 
-**Status:** implemented (local) 2026-10-06 — automated suite green; live
-admission probe outstanding (the provider stays pending-probe); FR-36
-automatic retries await model-recovery, which this wire classifies for but
-does not run. Decisions recorded 2026-10-06 (user delegated defaults).
+**Status:** implemented (local) 2026-10-06, review fixes 2026-10-07 —
+automated suite green; live admission probe outstanding (the provider stays
+pending-probe). Not yet implemented: the `/compact` hint for a 400 on
+replayed thinking (point 27; the error is typed, but the TUI part is
+reasoning-replay T12's), and FR-36 automatic retries of the transient
+failures in point 28 (model-recovery); a spend-cap 429 is already shown as a
+quota error. Decisions recorded 2026-10-06 (user delegated defaults).
 Requirement: v1-spec FR-38 ([v1-spec.md](../v1-spec.md)). Uses the replay data
 model owned by [reasoning-replay](../reasoning-replay/spec.md) (FR-39).
 Effort on this wire is enabled only by the effort probe (FR-40).

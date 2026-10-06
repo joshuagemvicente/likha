@@ -92,7 +92,7 @@ Unknown `/commands` show an error and are never sent to the model; the draft is 
 
 ## Reasoning effort
 
-Reasoning models accept an effort level that trades speed and tokens for deeper thinking. Each model publishes its own levels — `gpt-5.5` offers none, low, medium, high, xhigh; `claude-opus-5-5` offers low through max — so Likha offers exactly the levels the model publishes, from the provider's live model list when it has them (OpenRouter) and otherwise from the bundled catalog.
+Reasoning models accept an effort level that trades speed and tokens for deeper thinking. Each model publishes its own levels — `gpt-5.5` offers none, low, medium, high, xhigh; `claude-opus-5-5` offers low through max — so Likha offers exactly the levels the model publishes, from the provider's live model list when it has them (OpenRouter, and Anthropic Claude's `/v1/models`) and otherwise from the bundled catalog.
 
 - **Picking a model in `/models`** opens an effort step listing **Default** and the model's levels, with a short hint beside common names. The cursor starts on the level you last used with that model. **Enter** switches model and level together; **Esc** goes back to the model list and changes nothing. Models without levels switch on the first Enter, as before.
 - **`/effort`** opens the same step for the current model (the level in use is marked `(current)`); **`/effort <level>`** sets it directly, and **`/effort default`** goes back to the provider default. A level the model does not publish is an error that keeps your draft.
@@ -100,7 +100,7 @@ Reasoning models accept an effort level that trades speed and tokens for deeper 
 - The status line shows the level beside the model, and each turn footer records the level it ran at (`✻ gpt-5.5 · high · 12.3s · 3 tools`). Conversation compaction and session naming always use the provider default; explore children use the session's level.
 - If a provider rejects a request carrying effort, the error adds `Sent with effort <level>; /effort default sends none.`
 
-**Which providers carry effort:** only providers whose live probe has passed. None has yet, so the effort step does not appear anywhere until probes are recorded (see [providers](providers.md#reasoning-effort)). Switching to a reasoning model on any other provider says why effort stays at the provider default; Claude is reached through Anthropic's OpenAI-compatible endpoint, which ignores effort.
+**Which providers carry effort:** only providers whose live probe has passed. None has yet, so the effort step does not appear anywhere until probes are recorded (see [providers](providers.md#reasoning-effort)). Switching to a reasoning model on any other provider says why effort stays at the provider default. Claude now uses Anthropic's native Messages API, which carries effort as `output_config.effort`, but stays unverified for effort (`not yet verified for Anthropic Claude`) until its FR-40 live probe passes.
 
 ## Conversation compaction (`/compact`)
 

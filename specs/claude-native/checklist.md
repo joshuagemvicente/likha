@@ -75,7 +75,8 @@ the real terminal, or FR-36 retry wiring (model-recovery) stay open.
 - [ ] A rejected request carrying effort shows the effort hint; one carrying
       replayed thinking shows the `/compact` hint.
 - [ ] Overload, rate-limit and server errors, in HTTP or in the stream, are
-      visible errors that FR-36 treats as transient; a spend-cap 429 is not.
+      visible errors that FR-36 treats as transient; a spend-cap 429 is not
+      and reads as a quota error.
 - [x] A stream that ends before `message_stop` is an error, not an answer.
 - [x] A refusal shows `Claude declined the request (category: …).` and
       Anthropic's explanation; its partial text is never sent back.

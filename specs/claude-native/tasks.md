@@ -14,9 +14,12 @@ it.
 Until M2 routes the `claude` row, the native client is dormant: the row still
 uses chat completions and nothing a user sees changes.
 
-**Implemented (local) 2026-10-06.** T1–T17 landed with the automated suite
-green (`go test ./...`, `go vet ./...`, `gofmt`, `-race` on model, agent and
-session). T18 is the user's live probe and stays open. Implementation notes
+**Implemented (local) 2026-10-06, review fixes 2026-10-07.** T1–T17 landed
+with the automated suite green (`go test ./...`, `go vet ./...`, `gofmt`,
+`-race` on model, agent and session). T18 is the user's live probe and stays
+open. Still outstanding outside this feature: the `/compact` hint for a
+rejected replay (reasoning-replay T12's TUI part) and FR-36 retries
+(model-recovery). Implementation notes
 and deviations from the task text:
 
 - **T1.** `ProviderWire`, `WireChat`, `WireAnthropic` and `wireFor` live in
@@ -39,10 +42,14 @@ and deviations from the task text:
   added here; until it lands, a Claude 400 with replayed thinking is typed
   but shows no hint. model-recovery's `StreamError` has not landed either, so
   the error is the unexported `anthropicAPIError` (status, status line, type,
-  message, `error.details.error_code`, `retry-after`, request ID) with a
-  `transient()` classifier implementing the T9 table. Nothing retries yet:
-  FR-36 retry wiring is model-recovery's work. Every error after the response
-  starts (stream error, early EOF, refusal, wrong content type) gets
+  message, `error.details.error_code`, request ID). A 429 whose error code is
+  `enforced_spend_limit_reached` is shown as a quota (`spend limit reached (a
+  quota, not a rate limit: …)`) in the error text itself. **Deviation (review
+  2026-10-07):** the `transient()` classifier and the `retry-after` field were
+  removed as dead code, since nothing reads them until model-recovery lands;
+  model-recovery adds the T9 transient table and `retry-after` when it wires
+  FR-36 retries. Nothing retries yet. Every error after the response starts
+  (stream error, early EOF, refusal, wrong content type) gets
   ` (request <id>)` from the `request-id` header.
 - **T10.** The per-model output limit and adaptive flag are kept in a
   package-level, mutex-guarded cache keyed by model ID, filled by every
@@ -52,9 +59,24 @@ and deviations from the task text:
   and setup's list now informs the first request too. `Check` uses the
   client's own HTTP client (a task fork's gate counts only POSTs, so the GET
   is not charged); the package functions use the shared list client.
-- **T12.** Captured text blocks are kept verbatim, including whitespace-only
-  ones, so the stored array is exactly what Claude returned; the T13
-  consistency check compares their concatenation with `Content`.
+- **T12.** Captured text blocks are kept verbatim, including empty and
+  whitespace-only ones, so the stored array is exactly what Claude returned;
+  the T13 consistency check compares their concatenation with `Content`.
+  **Fix (review 2026-10-07):** T13 leaves those blank text blocks out of the
+  replayed array (they still count toward the `Content` check), because
+  Claude rejects whitespace-only text in a request (T2 rule 3). Doing it at
+  send time also repairs sessions saved before the fix.
+- **T2 (review fixes 2026-10-07).** Tool call IDs another wire issued (for
+  example Kimi K2's `functions.bash:0`) do not match Claude's
+  `^[a-zA-Z0-9_-]+$`; with tools declared, `tool_use.id` and
+  `tool_result.tool_use_id` map such an ID to its allowed characters (others
+  replaced by `_`) plus `_` and 8 hex digits of its SHA-256, the same for a
+  call and its result. Claude-issued IDs pass unchanged, so replay is
+  unaffected. Tool-less requests render calls as text from the stored
+  arguments without object validation, so `/compact` and naming work on any
+  history; with tools, `null` arguments are sent as `{}` (they decode the
+  same) and other non-objects fail before sending with an error naming the
+  call and `/compact`.
 - **Known gap.** `EstimateInputTokens` still estimates Claude requests with
   the chat shape and does not count replayed thinking bytes
   (`replaySentText` belongs to reasoning-replay). Usage reported by the API
