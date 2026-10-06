@@ -313,7 +313,9 @@ M1's changes above are applied in v1-spec.md. M2 adds (applied to v1-spec.md
    flipping to `You:` on delivery.
 5. **Interrupted response (2026-10-05):** keep the visible partial text in
    history with an interruption note; drop partial reasoning and partial
-   tool calls.
+   tool calls. *Amended 2026-10-07 by v1-spec FR-39 ([reasoning-replay](../reasoning-replay/spec.md)
+   rule 13):* on DeepSeek, the reasoning streamed so far is kept with the
+   kept text as replay state, never displayed.
 6. **Steer while a tool runs (2026-10-05):** wait for the tool calls to
    settle; never cancel a running tool.
 

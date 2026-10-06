@@ -5,7 +5,8 @@ probes (tasks T18, run by the user) outstanding, so no provider is verified.
 Decisions recorded 2026-10-06 (user delegated defaults). Requirement: v1-spec FR-39
 (amended into [v1-spec.md](../v1-spec.md)). FR-39 also amends FR-15
 and the closing sentence of FR-37, which both say reasoning "is never sent
-back to the provider". This spec owns the shared replay data model.
+back to the provider", and FR-21's Steer now rule, which discarded partial
+reasoning (rule 13). This spec owns the shared replay data model.
 [claude-native](../claude-native/spec.md) uses it for Anthropic thinking
 blocks, and [chunked-content](../chunked-content/spec.md) M2 uses it for
 Mistral thinking.

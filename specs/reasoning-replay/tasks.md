@@ -330,3 +330,33 @@ Deviations and refinements:
   child that never share state, Steer now on both, and `/compact`.
 - **Checklist.** `checklist.md` items describe live outcomes; they stay
   unticked until the user's probes (T18) run.
+
+## Review fixes (2026-10-07, local)
+
+- **Decision 8 amended: background requests send no replay state.**
+  Compaction and session naming go through `backgroundClient`
+  (`WithoutEffort()` then `Client.WithoutReplay()`, a fork with
+  `ReplayNone`). Before, a 400 that rejected a session's own Gemini
+  signatures (sent on every turn, see T10/T11 above) pointed at `/compact`,
+  whose summarize request resent the same signatures and failed the same
+  way. Neither provider needs state on these tool-less requests that end
+  with a user prompt, and their 400s are now plain errors without the hint
+  (`TestBackgroundRequestsSendNoReplay`, both providers, both requests).
+- **Idle context estimate (T16).** `recalculateContext` uses
+  `Client.EstimateHistoryTokens`, which treats the history as followed by a
+  new prompt, so no Gemini skip value is counted at idle (rule 14). The
+  in-turn estimate in `turn_execution.go` is unchanged.
+- **FR-21 amended** in v1-spec (and noted in steering-prompts decision 5 and
+  `docs/usage.md`): Steer now on DeepSeek keeps the streamed reasoning as
+  replay text. FR-39 carries its own implemented (local) status.
+- **A failed `/compact` never showed the hint**: its error event carries no
+  `Err`, so `replayRejectedNote` finds nothing; with decision 8 amended its
+  error cannot be a `ReplayRejectedError` either.
+- **Sources not re-checked in review.** The primary docs
+  (api-docs.deepseek.com/guides/thinking_mode, Google's thought-signatures
+  page) could not be fetched again during the 2026-10-07 review. The request
+  shapes (`reasoning_content` on assistant messages,
+  `tool_calls[].extra_content.google.thought_signature`, the skip value
+  inside `extra_content`, and the stream delta carrying `extra_content`) are
+  checked only against [research.md](research.md) and stay unconfirmed until
+  the T18 live probes.
