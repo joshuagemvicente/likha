@@ -208,7 +208,7 @@ func (c *Client) APIKey() string {
 
 type requestMessage struct {
 	Role       string            `json:"role"`
-	Content    string            `json:"content"`
+	Content    requestContent    `json:"content"`
 	ToolCalls  []requestToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string            `json:"tool_call_id,omitempty"`
 }
@@ -291,7 +291,7 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 		if m.Role == "tool" && m.ToolCallID == "" {
 			return result, usageReport{}, errors.New("tool result requires a tool call ID")
 		}
-		rm := requestMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
+		rm := requestMessage{Role: m.Role, Content: c.contentFor(m), ToolCallID: m.ToolCallID}
 		for _, call := range m.ToolCalls {
 			if m.Role != "assistant" || call.ID == "" || call.Name == "" || !json.Valid([]byte(call.Arguments)) {
 				return result, usageReport{}, errors.New("invalid assistant tool call")
@@ -372,7 +372,8 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 	if err != nil || mediaType != "text/event-stream" {
 		return result, usageReport{}, fmt.Errorf("model returned incompatible content type %q (expected SSE)", resp.Header.Get("Content-Type"))
 	}
-	message, report, err := consumeStream(ctx, io.LimitReader(resp.Body, maxResponseBytes+1), onText, onReasoning)
+	capture := replayCapture{wire: c.replayWire, source: c.ReplaySource()}
+	message, report, err := consumeStream(ctx, io.LimitReader(resp.Body, maxResponseBytes+1), capture, onText, onReasoning)
 	if err != nil {
 		return message, usageReport{}, err
 	}
@@ -864,9 +865,10 @@ func appendPiece(value *strings.Builder, piece string) {
 	value.WriteString(piece)
 }
 
-func consumeStream(ctx context.Context, reader io.Reader, onText func(string), onReasoning func(string)) (Message, usageReport, error) {
+func consumeStream(ctx context.Context, reader io.Reader, capture replayCapture, onText func(string), onReasoning func(string)) (Message, usageReport, error) {
 	result := Message{Role: "assistant"}
 	var lastUsage usageReport
+	var thinking chunkThinking
 	// skipped holds the first chunk type the reply skipped; it matters only
 	// when the reply shows nothing else (specs/chunked-content decision 3).
 	var skipped *string
@@ -930,6 +932,7 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 				}
 			}
 		}
+		thinking.add(delta.Content)
 		var reasoningPiece string
 		if delta.Reasoning != nil {
 			reasoningPiece = *delta.Reasoning
@@ -1048,7 +1051,12 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 		// a silent empty answer would report an unread reply as a success.
 		return Message{}, usageReport{}, fmt.Errorf("%w (type %q)", errUnshowableContent, *skipped)
 	}
+	replay, err := capture.replayFor(&thinking)
+	if err != nil {
+		return Message{}, usageReport{}, err
+	}
 	result.Content = text.String()
 	result.Reasoning = reasoning.String()
+	result.Replay = replay
 	return result, lastUsage, nil
 }
