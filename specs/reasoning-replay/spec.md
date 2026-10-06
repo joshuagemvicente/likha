@@ -1,8 +1,8 @@
 # Feature: Reasoning replay (send provider-required reasoning state back)
 
-**Status:** in progress — decisions recorded 2026-10-06 (user delegated
-defaults); the shared foundation (data model, send gate, persistence) is in
-the tree, capture and request encoding are not. Requirement: v1-spec FR-39
+**Status:** implemented (local) 2026-10-06 — automated suite green; live
+probes (tasks T18, run by the user) outstanding, so no provider is verified.
+Decisions recorded 2026-10-06 (user delegated defaults). Requirement: v1-spec FR-39
 (amended into [v1-spec.md](../v1-spec.md)). FR-39 also amends FR-15
 and the closing sentence of FR-37, which both say reasoning "is never sent
 back to the provider". This spec owns the shared replay data model.

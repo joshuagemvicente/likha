@@ -36,11 +36,9 @@ the tasks below:
   and a changed turn's plain text is still text (spec decision 6); signed
   `Details`, `Blocks` and signatures describe the exact turn the issuer
   returned. Replay text itself is never clipped.
-- Loop-level tests use the unexported `replyHook` seam to stand in for
-  capture until T5–T7 land: `TestMainLoopMalformedBatchKeepsOnlyUnsignedReplay`
-  and `TestChildLoopClippedReplyKeepsOnlyUnsignedReplay` (explore and
-  profile). When capture lands, T5/T6 should also cover these paths with
-  stream fixtures, and the hook can go once nothing needs it.
+- Loop-level tests used an unexported `replyHook` seam to stand in for
+  capture until T5–T7 landed. It is gone: the loops' replay tests now run
+  through real capture and encoding (see the implementation notes).
 
 ## M1 — Data model (`internal/model`)
 
@@ -88,9 +86,8 @@ the tasks below:
       `ReasoningContent` set to `""`. A snapshot JSON saved before this
       change decodes with `Replay == nil`. A message without replay marshals
       byte-identically to the pre-change encoding (golden).
-- [ ] **T2. Provider replay wire.** *(Type, constants, `modelBound`,
-      `Provider.Replay` and the shared-base table test done; enabling
-      `deepseek` and `gemini` is left to their capture/encode work.)* In `replay.go` add `type ReplayWire uint8`
+- [x] **T2. Provider replay wire.** *(`deepseek` and `gemini` enabled
+      with their capture and encoding.)* In `replay.go` add `type ReplayWire uint8`
       with `ReplayNone` (zero value), `ReplayReasoningContent`,
       `ReplayThoughtSignature`, `ReplayReasoningDetails` and
       `ReplayAnthropicBlocks` (set only by the claude-native client). Add a
@@ -118,7 +115,7 @@ the tasks below:
 
 ## M2 — Capture (`consumeStream`)
 
-- [ ] **T4. Pass the wire into the decoder.** `consumeStream` takes a small
+- [x] **T4. Pass the wire into the decoder.** `consumeStream` takes a small
       `replayCapture{wire ReplayWire; source ReplaySource}` value. With
       `ReplayNone` it behaves exactly as today. With any other wire, a
       successful result always carries `Replay{Source: source}`, filled by
@@ -127,7 +124,7 @@ the tasks below:
       *Verify:* the existing `consumeStream` tests pass unchanged with
       `ReplayNone`; a stream without reasoning on a `ReplayThoughtSignature`
       capture returns `Replay` with only `Source` set.
-- [ ] **T5. DeepSeek.** With `ReplayReasoningContent`, concatenate every
+- [x] **T5. DeepSeek.** With `ReplayReasoningContent`, concatenate every
       `delta.reasoning_content` piece separately from the display builder.
       The display builder keeps its current `reasoning`-first rule. If any
       chunk carried the field (even empty), set `ReasoningContent` to the
@@ -136,7 +133,7 @@ the tasks below:
       gives the exact text; a fixture where the field is present but empty
       gives a pointer to `""`; a fixture with only `delta.reasoning` gives
       `ReasoningContent == nil`.
-- [ ] **T6. Gemini.** With `ReplayThoughtSignature`, add
+- [x] **T6. Gemini.** With `ReplayThoughtSignature`, add
       `ExtraContent *struct{ Google *struct{ ThoughtSignature string
       `json:"thought_signature"` } `json:"google"` } `json:"extra_content"``
       to the tool-call fragment in `streamChunk`. Store it on
@@ -146,7 +143,7 @@ the tasks below:
       *Verify:* fixtures for a single call with a signature, two parallel
       calls where only the first has one, and a signature arriving on a
       later fragment of the same index than the call's name.
-- [ ] **T7. OpenRouter.** With `ReplayReasoningDetails`, decode
+- [x] **T7. OpenRouter.** With `ReplayReasoningDetails`, decode
       `delta.reasoning_details` as `[]json.RawMessage` and keep the
       elements in arrival order. At `[DONE]`, assemble streamed fragments
       into complete objects: consecutive elements with the same `type` and
@@ -165,7 +162,7 @@ the tasks below:
       objects with the exact concatenated text, the signature and the
       data; unknown fields survive; the shipped `openrouter` client
       captures nothing.
-- [ ] **T8. Failure paths.** Every error return from `consumeStream` still
+- [x] **T8. Failure paths.** Every error return from `consumeStream` still
       returns `Message{}`, so no replay state survives a failed, cancelled
       or retried (FR-36) attempt.
       *Verify:* fixtures that end before `[DONE]`, report a stream error, or
@@ -173,7 +170,7 @@ the tasks below:
 
 ## M3 — Replay (`Client.stream` request building)
 
-- [ ] **T9. Request fields.** Extend `requestMessage` with
+- [x] **T9. Request fields.** Extend `requestMessage` with
       `ReasoningContent *string `json:"reasoning_content,omitempty"`` and
       `ReasoningDetails json.RawMessage `json:"reasoning_details,omitempty"``,
       and `requestToolCall` with `ExtraContent *requestExtraContent
@@ -182,8 +179,7 @@ the tasks below:
       them, so bodies without replay are unchanged.
       *Verify:* golden body test: a history with no replay encodes
       byte-identically to the pre-change body.
-- [ ] **T10. Send gate.** *(`replayFor` done; filling request fields lands
-      with T9 and each provider's encoding.)* Add `(*Client).replayFor(m Message)
+- [x] **T10. Send gate.** Add `(*Client).replayFor(m Message)
       *ReasoningReplay`: it returns `m.Replay` only when
       `c.replayWire != ReplayNone`, `m.Role == "assistant"`, `m.Replay !=
       nil`, the endpoint matches, and, when `c.replayWire.modelBound()`,
@@ -197,7 +193,7 @@ the tasks below:
       signatures and details, and still sends DeepSeek text. A golden test
       with a history full of foreign replay state on a `ReplayNone` provider
       is byte-identical to the pre-feature body.
-- [ ] **T11. Gemini skip value.** With `ReplayThoughtSignature`, find the
+- [x] **T11. Gemini skip value.** With `ReplayThoughtSignature`, find the
       last `user` message. For each later assistant message with tool calls
       whose `replayFor` is nil (another model or endpoint issued it, or an
       older session wrote it), send `skip_thought_signature_validator` on
@@ -206,7 +202,7 @@ the tasks below:
       *Verify:* a current-turn call from another model gets the skip value;
       a previous-turn one does not; an own signed call is unchanged; an own
       unsigned call (Gemini 2.5) has no `extra_content`.
-- [ ] **T12. Replay error.** While building, count `Missing`: with
+- [x] **T12. Replay error.** While building, count `Missing`: with
       `ReplayReasoningContent` and tools present, assistant messages whose
       `replayFor` is nil; with `ReplayThoughtSignature`, messages that got
       the skip value; zero for every other wire. Count `Sent`: assistant
@@ -226,7 +222,7 @@ the tasks below:
 
 ## M4 — Agent, sessions and estimate
 
-- [ ] **T13. Steer now (DeepSeek).** Add
+- [x] **T13. Steer now (DeepSeek).** Add
       `(*Client).PartialAssistant(text, reasoning string) Message` to
       `model`. With `ReplayReasoningContent` it sets
       `Replay{Source, ReasoningContent: &reasoning}`; with any other wire it
@@ -253,8 +249,7 @@ the tasks below:
       only in replay counts as changed; a legacy snapshot fixture loads; a
       task record over capacity because of replay bytes fails with
       `ErrTaskCapacity`.
-- [ ] **T15. Compaction and children.** *(Clipping rule done with the
-      foundation note above; the request-body checks need T9.)*
+- [x] **T15. Compaction and children.**
       `CompactHistoryUsage` builds a fresh developer message, and explore
       and profile loops append the fork's own `assistant` values.
       `exploreLoopMessages` copies `ToolCalls` and shares `Replay` by
@@ -266,7 +261,7 @@ the tasks below:
       second request body carries its first response's state and none of
       the parent's; a profile task the same; a clipped child turn resends
       its unsigned text and no signed state.
-- [x] **T16. Context estimate.** *(Skip values join with T11; Anthropic
+- [x] **T16. Context estimate.** *(Skip values counted since T11; Anthropic
       blocks are left to claude-native, whose blocks replace content.)* Add `(*Client).EstimateInputTokens(messages,
       tools)`, which counts the package-level estimate plus the replay text
       `replayFor` would send (`ReasoningContent`, `Details`, signatures,
@@ -278,7 +273,7 @@ the tasks below:
 
 ## M5 — Evidence
 
-- [ ] **T17. Docs and record.** Amend the `Message.Reasoning` comment, the
+- [x] **T17. Docs and record.** Amend the `Message.Reasoning` comment, the
       `Stream` doc comment ("Reasoning is never sent back") and
       `EstimateInputTokens`' comment to the FR-15 wording. Add a
       `docs/providers.md` note for DeepSeek and Gemini, and for OpenRouter
@@ -299,3 +294,39 @@ the tasks below:
       passing probe. Agents never mark a row verified.
       *Verify:* each matrix row names a date, model and outcome from the
       user's run; rows without one stay "pending (user)".
+
+## Implementation notes (2026-10-06, local)
+
+Capture lives in `internal/model/replay_stream.go`, request encoding,
+`ReplayRejectedError` and `PartialAssistant` in `replay_request.go`;
+`client.go` only threads them through `consumeStream` and `Client.stream`.
+Deviations and refinements:
+
+- **T6/T7 decoding.** `extra_content` and `reasoning_details` are decoded as
+  raw JSON and parsed only under their own wire, instead of a typed struct on
+  every fragment, so a provider without replay can never fail a stream on
+  their shape (`TestStreamWithoutReplayCapturesNothing`). On its own wire a
+  malformed shape fails the stream like any malformed event.
+- **T7 assembly.** Assembled objects are re-encoded from a map, so their keys
+  come out in sorted order; values are unchanged. A streamed `text`,
+  `summary` or `data` piece that is not a string fails the stream. The rule
+  stays unverified until T18 (the row ships `ReplayNone`).
+- **T10/T11.** A matching issuer's own signatures go back on every turn;
+  only the skip value is limited to the current turn. A clipped child turn
+  on Gemini loses its signature (`dropClippedReplay`) and so gets the skip
+  value on its first call, because the call is in the child's current turn.
+- **T12.** `ReplayRejectedError` applies to HTTP 400 only, as the spec says;
+  effort keeps its 400/422 rule and wraps it. Skip-valued messages count as
+  `Missing`, not `Sent`.
+- **T13.** The agent keeps the reasoning pieces its `onReasoning` callback
+  saw. That callback prefers `reasoning` over `reasoning_content` when a
+  chunk carries both; DeepSeek sends only `reasoning_content`, so they match.
+- **Tests without a seam.** `replyHook` is removed. Agent tests point a
+  shipped provider row's `BaseURL` at an `httptest` server for the test's
+  duration (as `tui` tests already do), so `model.New` resolves the row's
+  real wire and every loop runs through real capture and encoding:
+  main-loop DeepSeek replay, the malformed batch on DeepSeek and Gemini,
+  clipped and unclipped explore and profile children on both, a parent and
+  child that never share state, Steer now on both, and `/compact`.
+- **Checklist.** `checklist.md` items describe live outcomes; they stay
+  unticked until the user's probes (T18) run.
