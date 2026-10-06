@@ -2,3 +2,6 @@
 /bin/
 /dist/
 /coverage.out
+/notes.txt
+/.preview-s3/
+/marketing/
