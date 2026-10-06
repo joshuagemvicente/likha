@@ -781,6 +781,9 @@ func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
 		if note := effortRejectedNote(v.Err); note != "" {
 			content += "\n" + note
 		}
+		if note := replayRejectedNote(v.Err); note != "" {
+			content += "\n" + note
+		}
 		m.entries = append(m.entries, entry{role: "Error", content: content})
 	} else {
 		m.status = "Ready"
