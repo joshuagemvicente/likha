@@ -100,7 +100,10 @@ Reasoning models accept an effort level that trades speed and tokens for deeper 
 - The status line shows the level beside the model, and each turn footer records the level it ran at (`✻ gpt-5.5 · high · 12.3s · 3 tools`). Conversation compaction and session naming always use the provider default; explore children use the session's level.
 - If a provider rejects a request carrying effort, the error adds `Sent with effort <level>; /effort default sends none.`
 
-**Which providers carry effort:** only providers whose live probe has passed. None has yet, so the effort step does not appear anywhere until probes are recorded (see [providers](providers.md#reasoning-effort)). Switching to a reasoning model on any other provider says why effort stays at the provider default. Claude now uses Anthropic's native Messages API, which carries effort as `output_config.effort`, but stays unverified for effort (`not yet verified for Anthropic Claude`) until its FR-40 live probe passes.
+**Which providers carry effort:** only providers whose live probe has passed. You run that probe yourself with `likha --probe-effort` ([below](#effort-probe---probe-effort)). None has passed yet, so the effort step does not appear anywhere until probes are recorded (see [providers](providers.md#reasoning-effort)). Switching to a reasoning model on any other provider says why effort stays at the provider default: `Effort stays at the provider default: not yet verified for <provider>.`
+
+- **Anthropic Claude** uses Anthropic's native Messages API, which carries effort as `output_config.effort`. It reads `not yet verified for Anthropic Claude` until a Claude probe passes. The probe does not send `output_config` yet, so a Claude probe run today sends no effort field and does not count as evidence.
+- **Mistral** replies at higher effort arrive as chunked thinking and text, and these now parse, so Mistral can be probed. Its effort stays off until Likha also sends Mistral's thinking back, as Mistral's docs ask.
 
 ## Effort probe (`--probe-effort`)
 

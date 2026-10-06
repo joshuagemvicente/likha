@@ -93,6 +93,8 @@ Likha sends a reasoning-effort level only to providers whose live probe shows th
 
 A probe sends one tool-bearing request at each published level of one model and records whether each was accepted, rejected, or ignored.
 
+A probe on `claude` does not send `output_config` yet: its rows carry no effort field, so a Claude run is not evidence until the probe gains the native shape.
+
 ### Running an effort probe
 
 You run the probe yourself, with your own key, and you pay for its requests. Likha never runs one on its own, and the probe never changes a setting or enables a provider.
