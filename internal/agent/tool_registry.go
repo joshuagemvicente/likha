@@ -36,6 +36,11 @@ type RunOptions struct {
 	// InitMode limits one /init turn (specs/repo-init): read-only tools plus
 	// edit_file proposals for the root AGENTS.md only. Never persisted.
 	InitMode bool
+	// InstallMode marks one /install turn (specs/install-command): until a
+	// plan_update call succeeds in the turn, run_command outside the
+	// read-only tier and every write tool refuse without review. Never
+	// persisted.
+	InstallMode bool
 	// Ask brokers one interactive question; PlanApply persists a checklist
 	// replacement; SkillLoad loads one discovered skill; WebSearch runs a
 	// consent-gated configured search. Nil hooks register the tool with its
@@ -94,6 +99,12 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 	outputs := options.Outputs
 	registry := tools.New()
 	var warnings []string
+	// install holds one /install turn's plan-first gate; nil outside that
+	// turn and when plan mode's stricter gate already applies.
+	var install *installGate
+	if options.InstallMode && !options.PlanMode {
+		install = &installGate{}
+	}
 	register := func(tool tools.Tool) {
 		if options.PlanMode && planModeGates(tool) {
 			// Registration with an unavailable reason hides the definition
@@ -114,6 +125,10 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 			tool.Aliases = nil
 			tool.UnavailableReason = "refused (/init): " + tool.Definition.Name +
 				" is unavailable during the /init survey; only read-only tools and an edit_file proposal for the root AGENTS.md are allowed"
+		} else if install != nil && install.gates(tool) {
+			// The tool stays advertised (the plan opens it mid-turn); the
+			// wrapped authorizer refuses before any approval flow until then.
+			tool.Authorize = install.wrapAuthorize(tool.Definition.Name, tool.Authorize)
 		}
 		if err := registry.Register(tool); err != nil {
 			warnings = append(warnings, "Tool "+tool.Definition.Name+" unavailable: "+err.Error())
@@ -299,6 +314,9 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 			if err := validateCommand(args.Command); err != nil {
 				return err
 			}
+			if install != nil && !install.commandAllowed(args.Command, root) {
+				return errors.New(installPlanFirst("run_command"))
+			}
 			return authorizeCommand(ctx, root, args.Command, options, emit, &autoApproval)
 		},
 		Run: func(ctx context.Context, input json.RawMessage) (tools.Result, error) {
@@ -368,6 +386,9 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 	planTool := tools.PlanUpdateTool(options.PlanApply)
 	if options.PlanApply == nil {
 		planTool.UnavailableReason = "Plan checklist persistence is unavailable"
+	}
+	if install != nil {
+		planTool.Run = install.wrapPlanUpdate(planTool.Run)
 	}
 	register(planTool)
 	skillTool := tools.SkillTool(options.SkillLoad)

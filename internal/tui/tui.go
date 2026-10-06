@@ -117,6 +117,7 @@ type ui struct {
 	planMode           bool              // live per-session read-only state; never persisted
 	initRun            bool              // the active run is a /init survey turn (agent.RunOptions.InitMode); cleared by finishRun
 	initProposed       bool              // the /init run showed an edit review for the root AGENTS.md
+	installRun         bool              // the active run is an /install turn (agent.RunOptions.InstallMode); cleared by finishRun
 	displayPrompts     map[string]string // model prompt -> the short text its You row shows (/init); status title only
 	runID              uint64
 	cancel             context.CancelFunc
@@ -434,7 +435,7 @@ func (m *ui) armActivityTick() tea.Cmd {
 func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
 	// Only handleCommand's /init and /install paths run in init or install
 	// mode; every other turn starts as a normal one.
-	m.initRun, m.initProposed = false, false
+	m.initRun, m.initProposed, m.installRun = false, false, false
 	return m.startTurnDisplay(prompt, prompt, queued)
 }
 
@@ -774,6 +775,7 @@ func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
 		m.entries = append(m.entries, entry{role: "Likha", content: initNoProposalNote})
 	}
 	m.initRun, m.initProposed = false, false
+	m.installRun = false
 	// The footer closes every finished user turn, failed ones
 	// included, below the run's last notice.
 	m.appendTurnFooter(turnTools, turnCancelled)

@@ -119,6 +119,12 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 			mainHarness[0].Content += initModeInstructions
 		}
 	}
+	if options.InstallMode && !options.PlanMode {
+		mainHarness = append([]model.Message(nil), mainHarness...)
+		if len(mainHarness) > 0 && mainHarness[0].Role == "system" {
+			mainHarness[0].Content += installModeInstructions
+		}
+	}
 	if options.SkillAdvert != "" && len(mainHarness) > 0 && mainHarness[0].Role == "system" {
 		mainHarness = append([]model.Message(nil), mainHarness...)
 		mainHarness[0].Content += "\n\n" + options.SkillAdvert
@@ -305,6 +311,19 @@ subagents, ask_user) to learn the repository. Shell commands, MCP tools, and
 every write except one edit_file proposal for the repository-root AGENTS.md
 are refused. The user reviews the full diff before anything is written. This
 limit applies to this turn only and grants no additional permissions.`
+
+// installModeInstructions extends the compiled harness's single system layer
+// for one /install turn; it is never persisted.
+const installModeInstructions = `
+
+## /install turn
+
+This turn is an /install: detect with read tools and read-only commands, ask
+only the unresolved choices in one ask_user questionnaire, then post the plan
+with plan_update. Until a plan with at least one step is posted this turn,
+commands outside the read-only tier and every edit are refused without review.
+After that, every command and edit follows its normal approval. This limit
+applies to this turn only and grants no additional permissions.`
 
 func parallelRead(registry *tools.Registry, name string) bool {
 	tool, ok := registry.Lookup(name)

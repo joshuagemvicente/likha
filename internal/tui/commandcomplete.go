@@ -19,6 +19,7 @@ var commands = []commandItem{
 	{"compact", "summarize the conversation so far into a compact brief, /compact [focus] steers it"},
 	{"help", "list the reserved commands"},
 	{"init", "survey the repository and propose a root AGENTS.md for review: /init [guidance]"},
+	{"install", "interview you about an install, show a plan, then run each step with approval: /install <request>"},
 	{"mcp", "show the connected MCP servers or how to configure them"},
 	{"models", "switch the model for this session"},
 	{"plan", "toggle read-only plan mode: edits, commands, and MCP calls refuse without approval flow"},

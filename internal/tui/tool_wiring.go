@@ -43,7 +43,7 @@ func (m *ui) openOutputStore() {
 }
 
 func (m *ui) toolRunOptions(runID uint64) agent.RunOptions {
-	options := agent.RunOptions{Outputs: m.outputs, SessionID: m.snapshot.ID, Provider: m.conn.ProviderCanonical, PlanMode: m.planMode, InitMode: m.initRun}
+	options := agent.RunOptions{Outputs: m.outputs, SessionID: m.snapshot.ID, Provider: m.conn.ProviderCanonical, PlanMode: m.planMode, InitMode: m.initRun, InstallMode: m.installRun}
 	store, sessionID := m.store, m.snapshot.ID
 	if store != nil && sessionID != "" {
 		options.TasksEnabled = m.client != nil && m.repo != nil
