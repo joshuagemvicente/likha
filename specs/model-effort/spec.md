@@ -32,8 +32,13 @@ levels that some models reject and hide levels that others support. Likha
 therefore offers each model exactly the levels it publishes.
 
 The levels come from the models.dev catalog Likha already bundles: its
-`reasoning_options` field lists each model's effort levels. On 2026-10-06,
-574 of the 651 reasoning-capable models in Likha's catalog had them.
+`reasoning_options` field lists a model's reasoning controls, which may be
+named effort levels, a thinking-token budget or an on/off toggle. On
+2026-10-06, 574 of the 651 reasoning-capable models in Likha's catalog had
+some `reasoning_options`, but many offer only a budget or a toggle. The
+catalog regenerated that day has 418 rows with effort levels (of 650
+reasoning rows): 415 from models.dev and 3 Gemini 2.5 rows from documented
+overrides. Models without effort levels get no effort step.
 Sources and provider behavior are recorded in [research.md](research.md).
 
 ## Role

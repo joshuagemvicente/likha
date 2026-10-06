@@ -205,9 +205,12 @@ better-specified than the draft.
     lifecycle) — the existing research rates this P3; it stays out of the approval critical path.
 11. **Plan mode / thinking control / text transforms.** *Source:* V2 built-in `plan` agent
     (read-only, may write plan files); OMP plan-mode children forced read-only and thinking
-    levels. *Likha today:* all three are drafts (`specs/plan-mode`, `specs/thinking-control`, since renamed `specs/model-effort`,
-    `specs/text-transforms`). Implement against these drafts; copy OMP's rule that plan mode
-    blocks side-effecting MCP calls.
+    levels. *Likha today:* plan mode and text transforms are specs only (`specs/plan-mode`
+    planned, `specs/text-transforms` draft). Thinking control was a draft when this comparison
+    was written; it has since been replaced by `specs/model-effort`, which is in progress
+    (implemented (local); no provider carries effort until its live probe passes). Implement
+    plan mode and text transforms against their specs; copy OMP's rule that plan mode blocks
+    side-effecting MCP calls.
 12. **Model roles for cheap side tasks.** *Source:* OMP `modelRoles` routes title/compaction/
     memory to small models; V2 variants/per-agent models. *Likha today:* session naming,
     compaction, and summaries all use the active model. *Shape:* optional role config
