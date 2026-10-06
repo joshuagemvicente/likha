@@ -114,7 +114,10 @@ type ui struct {
 	activityGeneration uint64 // invalidates ticks from an earlier activity interval
 	working            bool
 	cancelling         bool
-	planMode           bool // live per-session read-only state; never persisted
+	planMode           bool              // live per-session read-only state; never persisted
+	initRun            bool              // the active run is a /init survey turn (agent.RunOptions.InitMode); cleared by finishRun
+	initProposed       bool              // the /init run showed an edit review for the root AGENTS.md
+	displayPrompts     map[string]string // model prompt -> the short text its You row shows (/init); status title only
 	runID              uint64
 	cancel             context.CancelFunc
 	events             chan agent.TurnEvent
@@ -429,6 +432,17 @@ func (m *ui) armActivityTick() tea.Cmd {
 // queued pre-fills the fresh steering channel so a turn flushed from the
 // previous run's leftovers delivers its remaining messages in order.
 func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
+	// Only handleCommand's /init and /install paths run in init or install
+	// mode; every other turn starts as a normal one.
+	m.initRun, m.initProposed = false, false
+	return m.startTurnDisplay(prompt, prompt, queued)
+}
+
+// startTurnDisplay is startTurn with a transcript line that differs from the
+// model prompt: the You row shows display while the model and the saved
+// history receive prompt (/init shows "/init [guidance]" but sends the full
+// survey prompt).
+func (m *ui) startTurnDisplay(display, prompt string, queued []string) tea.Cmd {
 	steer := make(chan string, 64)
 	for _, q := range queued {
 		select {
@@ -440,14 +454,20 @@ func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
 	m.steer = steer
 	if m.client == nil {
 		m.entries = append(m.entries, entry{role: "Error", content: "No provider configured; complete first-run setup before prompting."})
-		m.input = []rune(prompt)
+		m.input = []rune(display)
 		m.edit.endCaret(m.input)
 		return nil
 	}
 	prior := m.history
 	m.priorLen = len(prior)
 	m.turnSent = make(map[string]int)
-	m.entries = append(m.entries, entry{role: "You", content: prompt})
+	m.entries = append(m.entries, entry{role: "You", content: display})
+	if display != prompt {
+		if m.displayPrompts == nil {
+			m.displayPrompts = make(map[string]string)
+		}
+		m.displayPrompts[prompt] = display
+	}
 	m.history = append(m.history, model.Message{Role: "user", Content: prompt})
 	m.refreshStatusSessionTitle()
 	m.persist()
@@ -590,6 +610,9 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 			break
 		}
 		m.pending = v.Approval
+		if m.initRun && isRootAgentsEdit(v.Approval) {
+			m.initProposed = true
+		}
 		m.markAwaitingApproval()
 		m.resetToolInspection()
 		m.resetAgentInspection()
@@ -744,6 +767,13 @@ func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
 	} else {
 		m.status = "Ready"
 	}
+	// A /init run that never showed an AGENTS.md review says so; there is
+	// no automatic retry (specs/repo-init). A shown-then-rejected proposal
+	// needs no note.
+	if m.initRun && !m.initProposed {
+		m.entries = append(m.entries, entry{role: "Likha", content: initNoProposalNote})
+	}
+	m.initRun, m.initProposed = false, false
 	// The footer closes every finished user turn, failed ones
 	// included, below the run's last notice.
 	m.appendTurnFooter(turnTools, turnCancelled)

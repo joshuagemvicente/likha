@@ -38,6 +38,18 @@ func (m *ui) refreshStatusSessionTitle() {
 	// The first prompt is known before a turn completes (and even when there
 	// is no session store), so use the current history for the live title.
 	snapshot.History = m.history
+	// A turn whose You row differs from its model prompt (/init) titles the
+	// session by the short text, not the long generated prompt.
+	for i, message := range m.history {
+		if message.Role != "user" {
+			continue
+		}
+		if display, ok := m.displayPrompts[message.Content]; ok {
+			snapshot.History = append([]model.Message(nil), m.history...)
+			snapshot.History[i].Content = display
+		}
+		break
+	}
 	m.statusTitle = statusSessionTitle(snapshot)
 }
 

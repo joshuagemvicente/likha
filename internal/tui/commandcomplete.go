@@ -18,6 +18,7 @@ var commands = []commandItem{
 	{"agents", "inspect the explore profile, task tree, transcripts, and branch cancellation"},
 	{"compact", "summarize the conversation so far into a compact brief, /compact [focus] steers it"},
 	{"help", "list the reserved commands"},
+	{"init", "survey the repository and propose a root AGENTS.md for review: /init [guidance]"},
 	{"mcp", "show the connected MCP servers or how to configure them"},
 	{"models", "switch the model for this session"},
 	{"plan", "toggle read-only plan mode: edits, commands, and MCP calls refuse without approval flow"},

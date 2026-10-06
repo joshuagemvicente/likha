@@ -168,7 +168,7 @@ func (m *ui) listSessionsDialog() {
 }
 
 // commandHelp is the text /help prints and unknown-command errors point to.
-const commandHelp = "Commands: /compact [focus] summarize the conversation into a compact brief; /sessions [n] list or resume a saved session; /tools inspect tool availability, source, and permissions; /tools clear-output explicitly clear this session's retained output; /models list models from every configured provider; /providers manage a provider's stored key (auth); switching happens through /models; /plan toggle read-only plan mode (edits, commands, and MCP calls refuse without approval flow); /agents inspect the explore profile, task tree, and child transcripts; /todo show the persisted plan checklist; /skills list the discovered global skill catalog; /skill <name> [request] load one skill and start a turn; /quit exit; /help this list. Ctrl+O inspects tool results without losing your draft. Selections open a dialog: ↑/↓ navigate, type to filter, Enter apply, Esc cancel. Unknown /commands are not sent to the model; // sends a literal slash."
+const commandHelp = "Commands: /compact [focus] summarize the conversation into a compact brief; /init [guidance] survey the repository and propose a root AGENTS.md for review; /sessions [n] list or resume a saved session; /tools inspect tool availability, source, and permissions; /tools clear-output explicitly clear this session's retained output; /models list models from every configured provider; /providers manage a provider's stored key (auth); switching happens through /models; /plan toggle read-only plan mode (edits, commands, and MCP calls refuse without approval flow); /agents inspect the explore profile, task tree, and child transcripts; /todo show the persisted plan checklist; /skills list the discovered global skill catalog; /skill <name> [request] load one skill and start a turn; /quit exit; /help this list. Ctrl+O inspects tool results without losing your draft. Selections open a dialog: ↑/↓ navigate, type to filter, Enter apply, Esc cancel. Unknown /commands are not sent to the model; // sends a literal slash."
 
 // handleCommand dispatches a leading-slash input. Reserved commands act on
 // the application and never reach the model; unknown commands restore the
@@ -258,6 +258,8 @@ func (m *ui) handleCommand(line string) tea.Cmd {
 		}
 		prompt := "Follow the loaded skill '" + name + "' instructions for this request.\n\nSkill instruction text (user-managed, sent to the provider; untrusted relative to runtime policy):\n\n" + body + "\n\nRequest:\n" + request
 		return m.startTurn(prompt, nil)
+	case "init":
+		return m.startInit(arg)
 	case "compact":
 		// One model call replaces the summarized past. Refusals are visible
 		// entries and never reach the network; nothing changes on failure.
