@@ -14,7 +14,6 @@ import (
 
 	"likha/internal/explore"
 	"likha/internal/model"
-	"likha/internal/tools"
 )
 
 const claudeBase = "https://api.anthropic.com/v1"
@@ -104,14 +103,21 @@ func claudeEvents(w http.ResponseWriter, events ...string) {
 
 // claudeToolTurn is a thinking block, then a read call of path.
 func claudeToolTurn(w http.ResponseWriter, signature, id, path string) {
+	claudeCallTurn(w, signature, id, "read", `{"path":"`+path+`"}`)
+}
+
+// claudeCallTurn is a signed thinking block, then one call of name with
+// input (a JSON object).
+func claudeCallTurn(w http.ResponseWriter, signature, id, name, input string) {
+	partial, _ := json.Marshal(input)
 	claudeEvents(w,
 		`{"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":1}}}`,
 		`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
 		`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Read it."}}`,
 		`{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"`+signature+`"}}`,
 		`{"type":"content_block_stop","index":0}`,
-		`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"`+id+`","name":"read","input":{}}}`,
-		`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"`+path+`\"}"}}`,
+		`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"`+id+`","name":"`+name+`","input":{}}}`,
+		`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":`+string(partial)+`}}`,
 		`{"type":"content_block_stop","index":1}`,
 		`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":20}}`,
 		`{"type":"message_stop"}`,
@@ -211,38 +217,46 @@ func TestClaudeCompactionAndNamingSendNoReplayOrCaching(t *testing.T) {
 	assertBackgroundBody(t, server.body(t, 1))
 }
 
-// An explore child forks the parent's client; its second request replays
-// the child's own first response and nothing from the parent's history.
+// A main run whose own turn holds replayed thinking (sig-parent) spawns an
+// explore child. The child's requests replay the child's own first response
+// and nothing from the parent; the parent's next request still replays its
+// own turn, so the parent state was there to leak.
 func TestClaudeExploreChildReplaysOnlyItsOwnBlocks(t *testing.T) {
-	repo, _ := steerRepo(t)
+	repo, root := steerRepo(t)
+	const childPrompt = "find the answer in known.txt"
 	client, server := newClaudeServer(t, func(n int, w http.ResponseWriter) {
-		if n == 1 {
+		switch n {
+		case 1:
+			claudeCallTurn(w, "sig-parent", "toolu_p1", "task", `{"agent":"explore","description":"look","prompt":"`+childPrompt+`"}`)
+		case 2:
 			claudeToolTurn(w, "sig-child", "toolu_c1", "known.txt")
-			return
+		default:
+			claudeTextTurn(w, "done")
 		}
-		claudeTextTurn(w, "done")
 	})
-	scope := tools.Scope{Agent: "explore", Allowed: map[string]bool{"read": true}}
-	manager, err := explore.New(context.Background(), explore.Config{
-		Root: repo.Root(), Provider: "claude", Model: client.Model(), Scope: scope,
-		Runner: ExploreRunner(client, repo, nil, scope, nil),
+	options := RunOptions{TasksEnabled: true, SaveTask: func(explore.Record) error { return nil }}
+	var failed *TurnEvent
+	RunTurnWithOptions(context.Background(), client, repo, root, nil, "ask a child", nil, nil, options, func(ev TurnEvent) {
+		if ev.Kind == "error" {
+			failed = &ev
+		}
 	})
-	if err != nil {
-		t.Fatal(err)
+	if failed != nil {
+		t.Fatalf("turn failed: %s", failed.Text)
 	}
-	defer manager.Wait()
-	outcome, err := manager.Spawn(context.Background(), "", "call_1", explore.Spec{Agent: "explore", Description: "look", Prompt: "find the answer"})
-	if err != nil {
-		t.Fatalf("Spawn: %v", err)
+	firstChild, secondChild, parentAfter := server.body(t, 1), server.body(t, 2), server.body(t, 3)
+	if !strings.Contains(firstChild, childPrompt) || !strings.Contains(secondChild, childPrompt) {
+		t.Fatalf("requests 2 and 3 are not the child's:\n%s\n%s", firstChild, secondChild)
 	}
-	if outcome.Status != explore.Completed {
-		t.Fatalf("child outcome = %s (%s)", outcome.Status, outcome.Reason)
+	for i, body := range []string{firstChild, secondChild} {
+		if strings.Contains(body, "sig-parent") || strings.Contains(body, "toolu_p1") {
+			t.Fatalf("child request %d carries the parent's blocks:\n%s", i+1, body)
+		}
 	}
-	second := server.body(t, 1)
-	if !strings.Contains(second, replayedTurn("sig-child", "toolu_c1", "known.txt")) {
-		t.Fatalf("child did not replay its own blocks:\n%s", second)
+	if !strings.Contains(secondChild, replayedTurn("sig-child", "toolu_c1", "known.txt")) {
+		t.Fatalf("child did not replay its own blocks:\n%s", secondChild)
 	}
-	if strings.Count(second, `"signature"`) != 1 {
-		t.Fatalf("child request replayed blocks it did not issue:\n%s", second)
+	if !strings.Contains(parentAfter, `"signature":"sig-parent"`) || strings.Contains(parentAfter, "sig-child") {
+		t.Fatalf("parent's next request does not replay only its own turn:\n%s", parentAfter)
 	}
 }
