@@ -115,6 +115,9 @@ func (m *ui) rebuild() {
 			add([]string{"WARNING: No filesystem/network sandbox"}, m.theme.Warning)
 			add([]string{"WARNING: Detached jobs may survive"}, m.theme.Warning)
 		}
+		if m.pending.Warning != "" {
+			add(wrap(m.pending.Warning, width), m.theme.Warning)
+		}
 		add([]string{""}, plain)
 		add(wrap(m.pending.Body, width), plain)
 	} else {

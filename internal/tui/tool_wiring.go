@@ -13,6 +13,7 @@ import (
 	"likha/internal/actions"
 	"likha/internal/agent"
 	"likha/internal/model"
+	"likha/internal/providers"
 	"likha/internal/session"
 	"likha/internal/tooloutput"
 	"likha/internal/tools"
@@ -89,6 +90,19 @@ func (m *ui) toolRunOptions(runID uint64) agent.RunOptions {
 	}
 	options.WebSearch = search
 	options.WebFetch = fetch
+	// Command permissions (specs/command-permissions): the grant store is
+	// captured here on the UI goroutine; the trust hooks touch only the
+	// private config file, never UI state, because tool goroutines call them.
+	options.CommandGrants = m.commandGrants
+	options.EditGrant = m.editGrant
+	if stateDir, root := m.stateDir, m.root; stateDir != "" {
+		options.CommandTrusted = func(check, fingerprint string) bool {
+			return providers.CommandTrusted(stateDir, root, check, fingerprint)
+		}
+		options.TrustChecks = func(checks map[string]string) error {
+			return providers.TrustCommandChecks(stateDir, root, checks)
+		}
+	}
 	return options
 }
 
@@ -277,6 +291,10 @@ func (m *ui) recordToolResult(call model.ToolCall, result tools.Result, text str
 		if result.Status == tools.Succeeded || result.Status == tools.Limited {
 			record.Diff = reviewedDiff(body)
 		}
+	} else if result.Diff != "" && (result.Status == tools.Succeeded || result.Status == tools.Limited) {
+		// An edit applied under Approve always had no review; the engine
+		// hands its diff over on the result (specs/approve-always).
+		record.Diff = reviewedDiff(result.Diff)
 	}
 	if call.Name == "plan_update" {
 		// An accepted replace mirrors into the snapshot; refusals and

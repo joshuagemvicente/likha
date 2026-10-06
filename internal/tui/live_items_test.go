@@ -264,6 +264,9 @@ func TestPermE2EApprovedEditShowsDiff(t *testing.T) {
 // A declined edit never claims the change: no diff is stored or drawn.
 func TestPermE2EDeclinedEditHasNoDiff(t *testing.T) {
 	m, _, _, _ := permE2EnewTurn(t)
+	// Edit reviews offer Approve always between Approve and Decline
+	// (specs/approve-always); focus stops at Decline.
+	m.Update(tea.KeyMsg{Type: tea.KeyRight})
 	m.Update(tea.KeyMsg{Type: tea.KeyRight})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	permE2Epump(t, m, func() bool { return !m.working })

@@ -165,10 +165,37 @@ func (m *McpManager) lookupToolLocked(server, name string) (*Client, Tool, error
 	return client, found, nil
 }
 
-// AuthorizeTool consults the same manager-lifetime server grant as legacy Call.
-// The callback sees original identities and runs outside the manager mutex.
-// Cancellation while awaiting approval never creates a late trust grant.
-func (m *McpManager) AuthorizeTool(ctx context.Context, server, tool, arguments string, approve func(server, tool, arguments string) bool) error {
+// Decision is the user's answer to a first-call MCP review
+// (specs/approve-always).
+type Decision int
+
+const (
+	Declined       Decision = iota
+	ApprovedOnce            // run this call; the server stays untrusted
+	ApprovedAlways          // run this call and trust the server for the session
+)
+
+// ResetTrust forgets every server trust and single-call approval (session
+// switch, deletion of the active session). Safe on a nil manager.
+func (m *McpManager) ResetTrust() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.trusted = make(map[string]bool)
+	m.once = nil
+}
+
+// onceKey identifies one single-use approval: one exact (server, tool).
+func onceKey(server, tool string) string { return server + "\x00" + tool }
+
+// AuthorizeTool consults the session's server trust. An untrusted server
+// asks; ApprovedAlways trusts the server for the session, ApprovedOnce
+// grants one call of this exact tool that CallTool consumes. The callback
+// sees original identities and runs outside the manager mutex. Cancellation
+// while awaiting approval never creates a late grant.
+func (m *McpManager) AuthorizeTool(ctx context.Context, server, tool, arguments string, approve func(server, tool, arguments string) Decision) error {
 	if m == nil {
 		return fmt.Errorf("unsupported MCP tool %q from server %q", tool, server)
 	}
@@ -178,6 +205,8 @@ func (m *McpManager) AuthorizeTool(ctx context.Context, server, tool, arguments 
 	m.mu.Lock()
 	_, _, err := m.lookupToolLocked(server, tool)
 	trusted := m.trusted[server]
+	// A stale single-use approval never carries into a new review.
+	delete(m.once, onceKey(server, tool))
 	m.mu.Unlock()
 	if err != nil {
 		return err
@@ -192,11 +221,14 @@ func (m *McpManager) AuthorizeTool(ctx context.Context, server, tool, arguments 
 	if arguments == "" {
 		arguments = "{}"
 	}
-	approved := approve != nil && approve(server, tool, arguments)
+	decision := Declined
+	if approve != nil {
+		decision = approve(server, tool, arguments)
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !approved {
+	if decision != ApprovedOnce && decision != ApprovedAlways {
 		return fmt.Errorf("MCP tool %q from server %q rejected by user", tool, server)
 	}
 	m.mu.Lock()
@@ -210,6 +242,13 @@ func (m *McpManager) AuthorizeTool(ctx context.Context, server, tool, arguments 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if decision == ApprovedOnce {
+		if m.once == nil {
+			m.once = make(map[string]bool)
+		}
+		m.once[onceKey(server, tool)] = true
+		return nil
+	}
 	if m.trusted == nil {
 		m.trusted = make(map[string]bool)
 	}
@@ -217,8 +256,8 @@ func (m *McpManager) AuthorizeTool(ctx context.Context, server, tool, arguments 
 	return nil
 }
 
-// CallTool dispatches only an exact discovered identity on an approved server;
-// it cannot grant trust. isError retains MCP's tool-level error flag. The 60 s
+// CallTool dispatches only an exact discovered identity on an approved server
+// or with a pending single-use approval; it cannot grant trust. isError retains MCP's tool-level error flag. The 60 s
 // deadline bounds local waiting, not remote effects: cancellation does not undo
 // server work or promise that it stops.
 func (m *McpManager) CallTool(ctx context.Context, server, tool string, args json.RawMessage) (string, bool, error) {
@@ -231,6 +270,11 @@ func (m *McpManager) CallTool(ctx context.Context, server, tool string, args jso
 	m.mu.Lock()
 	client, definition, err := m.lookupToolLocked(server, tool)
 	trusted := m.trusted[server]
+	if err == nil && !trusted && m.once[onceKey(server, tool)] {
+		// One approved call: consumed before it runs, so it never repeats.
+		delete(m.once, onceKey(server, tool))
+		trusted = true
+	}
 	m.mu.Unlock()
 	if err != nil {
 		return "", false, err

@@ -56,6 +56,10 @@ type Result struct {
 	ArtifactID   string   `json:"artifact_id,omitempty"`
 	NextOffset   int      `json:"next_offset,omitempty"`
 	Cursor       string   `json:"cursor,omitempty"`
+	// Diff is the unified diff of an edit applied without a review (Approve
+	// always); the transcript renders it like a reviewed diff. Never model
+	// content.
+	Diff string `json:"-"`
 }
 
 type Handler func(context.Context, json.RawMessage) (Result, error)

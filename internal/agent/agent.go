@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 
 	"likha/internal/explore"
 	"likha/internal/mcp"
@@ -13,7 +14,47 @@ import (
 
 type ApprovalRequest struct {
 	Kind, Title, Body string
-	Reply             chan bool
+	// Warning, when set, renders as a highlighted line above the body: the
+	// reason a command always asks (specs/command-permissions).
+	Warning string
+	// Remember offers a third decision-bar button: RememberSession allows
+	// the exact command for the rest of the session, RememberTrust trusts
+	// the repository's checks. Empty offers only Approve and Decline.
+	Remember string
+	// Remembered is set by the UI before it sends true on Reply when the
+	// user chose the Remember button; the channel send orders the write
+	// before the agent's read.
+	Remembered bool
+	Reply      chan bool
+}
+
+// Remember options for ApprovalRequest.Remember.
+const (
+	RememberSession = "session" // command: "Approve always" (cmdpolicy grant scope)
+	RememberTrust   = "trust"   // verification: "Trust repo checks"
+	RememberEdits   = "edits"   // edit: "Approve always" for the session's edits
+	RememberServer  = "server"  // MCP: "Approve always" trusts the server for the session
+)
+
+// AutoApprovalReason names a call that ran under an Approve always grant in
+// the "Approval: auto-approved (<reason>)" result line (specs/approve-always).
+const AutoApprovalReason = "approved always for this session"
+
+// EditGrant is the session's "Approve always" for repository edits. The UI
+// owns one per session (replaced on session switch); edit tools read it from
+// tool goroutines. A nil *EditGrant is never granted; Allow on nil is a no-op.
+type EditGrant struct{ on atomic.Bool }
+
+// Allow grants every later repository edit in the session.
+func (g *EditGrant) Allow() {
+	if g != nil {
+		g.on.Store(true)
+	}
+}
+
+// Allowed reports whether the session's edits run without a review.
+func (g *EditGrant) Allowed() bool {
+	return g != nil && g.on.Load()
 }
 
 type TurnEvent struct {
@@ -118,7 +159,12 @@ func dispatchTool(ctx context.Context, repo *repository.Repository, root string,
 }
 
 func requestApproval(ctx context.Context, kind, title, body string, emit func(TurnEvent)) (bool, error) {
-	request := &ApprovalRequest{Kind: kind, Title: title, Body: body, Reply: make(chan bool, 1)}
+	return awaitApproval(ctx, &ApprovalRequest{Kind: kind, Title: title, Body: body}, emit)
+}
+
+// awaitApproval emits a prepared request and blocks for its single decision.
+func awaitApproval(ctx context.Context, request *ApprovalRequest, emit func(TurnEvent)) (bool, error) {
+	request.Reply = make(chan bool, 1)
 	emit(TurnEvent{Kind: "approval", Approval: request})
 	select {
 	case approved := <-request.Reply:

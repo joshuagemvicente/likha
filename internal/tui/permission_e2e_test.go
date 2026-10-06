@@ -175,6 +175,9 @@ func TestPermE2EDeclineLetsModelContinue(t *testing.T) {
 	if m.pending == nil {
 		t.Fatal("approval review did not open")
 	}
+	// Edit reviews offer Approve always between Approve and Decline
+	// (specs/approve-always); focus stops at Decline.
+	m.Update(tea.KeyMsg{Type: tea.KeyRight})
 	m.Update(tea.KeyMsg{Type: tea.KeyRight})
 	if m.reviewFocus != focusDecline {
 		t.Fatalf("right did not focus Decline: focus = %d", m.reviewFocus)

@@ -240,7 +240,8 @@ func (m *ui) toolItemRows(index int, plan toolItemPlan, focused bool, width int)
 		}
 	} else if edit, ok := m.toolEditDiff(record, diffLines); ok {
 		diff = edit
-		summary = toolClipCells(edit.Summary+toolSummarySuffix(record), toolSummaryCells, g.Ellipsis)
+		auto, _ := toolCommandApproval(record.Content)
+		summary = toolClipCells(edit.Summary+auto+toolSummarySuffix(record), toolSummaryCells, g.Ellipsis)
 		preview, more = nil, edit.More
 	}
 	dot := muted

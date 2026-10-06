@@ -359,9 +359,13 @@ func (m *ui) statusIdentity(maxWidth int, usage string) []statusSegment {
 	makeParts := func(p, name string) []statusSegment {
 		// Plan mode is an unmissable persistent marker on every frame: it
 		// precedes the identity so trimming the model retires before it.
+		// AUTO-EDIT (specs/approve-always) rides the same slot; plan mode
+		// refuses edits anyway, so only PLAN MODE shows when both are on.
 		marker := []statusSegment{}
 		if m.planMode {
 			marker = []statusSegment{{"PLAN MODE", m.theme.Selected}}
+		} else if m.editGrant.Allowed() {
+			marker = []statusSegment{{"AUTO-EDIT", m.theme.Selected}}
 		}
 		parts := append(marker, []statusSegment{{p, m.theme.Selected}, {name, m.theme.Normal}, ctx}...)
 		if usage != "" {

@@ -7,6 +7,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
 
+	"likha/internal/agent"
+	"likha/internal/cmdpolicy"
 	"likha/internal/model"
 	"likha/internal/session"
 	likhaui "likha/internal/ui"
@@ -323,6 +325,15 @@ func (m *ui) handleSessionsCommand(arg string) tea.Cmd {
 	return m.resumeSession(m.sessionIDs[index-1])
 }
 
+// resetSessionGrants drops every Approve always grant — commands, edits, and
+// MCP server trust — so none carries into another session
+// (specs/approve-always).
+func (m *ui) resetSessionGrants() {
+	m.commandGrants = &cmdpolicy.Grants{}
+	m.editGrant = &agent.EditGrant{}
+	m.conn.Mcp.ResetTrust()
+}
+
 // resumeSession swaps history and entries for the completed snapshot. A
 // stored snapshot never contains a pending approval, so nothing replays.
 func (m *ui) resumeSession(id string) tea.Cmd {
@@ -340,6 +351,7 @@ func (m *ui) resumeSession(id string) tea.Cmd {
 	m.closeConsent()
 	m.planMode = false // a resumed session never inherits a live mode
 	m.webGrants = nil
+	m.resetSessionGrants()
 	m.refreshProfileCatalog()
 	m.restorePlan()
 	m.toolRecords = append([]session.ToolRecord(nil), snapshot.ToolRecords...)

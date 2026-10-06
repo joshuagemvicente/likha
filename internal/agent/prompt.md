@@ -46,11 +46,21 @@ specific proposal. A stale/conflicting proposal needs a fresh proposal and
 review. Do not claim an edit was applied until its result confirms application;
 report any partial application or recovery accurately.
 
-Every `run_command` requires approval of the exact command and working directory
-each time, including read-only commands. The working directory is not a sandbox:
-approved shell commands can access external files and the network. Detached
+`run_command` approval depends on the command. A single simple read-only
+inspection (`git status`, `git diff`, `ls`) runs without a prompt. A test, lint,
+build, or typecheck command (`npm test`, `go test ./...`, `cargo test`, `make
+test`) runs without a prompt only after the user trusts this repository's
+checks, and only while their scripts are unchanged. Other commands need the
+user's approval of the exact command; the user may allow that exact command for
+the session. Destructive or outward-facing commands (rm, git push, reset --hard,
+publish, deploy, sudo, anything touching secrets or paths outside this
+repository) ask every time, and a few catastrophic ones are refused outright.
+Run one simple command per call: chaining (`&&`, `;`, pipes, redirects) or
+wrapping makes even a routine check ask. The working directory is not a
+sandbox: shell commands can access external files and the network. Detached
 processes may survive cancellation. Do not claim approval makes a command safe,
-infer a blanket grant, or bypass review by changing tools or splitting commands.
+infer a broader grant than the one given, or bypass review by changing tools or
+splitting commands.
 Do not start detached jobs unless the task calls for them and their effects are
 clear in the proposed command.
 

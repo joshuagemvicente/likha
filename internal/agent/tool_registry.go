@@ -11,6 +11,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"likha/internal/actions"
+	"likha/internal/cmdpolicy"
 	"likha/internal/explore"
 	"likha/internal/mcp"
 	"likha/internal/model"
@@ -32,6 +33,9 @@ type RunOptions struct {
 	// PlanMode is a live per-session read-only state, never persisted. It
 	// gates mutation dispatch at turn boundaries, not mid-run.
 	PlanMode bool
+	// InitMode limits one /init turn (specs/repo-init): read-only tools plus
+	// edit_file proposals for the root AGENTS.md only. Never persisted.
+	InitMode bool
 	// Ask brokers one interactive question; PlanApply persists a checklist
 	// replacement; SkillLoad loads one discovered skill; WebSearch runs a
 	// consent-gated configured search. Nil hooks register the tool with its
@@ -48,6 +52,19 @@ type RunOptions struct {
 	// the runtime builds one runner per profile.
 	TaskAgents   []string
 	TaskProfiles []TaskProfile
+	// Command permissions (specs/command-permissions). CommandGrants holds
+	// exact commands the user allowed for this session; CommandTrusted
+	// reports whether a verification check (key and fingerprint) is covered
+	// by the user's trust in this repository; TrustChecks records trust in
+	// every check the repository currently has. Nil hooks mean every
+	// command that is not read-only prompts.
+	CommandGrants  *cmdpolicy.Grants
+	CommandTrusted func(check, fingerprint string) bool
+	TrustChecks    func(checks map[string]string) error
+	// EditGrant is the session's Approve always for edits
+	// (specs/approve-always). Nil: every edit asks and no edit review offers
+	// Approve always.
+	EditGrant *EditGrant
 }
 
 // TaskProfile is one accepted, drift-checked profile ready to run.
@@ -89,6 +106,14 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 			tool.Aliases = nil
 			tool.UnavailableReason = "refused (plan mode): " + tool.Definition.Name +
 				" is blocked while plan mode is active; toggle /plan off to restore the approval flow"
+		} else if options.InitMode && initModeGates(tool) {
+			// Same hidden-but-refusing registration as plan mode; plan mode's
+			// gate wins when both are set (the TUI refuses that combination).
+			tool.Run = nil
+			tool.Authorize = nil
+			tool.Aliases = nil
+			tool.UnavailableReason = "refused (/init): " + tool.Definition.Name +
+				" is unavailable during the /init survey; only read-only tools and an edit_file proposal for the root AGENTS.md are allowed"
 		}
 		if err := registry.Register(tool); err != nil {
 			warnings = append(warnings, "Tool "+tool.Definition.Name+" unavailable: "+err.Error())
@@ -145,28 +170,40 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 		register(tool)
 	}
 
+	// autoEdit is set when an edit ran under the session's Approve always
+	// grant (specs/approve-always). Edit tools are interactive, so calls
+	// never overlap and Authorize always precedes its own Run.
+	autoEdit := false
 	var prepared *actions.Edit
 	register(tools.Tool{
 		Definition: model.ToolDefinition{Name: "edit_file", Description: "Propose replacing the full content of a repository text file (or creating a new file). The user reviews the complete diff before any write.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`)},
 		Source:     tools.Source{Kind: "builtin"}, Effects: []tools.Effect{tools.Write}, Target: "repository", Interactive: true,
 		Authorize: func(ctx context.Context, input json.RawMessage) error {
-			prepared = nil
+			prepared, autoEdit = nil, false
 			var args struct{ Path, Content string }
 			if err := json.Unmarshal(input, &args); err != nil {
 				return err
+			}
+			if options.InitMode {
+				path, ok := initEditPath(root, args.Path)
+				if !ok {
+					return fmt.Errorf("refused (/init): edit_file may only propose the repository-root AGENTS.md during /init; got %s", args.Path)
+				}
+				args.Path = path
 			}
 			proposal, err := actions.PrepareEdit(root, args.Path, args.Content)
 			if err != nil {
 				return err
 			}
-			approved, err := requestApproval(ctx, "edit", "Edit: "+proposal.Path, proposal.Diff, emit)
+			request := &ApprovalRequest{Kind: "edit", Title: "Edit: " + proposal.Path, Body: proposal.Diff}
+			if isRootInstructionsPath(proposal.Path) {
+				request.Warning = rootInstructionsSizeWarning(len(args.Content))
+			}
+			auto, err := authorizeEdit(ctx, request, options, emit)
 			if err != nil {
 				return err
 			}
-			if !approved {
-				return errors.New("edit rejected by user")
-			}
-			prepared = proposal
+			prepared, autoEdit = proposal, auto
 			return nil
 		},
 		Run: func(ctx context.Context, _ json.RawMessage) (tools.Result, error) {
@@ -179,10 +216,16 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 			if err := prepared.Apply(); err != nil {
 				return tools.Result{}, err
 			}
-			return tools.Result{Content: "Applied edit to " + prepared.Path}, nil
+			result := tools.Result{Content: "Applied edit to " + prepared.Path}
+			if autoEdit {
+				result.Content = autoEditLabel + result.Content
+				result.Diff = prepared.Diff
+			}
+			return result, nil
 		},
 	})
 	var batch *actions.EditProposal
+	batchBody := ""
 	editUnavailable := ""
 	if options.EditJournal == nil {
 		editUnavailable = "Private session recovery journaling is unavailable; exact multi-file edits are disabled"
@@ -192,7 +235,7 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 		Source:     tools.Source{Kind: "builtin"}, Effects: []tools.Effect{tools.Write}, Target: "repository", Interactive: true,
 		UnavailableReason: editUnavailable,
 		Authorize: func(ctx context.Context, input json.RawMessage) error {
-			batch = nil
+			batch, batchBody, autoEdit = nil, "", false
 			if len(input) > 4<<20 {
 				return errors.New("edit arguments exceed four MiB")
 			}
@@ -211,14 +254,17 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 				body += "\nRequired new directories:\n" + strings.Join(proposal.Directories, "\n") + "\n"
 			}
 			body += "\n" + proposal.Diff
-			approved, err := requestApproval(ctx, "edit", "Review complete file change", body, emit)
+			request := &ApprovalRequest{Kind: "edit", Title: "Review complete file change", Body: body}
+			for _, path := range proposal.Paths {
+				if isRootInstructionsPath(path) {
+					request.Warning = rootInstructionsSizeWarning(rootInstructionsEditSize(root, args.Operations))
+				}
+			}
+			auto, err := authorizeEdit(ctx, request, options, emit)
 			if err != nil {
 				return err
 			}
-			if !approved {
-				return errors.New("edit rejected by user")
-			}
-			batch = proposal
+			batch, batchBody, autoEdit = proposal, body, auto
 			return nil
 		},
 		Run: func(ctx context.Context, _ json.RawMessage) (tools.Result, error) {
@@ -229,13 +275,23 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 				return tools.Result{}, errors.New("private edit recovery journal unavailable; no file changes applied")
 			}
 			content, err := batch.Apply(ctx)
-			return tools.Result{Content: content}, err
+			result := tools.Result{Content: content}
+			if autoEdit && err == nil {
+				result.Content = autoEditLabel + result.Content
+				result.Diff = batchBody
+			}
+			return result, err
 		},
 	})
+	// autoApproval names why the authorized command ran without a prompt;
+	// empty when the user approved it. run_command is interactive, so calls
+	// never overlap and Authorize always precedes its own Run.
+	autoApproval := ""
 	register(tools.Tool{
-		Definition: model.ToolDefinition{Name: "run_command", Description: "Request a shell command in the repository. The exact command and working directory require explicit user approval.", Parameters: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","minLength":1}},"required":["command"],"additionalProperties":false}`)},
+		Definition: model.ToolDefinition{Name: "run_command", Description: "Request a shell command in the repository. Read-only inspection, and test/lint/build checks in a repository the user trusts, run without a prompt; other commands need explicit user approval, and destructive or outward-facing commands (rm, git push, publish, deploy) always do. Prefer one simple command per call.", Parameters: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","minLength":1}},"required":["command"],"additionalProperties":false}`)},
 		Source:     tools.Source{Kind: "builtin"}, Effects: []tools.Effect{tools.Exec}, Target: "host", Interactive: true,
 		Authorize: func(ctx context.Context, input json.RawMessage) error {
+			autoApproval = ""
 			var args struct{ Command string }
 			if err := json.Unmarshal(input, &args); err != nil {
 				return err
@@ -243,30 +299,36 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 			if err := validateCommand(args.Command); err != nil {
 				return err
 			}
-			body := "Working directory: " + root + "\nCommand:\n" + args.Command + "\n\nApproved commands can access files outside this repository and use the network. Detached processes may outlive cancellation."
-			approved, err := requestApproval(ctx, "command", "Shell command", body, emit)
-			if err != nil {
-				return err
-			}
-			if !approved {
-				return errors.New("command rejected by user")
-			}
-			return nil
+			return authorizeCommand(ctx, root, args.Command, options, emit, &autoApproval)
 		},
 		Run: func(ctx context.Context, input json.RawMessage) (tools.Result, error) {
 			var args struct{ Command string }
 			if err := json.Unmarshal(input, &args); err != nil {
 				return tools.Result{}, err
 			}
+			auto := autoApproval
+			if auto != "" {
+				// A command nobody looked at must not run forever.
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, AutoCommandTimeout)
+				defer cancel()
+			}
 			command, err := actions.RunCommandCaptured(ctx, root, args.Command, 5<<20)
 			content := command.Captured
 			if content == "" {
 				content = command.Output
 			}
-			result := tools.Result{Content: fmt.Sprintf("Exit status: %d\n%s", command.ExitCode, strings.ToValidUTF8(content, "�")), Truncated: command.Truncated}
+			approval := ""
+			if auto != "" {
+				approval = CommandApprovalPrefix + "auto-approved (" + auto + ")\n"
+			}
+			result := tools.Result{Content: fmt.Sprintf("Exit status: %d\n%s%s", command.ExitCode, approval, strings.ToValidUTF8(content, "\ufffd")), Truncated: command.Truncated}
 			if command.Truncated {
 				result.Status = tools.Limited
 				result.Warnings = []string{fmt.Sprintf("Command output capture reached its limit; discarded %d bytes. Exit status and payload completeness are separate.", command.Discarded)}
+			}
+			if errors.Is(err, context.DeadlineExceeded) && auto != "" {
+				return result, fmt.Errorf("auto-approved command timed out after %s", AutoCommandTimeout)
 			}
 			if err != nil {
 				return result, err
@@ -318,10 +380,18 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 		register(tools.Tool{
 			Definition: item.Definition, Source: tools.Source{Kind: "mcp", Server: item.SourceServer, Tool: item.OriginalName}, Effects: []tools.Effect{tools.Write, tools.Exec, tools.Network}, Target: "external", Interactive: true, Aliases: item.Aliases,
 			Authorize: func(ctx context.Context, input json.RawMessage) error {
-				return servers.AuthorizeTool(ctx, item.SourceServer, item.OriginalName, string(input), func(server, tool, arguments string) bool {
-					body := fmt.Sprintf("MCP server: %s\nTool: %s\nArguments: %s\n\nApproving trusts this server's tools until app relaunch, not just this call. MCP servers run with your permissions; local cancellation may not stop server work.", server, tool, arguments)
-					approved, err := requestApproval(ctx, "mcp", "MCP tool", body, emit)
-					return err == nil && approved
+				return servers.AuthorizeTool(ctx, item.SourceServer, item.OriginalName, string(input), func(server, tool, arguments string) mcp.Decision {
+					body := fmt.Sprintf("MCP server: %s\nTool: %s\nArguments: %s\n\n\"Approve\" runs this call only. \"Approve always\" trusts this server's tools for the rest of this session. MCP servers run with your permissions; local cancellation may not stop server work.", server, tool, arguments)
+					request := &ApprovalRequest{Kind: "mcp", Title: "MCP tool", Body: body, Remember: RememberServer}
+					approved, err := awaitApproval(ctx, request, emit)
+					switch {
+					case err != nil || !approved:
+						return mcp.Declined
+					case request.Remembered:
+						return mcp.ApprovedAlways
+					default:
+						return mcp.ApprovedOnce
+					}
 				})
 			},
 			Run: func(ctx context.Context, input json.RawMessage) (tools.Result, error) {

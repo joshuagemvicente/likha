@@ -110,6 +110,15 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 			mainHarness[0].Content += planModeInstructions
 		}
 	}
+	if options.InitMode && !options.PlanMode {
+		// Same copy-and-extend as plan mode; explore and profile children use
+		// ExploreRegistry (glob/read/grep/task only), so they never gain write
+		// or exec tools during an /init turn either.
+		mainHarness = append([]model.Message(nil), mainHarness...)
+		if len(mainHarness) > 0 && mainHarness[0].Role == "system" {
+			mainHarness[0].Content += initModeInstructions
+		}
+	}
 	if options.SkillAdvert != "" && len(mainHarness) > 0 && mainHarness[0].Role == "system" {
 		mainHarness = append([]model.Message(nil), mainHarness...)
 		mainHarness[0].Content += "\n\n" + options.SkillAdvert
@@ -266,6 +275,36 @@ call are refused without an approval flow; asking questions, updating the
 persisted checklist, loading passive skills, and consent-gated web use remain
 available. This mode grants no additional permissions and ends when the user
 toggles it off.`
+
+// initModeGates reports whether an /init turn must refuse this tool before
+// any approval flow: every MCP call, every shell command, and every write
+// except edit_file (whose Authorize further limits it to the root AGENTS.md).
+func initModeGates(tool tools.Tool) bool {
+	if tool.Source.Kind == "mcp" {
+		return true
+	}
+	for _, effect := range tool.Effects {
+		if effect == tools.Exec {
+			return true
+		}
+		if effect == tools.Write && tool.Definition.Name != "edit_file" {
+			return true
+		}
+	}
+	return false
+}
+
+// initModeInstructions extends the compiled harness's single system layer for
+// one /init turn; it is never persisted.
+const initModeInstructions = `
+
+## /init survey
+
+This turn is an /init survey. Use read-only tools (read, glob, grep, task
+subagents, ask_user) to learn the repository. Shell commands, MCP tools, and
+every write except one edit_file proposal for the repository-root AGENTS.md
+are refused. The user reviews the full diff before anything is written. This
+limit applies to this turn only and grants no additional permissions.`
 
 func parallelRead(registry *tools.Registry, name string) bool {
 	tool, ok := registry.Lookup(name)

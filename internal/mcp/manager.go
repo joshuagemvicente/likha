@@ -19,6 +19,7 @@ type McpManager struct {
 	servers map[string]ServerConfig
 	clients map[string]*Client
 	trusted map[string]bool // server name → approved for the session
+	once    map[string]bool // onceKey(server, tool) → one approved call pending
 	failed  map[string]string
 }
 
@@ -99,7 +100,13 @@ func (m *McpManager) Call(ctx context.Context, name string, arguments json.RawMe
 	if !ok {
 		return "", false, fmt.Errorf("unsupported tool %q", name)
 	}
-	if err := m.AuthorizeTool(ctx, server, tool.Name, string(arguments), approve); err != nil {
+	decide := func(server, tool, arguments string) Decision {
+		if approve != nil && approve(server, tool, arguments) {
+			return ApprovedAlways
+		}
+		return Declined
+	}
+	if err := m.AuthorizeTool(ctx, server, tool.Name, string(arguments), decide); err != nil {
 		return "", false, err
 	}
 	return m.CallTool(ctx, server, tool.Name, arguments)

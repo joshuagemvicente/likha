@@ -599,7 +599,7 @@ func toolPermissionLabel(tool tools.CatalogEntry) string {
 		case tools.Write:
 			permissions = append(permissions, "repository changes require complete diff review and approval")
 		case tools.Exec:
-			permissions = append(permissions, "approval for the exact command and working directory; no filesystem/network sandbox, and detached jobs may survive cancellation")
+			permissions = append(permissions, "approval for the exact command and working directory, except read-only inspection and checks in a repository you trust; destructive and outward-facing commands always ask; no filesystem/network sandbox, and detached jobs may survive cancellation")
 		case tools.Network:
 			permissions = append(permissions, "separate consent for the backend/destination; conversation-scoped grants")
 		default:

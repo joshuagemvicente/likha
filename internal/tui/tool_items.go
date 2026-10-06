@@ -12,6 +12,7 @@ import (
 
 	"github.com/mattn/go-runewidth"
 
+	"likha/internal/agent"
 	"likha/internal/session"
 	"likha/internal/tools"
 )
@@ -429,8 +430,9 @@ func toolSummary(record session.ToolRecord, ellipsis string, limit int) (summary
 	case string(tools.Failed):
 		if record.Name == "run_command" {
 			if code, output, ok := toolExitStatus(record.Content); ok && code != 0 {
+				auto, output := toolCommandApproval(output)
 				preview, more = toolPreview(output, limit)
-				return "Failed: exit status " + strconv.Itoa(code), preview, more
+				return "Failed: exit status " + strconv.Itoa(code) + auto, preview, more
 			}
 		}
 		return toolClipCells("Failed: "+toolFailureReason(record, ellipsis), toolSummaryCells, ellipsis), nil, 0
@@ -490,14 +492,15 @@ func toolSuccessSummary(record session.ToolRecord, ellipsis string, limit int) (
 		return "Read " + toolCount(toolLineCount(content), "line", "lines"), preview, more
 	case "run_command":
 		code, output, ok := toolExitStatus(content)
+		auto, output := toolCommandApproval(output)
 		preview, more := toolPreview(output, limit)
 		if !ok {
 			return "Done", preview, more
 		}
 		if code != 0 {
-			return "Failed: exit status " + strconv.Itoa(code), preview, more
+			return "Failed: exit status " + strconv.Itoa(code) + auto, preview, more
 		}
-		return "Exit 0", preview, more
+		return "Exit 0" + auto, preview, more
 	case "web_fetch":
 		return toolWebFetchSummary(content, ellipsis, limit)
 	case "web_search":
@@ -546,6 +549,14 @@ func toolSuccessSummary(record session.ToolRecord, ellipsis string, limit int) (
 			if plan.Total != nil {
 				return fmt.Sprintf("Updated plan · %d/%d completed", plan.Completed, *plan.Total), nil, 0
 			}
+		}
+	case "edit", "edit_file":
+		// An edit applied under Approve always opens with the same
+		// auto-approved line as a command (specs/approve-always). This path
+		// is the generic fallback; the diff summary carries it otherwise.
+		if auto, rest := toolCommandApproval(content); auto != "" {
+			summary, preview, more := toolGenericSummary(rest, limit)
+			return summary + auto, preview, more
 		}
 	case "skill":
 		if strings.HasPrefix(content, "Loaded skill '") {
@@ -744,6 +755,18 @@ func toolExitStatus(content string) (code int, output string, ok bool) {
 		rest = ""
 	}
 	return code, rest, true
+}
+
+// toolCommandApproval strips the "Approval: auto-approved (…)" line an
+// unprompted command carries after its exit status (and an edit applied under
+// Approve always carries first) and returns the summary suffix that labels
+// it; prompted calls have no such line.
+func toolCommandApproval(output string) (suffix, rest string) {
+	first, remainder, _ := strings.Cut(output, "\n")
+	if strings.HasPrefix(first, agent.CommandApprovalPrefix+"auto-approved") {
+		return " · auto-approved", remainder
+	}
+	return "", output
 }
 
 func toolWebFetchSummary(content, ellipsis string, limit int) (string, []string, int) {

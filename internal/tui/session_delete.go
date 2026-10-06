@@ -120,6 +120,9 @@ func (m *ui) finishSessionDelete(msg sessionDeleteRequestedMsg, err error) tea.C
 		// nothing later saves into the deleted id.
 		fresh, createErr := m.store.Create()
 		if createErr != nil {
+			// Still drop the deleted session's grants (resumeSession does
+			// this on success).
+			m.resetSessionGrants()
 			m.entries = append(m.entries, entry{role: "Error", content: "Start a fresh session: " + createErr.Error()})
 		} else {
 			cmd = m.resumeSession(fresh.ID)

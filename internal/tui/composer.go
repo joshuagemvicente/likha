@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
+	"likha/internal/agent"
 	"likha/internal/providers"
 	likhaui "likha/internal/ui"
 )
@@ -418,26 +419,87 @@ func (m *ui) composerLines() []string {
 	return rows
 }
 
+// reviewButton is one decision-bar action. Gated actions (Approve and the
+// remember button) stay muted and unconfirmable until the review is read.
+type reviewButton struct {
+	focus         int
+	label, narrow string
+	gated         bool
+}
+
+// reviewButtons lists the decision bar left to right: Approve, the optional
+// remember action the request offers (specs/command-permissions), Decline.
+func (m *ui) reviewButtons() []reviewButton {
+	buttons := []reviewButton{{focus: focusApprove, label: "Approve", narrow: "Approve", gated: true}}
+	if m.pending != nil {
+		switch m.pending.Remember {
+		case agent.RememberSession, agent.RememberEdits, agent.RememberServer:
+			buttons = append(buttons, reviewButton{focus: focusRemember, label: "Approve always", narrow: "Always", gated: true})
+		case agent.RememberTrust:
+			buttons = append(buttons, reviewButton{focus: focusRemember, label: "Trust repo checks", narrow: "Trust", gated: true})
+		}
+	}
+	return append(buttons, reviewButton{focus: focusDecline, label: "Decline", narrow: "Decline"})
+}
+
+// reviewBarWidth is the wide decision bar's width: each button is a
+// two-column marker slot plus "[ label ]", with a two-space gap between.
+func reviewBarWidth(buttons []reviewButton) int {
+	width := 0
+	for i, button := range buttons {
+		if i > 0 {
+			width += 2
+		}
+		width += 2 + runewidth.StringWidth("[ "+button.label+" ]")
+	}
+	return width
+}
+
+// moveReviewFocus steps the focus across the visible buttons, stopping at
+// either end.
+func (m *ui) moveReviewFocus(step int) {
+	buttons := m.reviewButtons()
+	index := 0
+	for i, button := range buttons {
+		if button.focus == m.reviewFocus {
+			index = i
+		}
+	}
+	index = max(0, min(len(buttons)-1, index+step))
+	m.reviewFocus = buttons[index].focus
+}
+
 // reviewActionLines renders the pinned decision bar that replaces the
-// composer while a review is pending (FR-22): two labelled buttons with
-// exactly one focus marker, then the key hint. It reuses the composer's
-// reserved rows, so the layout budget is unchanged. Approve stays muted and
-// cannot be confirmed until every review page has been seen; Decline is
-// always available.
+// composer while a review is pending (FR-22): labelled buttons with exactly
+// one focus marker, then the key hint. It reuses the composer's reserved
+// rows, so the layout budget is unchanged. Approve (and a remember button)
+// stays muted and cannot be confirmed until every review page has been
+// seen; Decline is always available.
 func (m *ui) reviewActionLines() []string {
 	ready := m.reviewReady()
-	approveStyle := withBase(m.theme.Muted, m.theme.Base)
-	approve := approveStyle.Render("  [ Approve ]")
-	if m.reviewFocus == focusApprove {
-		style := m.theme.Muted
-		if ready {
-			style = m.theme.Selected
+	buttons := m.reviewButtons()
+	// Three buttons use the compact bracket form when the wide row does not
+	// fit with three columns spare: below 53 columns with Approve always
+	// (50 cells), below 56 with Trust repo checks (53 cells). The compact
+	// form fits the 40-column minimum.
+	compact := len(buttons) > 2 && m.width < reviewBarWidth(buttons)+3
+	var row strings.Builder
+	for i, button := range buttons {
+		if i > 0 {
+			row.WriteString(m.theme.Base.Render("  "))
 		}
-		approve = withBase(style, m.theme.Base).Render("> [ Approve ]")
-	}
-	decline := approveStyle.Render("  [ Decline ]")
-	if m.reviewFocus == focusDecline {
-		decline = withBase(m.theme.Selected, m.theme.Base).Render("> [ Decline ]")
+		label := "[ " + button.label + " ]"
+		if compact {
+			label = "[" + button.narrow + "]"
+		}
+		style, marker := m.theme.Muted, "  "
+		if button.focus == m.reviewFocus {
+			marker = "> "
+			if !button.gated || ready {
+				style = m.theme.Selected
+			}
+		}
+		row.WriteString(withBase(style, m.theme.Base).Render(marker + label))
 	}
 	hint := "←/→ choose · Enter confirm · Esc cancel run"
 	if !ready {
@@ -455,11 +517,11 @@ func (m *ui) reviewActionLines() []string {
 	// focused); a two-space gap between the cells leaves the four-space
 	// separation the spec shows. fit measures plain text only, so pad the
 	// styled row to the full width explicitly.
-	buttons := approve + m.theme.Base.Render("  ") + decline
-	if w := runewidth.StringWidth(stripANSI(buttons)); w < m.width {
-		buttons += m.theme.Base.Render(strings.Repeat(" ", m.width-w))
+	bar := row.String()
+	if w := runewidth.StringWidth(stripANSI(bar)); w < m.width {
+		bar += m.theme.Base.Render(strings.Repeat(" ", m.width-w))
 	}
-	return []string{buttons, withBase(m.theme.Muted, m.theme.Base).Render(fit(hint, m.width))}
+	return []string{bar, withBase(m.theme.Muted, m.theme.Base).Render(fit(hint, m.width))}
 }
 
 // An unsuccessful write leaves both the active appearance and the stored

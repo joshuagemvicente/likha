@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"likha/internal/agent"
+	"likha/internal/cmdpolicy"
 	"likha/internal/explore"
 	"likha/internal/model"
 	"likha/internal/profiles"
@@ -48,6 +49,10 @@ const minWidth, minHeight = 40, 12
 // decision bar. A new approval always starts on Approve.
 const focusApprove = 0
 const focusDecline = 1
+
+// focusRemember is the optional middle button: "Allow for session" or
+// "Trust repo checks" (specs/command-permissions).
+const focusRemember = 2
 
 // workingLabel is the fixed generic activity text. It never claims to reveal
 // model reasoning; spinner frames remain literal ASCII in every terminal.
@@ -187,8 +192,10 @@ type ui struct {
 	askSequence           uint64 // delivery identity counter under m.events broker
 	consent               consentState
 	reportedSkillErrors   string
-	webGrants             map[string]bool // conversation-scoped web consents
-	webConfigState        string          // last loaded web config; a change clears webGrants
+	webGrants             map[string]bool   // conversation-scoped web consents
+	commandGrants         *cmdpolicy.Grants // commands approved always for this session; replaced on session switch
+	editGrant             *agent.EditGrant  // Approve always for edits (specs/approve-always); replaced on session switch
+	webConfigState        string            // last loaded web config; a change clears webGrants
 	webConfigSeen         bool
 	grantsMu              sync.Mutex // serializes UI writes with tool-goroutine reads
 
@@ -238,7 +245,7 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 	if conn.Nerd {
 		glyphs = likhaui.NerdGlyphs()
 	}
-	m := &ui{root: root, repo: repo, client: client, modelName: name, conn: conn, stateDir: stateDir, store: store, snapshot: snapshot, history: snapshot.History, promptHistory: newPromptHistory(restoredPromptHistory(snapshot)), following: true, caretOn: true, streaming: -1, activity: -1, status: "Connected", mode: modeMain, theme: theme, glyphs: glyphs, blocks: likhaui.BlockGlyphSet(conn.ASCII), themeName: themeName, composerStyle: validComposerStyle(conn.ComposerStyle), statusLineOpts: conn.StatusLine, started: time.Now(), freshSession: len(snapshot.Entries) == 0}
+	m := &ui{root: root, repo: repo, client: client, modelName: name, conn: conn, stateDir: stateDir, store: store, snapshot: snapshot, history: snapshot.History, promptHistory: newPromptHistory(restoredPromptHistory(snapshot)), following: true, caretOn: true, streaming: -1, activity: -1, status: "Connected", mode: modeMain, theme: theme, glyphs: glyphs, blocks: likhaui.BlockGlyphSet(conn.ASCII), themeName: themeName, composerStyle: validComposerStyle(conn.ComposerStyle), statusLineOpts: conn.StatusLine, started: time.Now(), freshSession: len(snapshot.Entries) == 0, commandGrants: &cmdpolicy.Grants{}, editGrant: &agent.EditGrant{}}
 	m.restoreTaskRecords()
 	m.restorePlan()
 	m.refreshProfileCatalog()
@@ -1530,13 +1537,13 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// letters included — stays inert (FR-22).
 			switch v.String() {
 			case "left", "shift+tab":
-				m.reviewFocus = focusApprove
+				m.moveReviewFocus(-1)
 				return m, nil
 			case "right", "tab":
-				m.reviewFocus = focusDecline
+				m.moveReviewFocus(1)
 				return m, nil
 			case "enter":
-				if m.reviewFocus == focusApprove {
+				if m.reviewFocus == focusApprove || m.reviewFocus == focusRemember && m.pending.Remember != "" {
 					if m.width < minWidth || m.height < minHeight {
 						return m, nil
 					}
@@ -1545,8 +1552,15 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, nil
 					}
 					m.rememberApprovedEdit()
+					status := "Executing approved " + m.pending.Kind
+					if m.reviewFocus == focusRemember {
+						// Written before the send: the channel orders it
+						// before the agent reads the decision.
+						m.pending.Remembered = true
+						status += " (" + strings.ToLower(m.reviewButtons()[1].label) + ")"
+					}
 					m.pending.Reply <- true
-					m.status = "Executing approved " + m.pending.Kind
+					m.status = status
 					m.pending = nil
 					m.reviewSeen = nil
 					m.reviewFocus = focusApprove
