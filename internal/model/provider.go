@@ -17,6 +17,11 @@ type Provider struct {
 	Auth          AuthKind   // authentication kind; zero value is a user-supplied API key
 	Effort        EffortWire // how the provider carries a reasoning-effort level; zero value carries none
 	EffortNote    string     // why effort cannot be carried, when known beyond "not yet verified"
+	// Replay is how the provider wants its own reasoning state back
+	// (specs/reasoning-replay); the zero value captures and sends none.
+	// Rows that share a BaseURL must share a Replay value, because clients
+	// resolve it from their base URL.
+	Replay ReplayWire
 }
 
 // AuthKind selects how Likha authenticates to a provider. The zero value is

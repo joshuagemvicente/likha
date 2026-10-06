@@ -38,6 +38,7 @@ func (c *Client) Fork() (*Client, error) {
 		oauth:         c.oauth,
 		effortWire:    c.effortWire,
 		effort:        c.effort,
+		replayWire:    c.replayWire,
 	}
 	c.mu.Unlock()
 

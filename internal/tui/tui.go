@@ -1263,9 +1263,9 @@ func (m *ui) resolveContextWindow() {
 // recalculateContext recomputes a best-effort estimate for restored or
 // rewritten history. It is deliberately marked estimated: no actual provider
 // request (and therefore no actual tool payload) exists at these lifecycle
-// boundaries.
+// boundaries. A nil client counts no replay state.
 func (m *ui) recalculateContext(messages []model.Message) {
-	tokens, ok := model.EstimateInputTokens(m.modelName, messages, nil)
+	tokens, ok := m.client.EstimateInputTokens(messages, nil)
 	m.contextTokens = tokens
 	m.contextSeen = ok
 	m.contextEstimated = ok

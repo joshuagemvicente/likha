@@ -6,11 +6,12 @@ import (
 )
 
 // EstimateInputTokens returns a local approximation of the input tokens Likha
-// sends in messages and tool definitions. Reasoning is excluded because it is
-// not sent back to the provider. The estimate is model-independent: this
-// package has no model-specific tokenizer. The boolean is false only if the
-// estimate cannot be represented as an int64; an empty input is a usable zero
-// estimate.
+// sends in messages and tool definitions. Display reasoning is excluded
+// because it is never sent; replay state is excluded because only a client
+// knows which of it a request carries (see Client.EstimateInputTokens). The
+// estimate is model-independent: this package has no model-specific
+// tokenizer. The boolean is false only if the estimate cannot be represented
+// as an int64; an empty input is a usable zero estimate.
 func EstimateInputTokens(modelID string, messages []Message, tools []ToolDefinition) (int64, bool) {
 	_ = modelID // Reserved for a model-specific tokenizer if one is added later.
 
@@ -49,6 +50,30 @@ func EstimateInputTokens(modelID string, messages []Message, tools []ToolDefinit
 		}
 	}
 
+	return total, true
+}
+
+// EstimateInputTokens is the package-level estimate plus the replay state
+// this client would send with messages, and nothing it would leave out. A nil
+// client sends no replay state.
+func (c *Client) EstimateInputTokens(messages []Message, tools []ToolDefinition) (int64, bool) {
+	total, ok := EstimateInputTokens(c.Model(), messages, tools)
+	if !ok || c == nil {
+		return total, ok
+	}
+	for _, message := range messages {
+		replay := c.replayFor(message)
+		if replay == nil {
+			continue
+		}
+		for _, text := range replaySentText(c.replayWire, replay, message) {
+			tokens, ok := estimateTextTokens(text)
+			if !ok || total > int64(^uint64(0)>>1)-tokens {
+				return 0, false
+			}
+			total += tokens
+		}
+	}
 	return total, true
 }
 

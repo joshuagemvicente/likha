@@ -27,18 +27,31 @@ const (
 	maxErrorBytes     = 64 << 10
 )
 
+// Message is one conversation turn. Sessions persist it with plain
+// encoding/json, so fields added later carry omitempty to keep older
+// encodings byte-identical.
 type Message struct {
 	Role       string
 	Content    string
-	Reasoning  string // thinking-model reasoning; never sent back to the provider
+	Reasoning  string // display reasoning; never sent to any provider (FR-15)
 	ToolCalls  []ToolCall
 	ToolCallID string
+	// Replay is provider-issued reasoning state, sent back only to its
+	// issuer (FR-39). It belongs to assistant messages only, and a message
+	// whose ToolCalls are dropped or whose Content is altered loses it.
+	Replay *ReasoningReplay `json:",omitempty"`
 }
 
+// ToolCall stays all-string so callers can compare calls with ==.
 type ToolCall struct {
 	ID        string
 	Name      string
 	Arguments string
+	// ThoughtSignature is Gemini's signature for this call. A captured
+	// signature implies a non-nil Message.Replay with Source set; a
+	// signature on a message whose Replay does not match the client is
+	// never sent.
+	ThoughtSignature string `json:",omitempty"`
 }
 
 type ToolDefinition struct {
@@ -66,6 +79,8 @@ type Client struct {
 
 	effortWire EffortWire // how the provider carries effort; EffortUnsupported sends none
 	effort     string     // reasoning-effort level for later requests; "" sends none
+
+	replayWire ReplayWire // how the provider wants its reasoning state back; ReplayNone sends none
 
 	oauth *oauthSession // shared Sign in with ChatGPT session, including forks
 
@@ -96,11 +111,12 @@ func New(endpoint, name, apiKey string) (*Client, error) {
 		return nil, errors.New("model name is required")
 	}
 	return &Client{
-		url:    base + "/chat/completions",
-		base:   base,
-		model:  name,
-		apiKey: apiKey,
-		http:   noRedirectHTTPClient(),
+		url:        base + "/chat/completions",
+		base:       base,
+		model:      name,
+		apiKey:     apiKey,
+		http:       noRedirectHTTPClient(),
+		replayWire: replayWireFor(base, Providers),
 	}, nil
 }
 
@@ -217,8 +233,8 @@ type requestTool struct {
 
 // Stream returns the complete assistant turn after [DONE], streaming text to
 // onText and thinking-model reasoning to onReasoning. A partial turn is never
-// returned as a successful answer. Reasoning is never sent back on a later
-// request.
+// returned as a successful answer. Display reasoning is never sent on a later
+// request; provider-issued replay state goes back only to its issuer.
 func (c *Client) Stream(ctx context.Context, messages []Message, tools []ToolDefinition, onText func(string), onReasoning func(string)) (Message, error) {
 	message, _, err := c.stream(ctx, messages, tools, onText, onReasoning)
 	return message, err

@@ -149,7 +149,7 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		if continuation != nil {
 			request = append(request, *continuation)
 		}
-		tokens, known := model.EstimateInputTokens(client.Model(), request, definitions)
+		tokens, known := client.EstimateInputTokens(request, definitions)
 		emit(TurnEvent{Kind: "context", ContextTokens: tokens, ContextKnown: known, ContextEstimated: true})
 		roundCtx, stopRound := watchSteerNow(ctx, options.SteerNow, steer)
 		var partial strings.Builder
@@ -164,9 +164,10 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 			if ctx.Err() == nil && steered {
 				// Steer now (specs/steering-prompts M2): only this request
 				// stopped. Visible text stays in history so the model does
-				// not repeat itself; partial reasoning and half-streamed tool
-				// calls are dropped. Neither transport reports usage before
-				// its final frame, so the stopped request carries none.
+				// not repeat itself; partial reasoning, replay state and
+				// half-streamed tool calls are dropped (a cut-short signed
+				// payload would be rejected). Neither transport reports usage
+				// before its final frame, so the stopped request carries none.
 				if partial.Len() > 0 {
 					history = append(history, model.Message{Role: "assistant", Content: partial.String()})
 				}
@@ -182,8 +183,9 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 			}
 			emit(TurnEvent{Kind: "usage", Usage: &usage})
 		}
+		assistant = replyHook(request, assistant)
 		if err := validateToolCallIDs(assistant.ToolCalls); err != nil {
-			assistant.ToolCalls = nil
+			dropToolCalls(&assistant)
 			history = append(history, assistant)
 			fail(err)
 			return
@@ -293,6 +295,49 @@ func watchSteerNow(ctx context.Context, steerNow <-chan struct{}, steer <-chan s
 		cancel()
 		return steered
 	}
+}
+
+// replyHook sees each loop request and the reply it produced, and returns
+// the reply the loop continues with. Production keeps the identity. Tests
+// replace it to stand in for provider replay capture, which no shipped
+// provider row enables yet (specs/reasoning-replay T5–T7), so the loops'
+// replay invariants are checked where they run, not only in their helpers.
+var replyHook = func(_ []model.Message, reply model.Message) model.Message { return reply }
+
+// dropToolCalls removes a malformed batch of tool calls from an assistant
+// message that stays in history, together with its signed replay state.
+func dropToolCalls(assistant *model.Message) {
+	assistant.ToolCalls = nil
+	dropSignedReplay(assistant)
+}
+
+// dropClippedReplay drops an assistant message's signed replay state when
+// its content is about to be clipped to limit bytes. The replay text itself
+// is never clipped.
+func dropClippedReplay(assistant *model.Message, limit int) {
+	if len(assistant.Content) > limit {
+		dropSignedReplay(assistant)
+	}
+}
+
+// dropSignedReplay keeps only the replay state that stays valid once the
+// agent has changed an assistant message. Signed state describes the exact
+// turn the issuer returned, so sending it with a different turn would
+// misrepresent what the model issued. Unsigned reasoning text is plain
+// context and stays: DeepSeek rejects later tool requests whose earlier
+// turns lack it (specs/reasoning-replay context.md, explore and profile).
+func dropSignedReplay(assistant *model.Message) {
+	assistant.Replay = assistant.Replay.UnsignedOnly()
+	if len(assistant.ToolCalls) == 0 {
+		return
+	}
+	// Copy: the slice may share its backing array with an earlier history
+	// value.
+	calls := append([]model.ToolCall(nil), assistant.ToolCalls...)
+	for i := range calls {
+		calls[i].ThoughtSignature = ""
+	}
+	assistant.ToolCalls = calls
 }
 
 func validateToolCallIDs(calls []model.ToolCall) error {

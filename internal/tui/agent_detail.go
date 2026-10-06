@@ -355,7 +355,7 @@ func (m *ui) agentDetailLines(record explore.Record) []toolInspectionLine {
 			add("Tool call: "+message.ToolCallID, m.theme.Muted)
 		}
 		if message.Reasoning != "" {
-			add("Saved reasoning (not sent back to the provider)", m.theme.Muted)
+			add("Saved reasoning (display only; never sent to the provider)", m.theme.Muted)
 			add(message.Reasoning, m.theme.Muted)
 		}
 		if index, found := resultByCall[message.ToolCallID]; found && message.Role == "tool" {

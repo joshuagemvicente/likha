@@ -33,10 +33,11 @@ func NewOAuth(baseURL, modelName, issuer, clientID string, creds OAuthCredential
 		return nil, errChatgptLoginExpired
 	}
 	c := &Client{
-		url:   ChatGPTResource + "/responses",
-		base:  ChatGPTResource,
-		model: strings.TrimSpace(modelName),
-		http:  noRedirectHTTPClient(),
+		url:        ChatGPTResource + "/responses",
+		base:       ChatGPTResource,
+		model:      strings.TrimSpace(modelName),
+		http:       noRedirectHTTPClient(),
+		replayWire: replayWireFor(ChatGPTResource, Providers),
 	}
 	lifetime, stop := context.WithCancel(context.Background())
 	c.oauth = &oauthSession{client: c, creds: cloneClientOAuthCredentials(creds), lifetime: lifetime, stop: stop}

@@ -435,7 +435,7 @@ func sameConversation(a, b Snapshot) bool {
 	}
 	for i := range a.History {
 		left, right := a.History[i], b.History[i]
-		if left.Role != right.Role || left.Content != right.Content || left.Reasoning != right.Reasoning || left.ToolCallID != right.ToolCallID || len(left.ToolCalls) != len(right.ToolCalls) {
+		if left.Role != right.Role || left.Content != right.Content || left.Reasoning != right.Reasoning || left.ToolCallID != right.ToolCallID || !left.Replay.Equal(right.Replay) || len(left.ToolCalls) != len(right.ToolCalls) {
 			return false
 		}
 		for j := range left.ToolCalls {

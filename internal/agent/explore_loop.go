@@ -215,6 +215,7 @@ func ExploreRunner(client *model.Client, repo *repository.Repository, harness []
 			})
 			// Read the fork's telemetry exactly once, even when Stream failed.
 			node.RecordRequest(child.LastRequest())
+			assistant = replyHook(request, assistant)
 			assistant.Role = "assistant"
 			if assistant.Content == "" || (streamErr != nil && len(partial.Content) > len(assistant.Content)) {
 				assistant.Content = partial.Content
@@ -222,6 +223,7 @@ func ExploreRunner(client *model.Client, repo *repository.Repository, harness []
 			if assistant.Reasoning == "" || (streamErr != nil && len(partial.Reasoning) > len(assistant.Reasoning)) {
 				assistant.Reasoning = partial.Reasoning
 			}
+			dropClippedReplay(&assistant, exploreStreamBytes)
 			clipped = clipped || len(assistant.Content) > exploreStreamBytes || len(assistant.Reasoning) > exploreStreamBytes
 			assistant.Content = utf8Prefix(strings.ToValidUTF8(assistant.Content, "�"), exploreStreamBytes)
 			assistant.Reasoning = utf8Prefix(strings.ToValidUTF8(assistant.Reasoning, "�"), exploreStreamBytes)
@@ -232,7 +234,7 @@ func ExploreRunner(client *model.Client, repo *repository.Repository, harness []
 			if idErr != nil {
 				// Never execute any part of a malformed batch, or persist an
 				// unmatched/duplicate result protocol into the next request.
-				assistant.ToolCalls = nil
+				dropToolCalls(&assistant)
 				node.Warn(idErr.Error())
 			}
 			history = append(history, assistant)

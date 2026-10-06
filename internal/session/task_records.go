@@ -455,7 +455,7 @@ func sameTaskRecord(a, b explore.Record) bool {
 	}
 	for i, left := range a.History {
 		right := b.History[i]
-		if left.Role != right.Role || left.Content != right.Content || left.Reasoning != right.Reasoning || left.ToolCallID != right.ToolCallID || !slices.Equal(left.ToolCalls, right.ToolCalls) {
+		if left.Role != right.Role || left.Content != right.Content || left.Reasoning != right.Reasoning || left.ToolCallID != right.ToolCallID || !left.Replay.Equal(right.Replay) || !slices.Equal(left.ToolCalls, right.ToolCalls) {
 			return false
 		}
 	}
@@ -662,7 +662,8 @@ func repairTaskHistory(history []model.Message, records []explore.Record) ([]mod
 			}
 			if i+1+offset < end {
 				result := history[i+1+offset]
-				if result.ToolCallID != call.ID || len(result.ToolCalls) != 0 || result.Reasoning != "" {
+				// Replay state belongs to assistant messages only.
+				if result.ToolCallID != call.ID || len(result.ToolCalls) != 0 || result.Reasoning != "" || result.Replay != nil {
 					valid = false
 					break
 				}

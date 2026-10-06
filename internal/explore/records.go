@@ -93,14 +93,24 @@ func cloneScope(scope tools.Scope) tools.Scope {
 	return scope
 }
 
+// cloneMessages copies a child history for its task record. Replay state and
+// thought signatures are stripped: task records are display and resume
+// transcripts, never request history, so persisting provider-issued state
+// there would only cost capacity.
 func cloneMessages(messages []model.Message) []model.Message {
 	if messages == nil {
 		return nil
 	}
 	cloned := append([]model.Message{}, messages...)
 	for i := range cloned {
-		if messages[i].ToolCalls != nil {
-			cloned[i].ToolCalls = append([]model.ToolCall{}, messages[i].ToolCalls...)
+		cloned[i].Replay = nil
+		if messages[i].ToolCalls == nil {
+			continue
+		}
+		cloned[i].ToolCalls = make([]model.ToolCall, len(messages[i].ToolCalls))
+		for j, call := range messages[i].ToolCalls {
+			call.ThoughtSignature = ""
+			cloned[i].ToolCalls[j] = call
 		}
 	}
 	return cloned
