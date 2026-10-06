@@ -37,10 +37,9 @@ type Node struct {
 }
 
 type requestUsage struct {
-	accounted      bool
-	reported       bool
-	completionSeen bool
-	usage          model.TokenUsage
+	accounted bool
+	reported  bool
+	usage     model.RequestUsage
 }
 
 // Record returns a detached versioned snapshot. SpawnUsed is the shared budget
@@ -208,16 +207,18 @@ func (n *Node) BeginRequest() error {
 // model.Client.LastRequestUsage, so a prompt-only report leaves completion
 // unknown instead of known zero.
 func (n *Node) RecordRequestUsage(prompt, completion int64, promptSeen, completionSeen, reported bool) {
-	n.recordUsage(model.TokenUsage{Prompt: prompt, Completion: completion, PromptSeen: promptSeen}, completionSeen, reported)
+	n.RecordRequest(model.RequestUsage{Prompt: prompt, Completion: completion, PromptSeen: promptSeen, CompletionSeen: completionSeen}, reported)
 }
 
 // RecordUsage consumes a report that carries a prompt-seen flag only; such a
-// report is taken as complete. Prefer RecordRequestUsage.
+// report is taken as complete. Prefer RecordRequest.
 func (n *Node) RecordUsage(usage model.TokenUsage, reported bool) {
-	n.recordUsage(usage, usage.PromptSeen, reported)
+	n.RecordRequest(model.RequestUsage{Prompt: usage.Prompt, Completion: usage.Completion, PromptSeen: usage.PromptSeen, CompletionSeen: usage.PromptSeen}, reported)
 }
 
-func (n *Node) recordUsage(usage model.TokenUsage, completionSeen, reported bool) {
+// RecordRequest consumes the child client's full per-request breakdown
+// (model.Client.LastRequest) once for the current request.
+func (n *Node) RecordRequest(usage model.RequestUsage, reported bool) {
 	m := n.manager
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -230,7 +231,6 @@ func (n *Node) recordUsage(usage model.TokenUsage, completionSeen, reported bool
 	}
 	request.accounted = true
 	request.reported = reported
-	request.completionSeen = completionSeen
 	request.usage = usage
 	n.summarizeUsageLocked()
 	m.updateLocked(n, nil)
@@ -244,7 +244,7 @@ func (n *Node) summarizeUsageLocked() {
 	}
 	for _, request := range n.requests {
 		promptKnown := request.reported && request.usage.PromptSeen && request.usage.Prompt >= 0
-		completionKnown := request.reported && request.completionSeen && request.usage.Completion >= 0
+		completionKnown := request.reported && request.usage.CompletionSeen && request.usage.Completion >= 0
 		if promptKnown {
 			usage.PromptTokens += request.usage.Prompt
 		}
@@ -261,10 +261,21 @@ func (n *Node) summarizeUsageLocked() {
 		}
 		usage.PromptKnown = usage.PromptKnown && promptKnown
 		usage.CompletionKnown = usage.CompletionKnown && completionKnown
-		if promptKnown && completionKnown {
-			cost, known := model.TurnCost(n.record.Model, request.usage.Prompt, request.usage.Completion)
+		if request.reported {
+			usage.CacheReadTokens += max(request.usage.CacheRead, 0)
+			usage.CacheWriteTokens += max(request.usage.CacheWrite, 0)
+			usage.ReasoningTokens += max(request.usage.Reasoning, 0)
+		}
+		// An unreported request carries no usable usage; its cost is unknown
+		// (a subscription identity does not establish a charge).
+		priced := request.usage
+		if !request.reported {
+			priced = model.RequestUsage{}
+		}
+		cost, source := model.RequestCost(n.record.Provider, n.record.Model, priced)
+		if source.Known() {
 			usage.Cost += cost
-			usage.CostKnown = usage.CostKnown && known
+			usage.CostEstimated = usage.CostEstimated || source == model.CostEstimated
 		} else {
 			usage.CostKnown = false
 		}

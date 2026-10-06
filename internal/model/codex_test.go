@@ -74,18 +74,18 @@ func TestBuildCodexRequestFullConversation(t *testing.T) {
 		Description: "match repository paths by pattern",
 		Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`),
 	}}
-	payload, err := BuildCodexRequest("codex-mini", messages, tools)
+	payload, err := BuildCodexRequest("gpt-6.1-sol", messages, tools)
 	if err != nil {
 		t.Fatalf("BuildCodexRequest: %v", err)
 	}
 	body := codexRequestMap(t, payload)
-	if body["model"] != "codex-mini" {
-		t.Errorf("model = %v, want codex-mini", body["model"])
+	if body["model"] != "gpt-6.1-sol" {
+		t.Errorf("model = %v, want gpt-6.1-sol", body["model"])
 	}
-	if body["instructions"] != "first system block\n\nsecond developer block" {
-		t.Errorf("instructions = %v, want system+developer joined", body["instructions"])
+	if body["instructions"] != "first system block" {
+		t.Errorf("instructions = %v, want system instructions", body["instructions"])
 	}
-	for _, forbidden := range []string{"temperature", "top_p", "store", "messages", "presence_penalty", "frequency_penalty"} {
+	for _, forbidden := range []string{"temperature", "top_p", "messages", "presence_penalty", "frequency_penalty"} {
 		if _, present := body[forbidden]; present {
 			t.Errorf("request contains forbidden field %q", forbidden)
 		}
@@ -93,35 +93,46 @@ func TestBuildCodexRequestFullConversation(t *testing.T) {
 	if body["stream"] != true {
 		t.Errorf("stream = %v, want true", body["stream"])
 	}
+	if body["store"] != false {
+		t.Errorf("store = %v, want false", body["store"])
+	}
 	items := codexInputMaps(t, body)
-	if len(items) != 4 {
-		t.Fatalf("got %d input items, want 4", len(items))
+	if len(items) != 5 {
+		t.Fatalf("got %d input items, want 5", len(items))
 	}
 	parts := codexContentParts(t, body, 0)
-	if items[0]["type"] != "message" || items[0]["role"] != "user" {
-		t.Errorf("item0 = %v, want user message", items[0])
+	if items[0]["role"] != "developer" || parts[0]["text"] != "second developer block" {
+		t.Errorf("item0 = %v, want developer message", items[0])
+	}
+	parts = codexContentParts(t, body, 1)
+	if items[1]["type"] != "message" || items[1]["role"] != "user" {
+		t.Errorf("item1 = %v, want user message", items[1])
 	}
 	if len(parts) != 1 || parts[0]["type"] != "input_text" || parts[0]["text"] != "list things" {
 		t.Errorf("user content = %v, want single input_text part", parts)
 	}
-	if items[1]["type"] != "message" || items[1]["role"] != "assistant" {
-		t.Errorf("item1 = %v, want assistant message", items[1])
+	if items[2]["type"] != "message" || items[2]["role"] != "assistant" {
+		t.Errorf("item2 = %v, want assistant message", items[2])
 	}
-	parts = codexContentParts(t, body, 1)
-	if len(parts) != 1 || parts[0]["type"] != "output_text" || parts[0]["text"] != "done" {
-		t.Errorf("assistant content = %v, want single output_text part", parts)
+	parts = codexContentParts(t, body, 2)
+	if len(parts) != 1 || parts[0]["type"] != "input_text" || parts[0]["text"] != "done" {
+		t.Errorf("assistant content = %v, want single input_text part", parts)
 	}
-	if items[2]["type"] != "function_call" || items[2]["call_id"] != "call_1" || items[2]["name"] != "glob" || items[2]["arguments"] != `{"path":"/tmp"}` {
-		t.Errorf("item2 = %v, want function_call", items[2])
+	if items[3]["type"] != "function_call" || items[3]["call_id"] != "call_1" || items[3]["name"] != "glob" || items[3]["namespace"] != "likha" || items[3]["arguments"] != `{"path":"/tmp"}` {
+		t.Errorf("item3 = %v, want namespaced function_call", items[3])
 	}
-	if items[3]["type"] != "function_call_output" || items[3]["call_id"] != "call_1" || items[3]["output"] != "a.txt\nb.txt" {
-		t.Errorf("item3 = %v, want function_call_output", items[3])
+	if items[4]["type"] != "function_call_output" || items[4]["call_id"] != "call_1" || items[4]["output"] != "a.txt\nb.txt" {
+		t.Errorf("item4 = %v, want function_call_output", items[4])
 	}
 	rawTools, ok := body["tools"].([]any)
 	if !ok || len(rawTools) != 1 {
 		t.Fatalf("tools = %v, want one entry", body["tools"])
 	}
-	tool := rawTools[0].(map[string]any)
+	namespace := rawTools[0].(map[string]any)
+	if namespace["type"] != "namespace" || namespace["name"] != "likha" {
+		t.Fatalf("namespace = %v", namespace)
+	}
+	tool := namespace["tools"].([]any)[0].(map[string]any)
 	if tool["type"] != "function" || tool["name"] != "glob" || tool["description"] != "match repository paths by pattern" {
 		t.Errorf("tool = %v, want function definition", tool)
 	}
@@ -130,13 +141,12 @@ func TestBuildCodexRequestFullConversation(t *testing.T) {
 	}
 }
 
-func TestBuildCodexRequestAssistantCallsBeforeMessage(t *testing.T) {
-	// Tool calls come before or after the message item exactly as they appear
-	// in the slice order; here the calls precede the content.
+func TestBuildCodexRequestAssistantTextAndCallOrder(t *testing.T) {
+	// Text precedes the calls within a Message; call order remains unchanged.
 	messages := []Message{
 		{Role: "assistant", Content: "here", ToolCalls: []ToolCall{
-			{ID: "c1", Name: "a", Arguments: "1"},
-			{ID: "c2", Name: "b", Arguments: "2"},
+			{ID: "c1", Name: "a", Arguments: `{"a":1}`},
+			{ID: "c2", Name: "b", Arguments: `{"b":2}`},
 		}},
 	}
 	payload, err := BuildCodexRequest("m", messages, nil)
@@ -158,8 +168,8 @@ func TestBuildCodexRequestAssistantCallsBeforeMessage(t *testing.T) {
 		t.Errorf("item0 = %v, want assistant message", items[0])
 	}
 	parts := codexContentParts(t, codexRequestMap(t, payload), 0)
-	if parts[0]["type"] != "output_text" || parts[0]["text"] != "here" {
-		t.Errorf("assistant content = %v, want output_text", parts)
+	if parts[0]["type"] != "input_text" || parts[0]["text"] != "here" {
+		t.Errorf("assistant content = %v, want input_text", parts)
 	}
 	if items[1]["call_id"] != "c1" || items[2]["call_id"] != "c2" {
 		t.Errorf("call order = %v,%v, want c1,c2", items[1], items[2])
@@ -167,17 +177,19 @@ func TestBuildCodexRequestAssistantCallsBeforeMessage(t *testing.T) {
 }
 
 func TestBuildCodexRequestOmissions(t *testing.T) {
-	// No system/developer: instructions omitted entirely.
-	// No tools: "tools" omitted entirely.
+	// No system: instructions omitted entirely. No tools: explicit empty array.
 	payload, err := BuildCodexRequest("m", []Message{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("BuildCodexRequest: %v", err)
 	}
 	body := codexRequestMap(t, payload)
-	for _, absent := range []string{"instructions", "tools"} {
+	for _, absent := range []string{"instructions"} {
 		if _, present := body[absent]; present {
 			t.Errorf("request must omit %q when nothing to send, got %v", absent, body[absent])
 		}
+	}
+	if tools, ok := body["tools"].([]any); !ok || len(tools) != 0 {
+		t.Errorf("tools = %v, want []", body["tools"])
 	}
 	if body["model"] != "m" || body["stream"] != true {
 		t.Errorf("base fields = %v", body)
@@ -290,7 +302,7 @@ func TestConsumeCodexStreamTextAndReasoning(t *testing.T) {
 		codexFrame("response.reasoning_text.delta", `{"delta":"more think"}`) +
 		codexFrame("response.output_text.delta", `{"delta":"Hello"}`) +
 		codexFrame("response.output_text.delta", `{"delta":" world"}`) +
-		codexFrame("response.completed", `{"response":{"output":[]}}`)
+		codexFrame("response.completed", `{"response":{"status":"completed","output":[]}}`)
 	msg, rec, err := codexRunStream(sse)
 	if err != nil {
 		t.Fatalf("ConsumeCodexStream: %v", err)
@@ -318,7 +330,7 @@ func TestConsumeCodexStreamFunctionCall(t *testing.T) {
 		codexFrame("response.function_call_arguments.delta", `{"item_id":"item_1","delta":"{\"pa"}`) +
 		codexFrame("response.function_call_arguments.delta", `{"item_id":"item_1","delta":"th\":\"drift\"}"}`) +
 		codexFrame("response.output_item.done", `{"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"glob","arguments":"{\"path\":\"a\"}"}}`) +
-		codexFrame("response.completed", `{"response":{"output":[{"type":"function_call","call_id":"call_1","name":"glob","arguments":"{\"path\":\"a\"}"},{"type":"message","content":[{"type":"output_text","text":"x"}]}]}}`)
+		codexFrame("response.completed", `{"response":{"status":"completed","output":[{"type":"function_call","call_id":"call_1","name":"glob","arguments":"{\"path\":\"a\"}"},{"type":"message","content":[{"type":"output_text","text":"x"}]}]}}`)
 	msg, _, err := codexRunStream(sse)
 	if err != nil {
 		t.Fatalf("ConsumeCodexStream: %v", err)
@@ -336,7 +348,7 @@ func TestConsumeCodexStreamFunctionCallStreamedOnly(t *testing.T) {
 	// added → delta → completed (no done event): accumulated arguments win.
 	sse := codexFrame("response.output_item.added", `{"item":{"type":"function_call","id":"i1","call_id":"c1","name":"f","arguments":"{\"a"}}`) +
 		codexFrame("response.function_call_arguments.delta", `{"item_id":"i1","delta":"\":1}"}`) +
-		codexFrame("response.completed", `{"response":{"output":[{"type":"function_call","call_id":"c1","name":"f","arguments":"{\"a\":1}"}]}}`)
+		codexFrame("response.completed", `{"response":{"status":"completed","output":[{"type":"function_call","call_id":"c1","name":"f","arguments":"{\"a\":1}"}]}}`)
 	msg, _, err := codexRunStream(sse)
 	if err != nil {
 		t.Fatalf("ConsumeCodexStream: %v", err)
@@ -350,7 +362,7 @@ func TestConsumeCodexStreamFunctionCallFromCompleted(t *testing.T) {
 	// No streaming fragments at all: completed output is the only source and
 	// must keep output order.
 	sse := codexFrame("response.output_text.delta", `{"delta":"answer"}`) +
-		codexFrame("response.completed", `{"response":{"output":[{"type":"message","content":[{"type":"output_text","text":"answer"}]},{"type":"function_call","call_id":"c2","name":"second","arguments":"{}"},{"type":"function_call","call_id":"c1","name":"first","arguments":"[]"}]}}`)
+		codexFrame("response.completed", `{"response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"answer"}]},{"type":"function_call","call_id":"c2","name":"second","arguments":"{}"},{"type":"function_call","call_id":"c1","name":"first","arguments":"{\"items\":[]}"}]}}`)
 	msg, _, err := codexRunStream(sse)
 	if err != nil {
 		t.Fatalf("ConsumeCodexStream: %v", err)
@@ -361,8 +373,8 @@ func TestConsumeCodexStreamFunctionCallFromCompleted(t *testing.T) {
 	if msg.ToolCalls[0].ID != "c2" || msg.ToolCalls[1].ID != "c1" {
 		t.Errorf("order = %s,%s, want c2,c1 (output order)", msg.ToolCalls[0].ID, msg.ToolCalls[1].ID)
 	}
-	if msg.ToolCalls[1].Arguments != "[]" {
-		t.Errorf("arguments = %q, want []", msg.ToolCalls[1].Arguments)
+	if msg.ToolCalls[1].Arguments != `{"items":[]}` {
+		t.Errorf("arguments = %q, want items object", msg.ToolCalls[1].Arguments)
 	}
 	if msg.Content != "answer" {
 		t.Errorf("content = %q, want answer", msg.Content)
@@ -375,9 +387,9 @@ func TestConsumeCodexStreamCompletedInvalidCall(t *testing.T) {
 		sse  string
 		want string
 	}{
-		{"non-JSON arguments", codexFrame("response.completed", `{"response":{"output":[{"type":"function_call","call_id":"c","name":"f","arguments":"garbage"}]}}`), "non-JSON arguments"},
-		{"missing name", codexFrame("response.completed", `{"response":{"output":[{"type":"function_call","call_id":"c","arguments":"1"}]}}`), "missing a call ID or name"},
-		{"missing call id", codexFrame("response.completed", `{"response":{"output":[{"type":"function_call","name":"f","arguments":"1"}]}}`), "missing a call ID or name"},
+		{"non-JSON arguments", codexFrame("response.completed", `{"response":{"status":"completed","output":[{"type":"function_call","call_id":"c","name":"f","arguments":"garbage"}]}}`), "non-JSON-object arguments"},
+		{"missing name", codexFrame("response.completed", `{"response":{"status":"completed","output":[{"type":"function_call","call_id":"c","arguments":"{}"}]}}`), "missing a call ID or name"},
+		{"missing call id", codexFrame("response.completed", `{"response":{"status":"completed","output":[{"type":"function_call","name":"f","arguments":"{}"}]}}`), "missing a call ID or name"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -396,48 +408,42 @@ func TestConsumeCodexStreamUsage(t *testing.T) {
 	}{
 		{
 			name:     "response.usage on completed",
-			terminal: `{"response":{"output":[],"usage":{"input_tokens":110,"output_tokens":25}}}`,
+			terminal: `{"response":{"status":"completed","output":[],"usage":{"input_tokens":110,"output_tokens":25}}}`,
 			want:     TokenUsage{Prompt: 110, Completion: 25, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
 			name:     "top-level usage on completed",
-			terminal: `{"response":{"output":[]},"usage":{"input_tokens":50,"output_tokens":8}}`,
+			terminal: `{"response":{"status":"completed","output":[]},"usage":{"input_tokens":50,"output_tokens":8}}`,
 			want:     TokenUsage{Prompt: 50, Completion: 8, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
 			name:     "top-level usage wins over response.usage",
-			terminal: `{"response":{"output":[],"usage":{"input_tokens":1,"output_tokens":1}},"usage":{"input_tokens":2,"output_tokens":2}}`,
+			terminal: `{"response":{"status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}},"usage":{"input_tokens":2,"output_tokens":2}}`,
 			want:     TokenUsage{Prompt: 2, Completion: 2, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
 			name:     "chat-completions alias naming accepted",
-			terminal: `{"response":{"output":[],"usage":{"prompt_tokens":33,"completion_tokens":44}}}`,
+			terminal: `{"response":{"status":"completed","output":[],"usage":{"prompt_tokens":33,"completion_tokens":44}}}`,
 			want:     TokenUsage{Prompt: 33, Completion: 44, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
 			name:     "zero totals are valid usage",
-			terminal: `{"response":{"output":[],"usage":{"input_tokens":0,"output_tokens":0}}}`,
+			terminal: `{"response":{"status":"completed","output":[],"usage":{"input_tokens":0,"output_tokens":0}}}`,
 			want:     TokenUsage{PromptSeen: true},
 			wantSeen: true,
 		},
 		{
-			name:     "usage on incomplete terminal",
-			terminal: `{"response":{"output":[],"status":"incomplete","usage":{"input_tokens":12,"output_tokens":3}}}`,
-			want:     TokenUsage{Prompt: 12, Completion: 3, PromptSeen: true},
-			wantSeen: true,
-		},
-		{
 			name:     "no usage on completed means no usage",
-			terminal: `{"response":{"output":[]}}`,
+			terminal: `{"response":{"status":"completed","output":[]}}`,
 			wantSeen: false,
 		},
 		{
 			name:     "null usage means no usage",
-			terminal: `{"response":{"output":[],"usage":null}}`,
+			terminal: `{"response":{"status":"completed","output":[],"usage":null}}`,
 			wantSeen: false,
 		},
 	}
@@ -474,14 +480,12 @@ func TestConsumeCodexStreamUsageIgnoredBeforeTerminal(t *testing.T) {
 	}
 }
 
-func TestConsumeCodexStreamDone(t *testing.T) {
+func TestConsumeCodexStreamDoneBeforeCompletedFails(t *testing.T) {
 	sse := codexFrame("response.output_text.delta", `{"delta":"hi"}`) + "data: [DONE]\n\n"
 	msg, _, err := codexRunStream(sse)
-	if err != nil {
-		t.Fatalf("ConsumeCodexStream: [DONE] must terminate successfully: %v", err)
-	}
-	if msg.Content != "hi" {
-		t.Errorf("content = %q, want hi", msg.Content)
+	codexWantError(t, err, "before response.completed")
+	if msg.Role != "" || msg.Content != "" {
+		t.Errorf("partial message returned: %+v", msg)
 	}
 }
 
@@ -515,72 +519,63 @@ func TestConsumeCodexStreamResponseFailed(t *testing.T) {
 func TestConsumeCodexStreamEarlyEOF(t *testing.T) {
 	sse := codexFrame("response.output_text.delta", `{"delta":"partial"}`) // no terminal
 	_, _, err := codexRunStream(sse)
-	codexWantError(t, err, "codex stream ended without a terminal event")
+	codexWantError(t, err, "Responses stream ended without response.completed")
 }
 
 func TestConsumeCodexStreamEarlyEOFIncompleteSilence(t *testing.T) {
 	// Nothing streamed at all, connection closes: still an error, never a
 	// successful empty turn.
 	_, _, err := codexRunStream(codexFrame("response.created", `{"response":{}}`))
-	codexWantError(t, err, "codex stream ended without a terminal event")
+	codexWantError(t, err, "Responses stream ended without response.completed")
 }
 
 func TestConsumeCodexStreamIncompleteTerminal(t *testing.T) {
 	sse := codexFrame("response.output_text.delta", `{"delta":"partial answer"}`) +
 		codexFrame("response.incomplete", `{"response":{"output":[],"status":"incomplete"}}`)
 	msg, _, err := codexRunStream(sse)
-	if err != nil {
-		t.Fatalf("ConsumeCodexStream: response.incomplete must terminate successfully: %v", err)
-	}
-	if msg.Content != "partial answer" {
-		t.Errorf("content = %q, want partial answer", msg.Content)
+	codexWantError(t, err, "Responses stream incomplete")
+	if msg.Role != "" || msg.Content != "" || len(msg.ToolCalls) != 0 {
+		t.Errorf("partial message returned: %+v", msg)
 	}
 }
 
 func TestConsumeCodexStreamMalformedPayload(t *testing.T) {
 	sse := codexFrame("response.output_text.delta", `{not json}`)
 	_, _, err := codexRunStream(sse)
-	codexWantError(t, err, "malformed codex stream")
+	codexWantError(t, err, "malformed Responses stream")
 }
 
 func TestConsumeCodexStreamMalformedFunctionPayload(t *testing.T) {
 	sse := codexFrame("response.function_call_arguments.delta", `{"item_id":not-a-json}`)
 	_, _, err := codexRunStream(sse)
-	codexWantError(t, err, "malformed codex stream")
+	codexWantError(t, err, "malformed Responses stream")
 }
 
 func TestConsumeCodexStreamContextCancellation(t *testing.T) {
 	pr, pw := io.Pipe()
-	go func() {
-		for {
-			err := context.DeadlineExceeded // placeholder write
-			_ = err
-			pw.Write([]byte(codexFrame("response.output_text.delta", `{"delta":"x"}`)))
-			time.Sleep(20 * time.Millisecond)
-		}
-	}()
+	defer pr.Close()
+	defer pw.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, _, _, err := ConsumeCodexStream(ctx, pr, nil, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
-	pw.Close()
 }
 
 func TestConsumeCodexStreamOversizedLine(t *testing.T) {
 	// >1 MiB single line: clean failure, not unbounded buffering.
 	sse := codexFrame("response.output_text.delta", `{"delta":"`+strings.Repeat("a", 1100*1024)+`"}`) +
-		codexFrame("response.completed", `{"response":{"output":[]}}`)
+		codexFrame("response.completed", `{"response":{"status":"completed","output":[]}}`)
 	_, _, err := codexRunStream(sse)
-	codexWantError(t, err, "reading codex stream")
+	codexWantError(t, err, "reading Responses stream")
 }
 
 func TestConsumeCodexStreamUnknownEventsIgnored(t *testing.T) {
 	sse := codexFrame("response.some_future_event", `{"mystery":{"nested":"value"}}`) +
 		codexFrame("response.created", `{"response":{"id":"r"}}`) +
 		codexFrame("response.output_text.delta", `{"delta":"ok"}`) +
-		codexFrame("response.completed", `{"response":{"output":[]}}`)
+		codexFrame("response.completed", `{"response":{"status":"completed","output":[]}}`)
 	msg, _, err := codexRunStream(sse)
 	if err != nil {
 		t.Fatalf("ConsumeCodexStream: %v", err)
@@ -594,7 +589,7 @@ func TestConsumeCodexStreamErrorEventWithoutData(t *testing.T) {
 	// A named error event with no payload must fail, not silently pass.
 	sse := "event: error\n\n"
 	_, _, err := codexRunStream(sse)
-	codexWantError(t, err, "codex stream reported an error")
+	codexWantError(t, err, "Responses stream reported an error")
 }
 
 func TestConsumeCodexStreamBlankContentOnlyEvent(t *testing.T) {
@@ -602,7 +597,7 @@ func TestConsumeCodexStreamBlankContentOnlyEvent(t *testing.T) {
 	sse := ": keepalive\n\n" +
 		"id: 1\nretry: 100\n" +
 		codexFrame("response.output_text.delta", `{"delta":"still alive"}`) +
-		codexFrame("response.completed", `{"response":{"output":[]}}`)
+		codexFrame("response.completed", `{"response":{"status":"completed","output":[]}}`)
 	msg, _, err := codexRunStream(sse)
 	if err != nil {
 		t.Fatalf("ConsumeCodexStream: %v", err)
@@ -615,7 +610,7 @@ func TestConsumeCodexStreamBlankContentOnlyEvent(t *testing.T) {
 func TestConsumeCodexStreamNilCallbacks(t *testing.T) {
 	sse := codexFrame("response.output_text.delta", `{"delta":"quiet"}`) +
 		codexFrame("response.reasoning_text.delta", `{"delta":"deep"}`) +
-		codexFrame("response.completed", `{"response":{"output":[]}}`)
+		codexFrame("response.completed", `{"response":{"status":"completed","output":[]}}`)
 	msg, _, _, err := ConsumeCodexStream(context.Background(), strings.NewReader(sse), nil, nil)
 	if err != nil {
 		t.Fatalf("ConsumeCodexStream: %v", err)
@@ -626,9 +621,8 @@ func TestConsumeCodexStreamNilCallbacks(t *testing.T) {
 }
 
 func TestConsumeCodexStreamRealWorldTurn(t *testing.T) {
-	// One whole turn: reasoning summary, text, two function calls where the
-	// second arrives with its name filled only at completed time.
-	sse := codexFrame("response.created", `{"response":{"id":"resp_1","model":"codex-mini"}}`) +
+	// One whole public Responses turn: reasoning summary, text and two calls.
+	sse := codexFrame("response.created", `{"response":{"id":"resp_1","model":"gpt-6.1-sol"}}`) +
 		codexFrame("response.output_item.added", `{"item":{"type":"reasoning","id":"rs_1"}}`) +
 		codexFrame("response.reasoning_summary_text.delta", `{"delta":"checking "}`) +
 		codexFrame("response.reasoning_summary_text.delta", `{"delta":"files"}`) +
@@ -639,7 +633,7 @@ func TestConsumeCodexStreamRealWorldTurn(t *testing.T) {
 		codexFrame("response.output_item.added", `{"item":{"type":"function_call","id":"fc_2","call_id":"call_k1","name":"list_dir","arguments":"{}"}}`) +
 		codexFrame("response.function_call_arguments.delta", `{"item_id":"fc_1","delta":"{\"path\":\"/x\"}"}`) +
 		codexFrame("response.output_item.done", `{"item":{"type":"function_call","id":"fc_1","call_id":"call_z9","name":"read","arguments":"{\"path\":\"/x\"}"}}`) +
-		codexFrame("response.completed", `{"response":{"output":[{"type":"reasoning","id":"rs_1"},{"type":"message","id":"msg_1"},{"type":"function_call","call_id":"call_z9","name":"read","arguments":"{\"path\":\"/x\"}"},{"type":"function_call","call_id":"call_k1","name":"list_dir","arguments":"{}"}]}}`)
+		codexFrame("response.completed", `{"response":{"status":"completed","output":[{"type":"reasoning","id":"rs_1"},{"type":"message","id":"msg_1"},{"type":"function_call","call_id":"call_z9","name":"read","arguments":"{\"path\":\"/x\"}"},{"type":"function_call","call_id":"call_k1","name":"list_dir","arguments":"{}"}]}}`)
 	msg, rec, err := codexRunStream(sse)
 	if err != nil {
 		t.Fatalf("ConsumeCodexStream: %v", err)
@@ -680,5 +674,39 @@ func TestCodexStreamReadCapturedDump(t *testing.T) {
 	}
 	if _, _, _, err := ConsumeCodexStream(context.Background(), strings.NewReader(string(data)), nil, nil); err != nil {
 		t.Fatalf("ConsumeCodexStream on captured dump: %v", err)
+	}
+}
+
+// Steer now (specs/steering-prompts M2) stops a Codex stream by cancelling
+// its request context mid-response: the consumer must return promptly with
+// context.Canceled even while the body is still open, and never report the
+// partial turn as a result.
+func TestConsumeCodexStreamCancelledMidResponseReturnsPromptly(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	go func() {
+		io.WriteString(writer, codexFrame("response.output_text.delta", `{"delta":"partial"}`))
+		// The body stays open, as a live response does.
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var chunks []string
+	done := make(chan struct{})
+	var message Message
+	var err error
+	go func() {
+		defer close(done)
+		message, _, err = consumeCodexStreamDetailed(ctx, reader, func(s string) {
+			chunks = append(chunks, s)
+			cancel()
+		}, nil)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelled codex stream did not return")
+	}
+	if !errors.Is(err, context.Canceled) || message.Role != "" || len(chunks) != 1 || chunks[0] != "partial" {
+		t.Fatalf("message=%+v chunks=%v err=%v", message, chunks, err)
 	}
 }

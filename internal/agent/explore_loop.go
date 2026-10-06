@@ -214,7 +214,7 @@ func ExploreRunner(client *model.Client, repo *repository.Repository, harness []
 				progress(&partial.Reasoning, reasoning)
 			})
 			// Read the fork's telemetry exactly once, even when Stream failed.
-			node.RecordRequestUsage(child.LastRequestUsage())
+			node.RecordRequest(child.LastRequest())
 			assistant.Role = "assistant"
 			if assistant.Content == "" || (streamErr != nil && len(partial.Content) > len(assistant.Content)) {
 				assistant.Content = partial.Content

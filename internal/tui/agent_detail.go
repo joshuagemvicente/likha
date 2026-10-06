@@ -542,8 +542,11 @@ func agentDetailTiming(record explore.Record, now time.Time) []string {
 }
 
 // agentDetailUsage prices only provider-measured tokens, not context estimates
-// or the usage embedded in nested task tool outcomes. TurnCost's subscription
-// rows are valid only for the actual ChatGPT provider, never by model ID alone.
+// or the usage embedded in nested task tool outcomes. Subscription allowance
+// does not establish a monetary charge, and a catalog price applies only to
+// the task's exact (provider, model)
+// pair (specs/model-metadata). The stored cost is the record's per-request
+// sum and is never repriced from the task's aggregate totals.
 func agentDetailUsage(record explore.Record) explore.Usage {
 	usage := record.Usage
 	usage.ReportedRequests, usage.UnknownRequests = max(0, usage.ReportedRequests), max(0, usage.UnknownRequests)
@@ -560,22 +563,53 @@ func agentDetailUsage(record explore.Record) explore.Usage {
 		usage.CompletionTokens, usage.CompletionKnown = 0, false
 	}
 	if math.IsNaN(usage.Cost) || math.IsInf(usage.Cost, 0) || usage.Cost < 0 {
-		usage.Cost, usage.CostKnown = 0, false
+		usage.Cost, usage.CostKnown, usage.CostEstimated = 0, false, false
 	}
-	chatGPT := strings.EqualFold(strings.TrimSpace(record.Provider), "chatgpt")
-	if chatGPT && (record.Rounds > 0 || usage.ReportedRequests > 0 || usage.UnknownRequests > 0 || usage.PromptKnown || usage.CompletionKnown || usage.CostKnown) {
-		usage.Cost, usage.CostKnown = 0, true
-		return usage
+	// Records stored before the catalog priced the former subscription
+	// model IDs at $0 by ID alone, whatever the provider. ChatGPT records
+	// also inferred zero from their provider. Neither establishes a charge;
+	// the historical stored format cannot distinguish a reported zero.
+	if usage.CostKnown && usage.Cost == 0 && (agentSubscriptionProvider(record.Provider) || legacySubscriptionZero(record.Model)) {
+		usage.CostKnown, usage.CostEstimated = false, false
 	}
-	unitCost, unitKnown := model.TurnCost(record.Model, 1, 1)
-	subscriptionOnly := unitKnown && unitCost == 0
-	if usage.CostKnown && usage.Cost == 0 && subscriptionOnly && !chatGPT {
-		usage.CostKnown = false
-	}
-	if !usage.CostKnown && usage.PromptKnown && usage.CompletionKnown && !subscriptionOnly {
-		usage.Cost, usage.CostKnown = model.TurnCost(record.Model, usage.PromptTokens, usage.CompletionTokens)
+	// A record without a stored cost is priced only when its totals are
+	// exactly one request (records saved before per-request pricing):
+	// summed totals of several requests would cross price tiers no single
+	// request reached.
+	if !usage.CostKnown && usage.PromptKnown && usage.CompletionKnown && record.Rounds == 1 && usage.ReportedRequests == 1 && usage.UnknownRequests == 0 {
+		cost, source := model.RequestCost(strings.TrimSpace(record.Provider), record.Model, model.RequestUsage{
+			Prompt: usage.PromptTokens, Completion: usage.CompletionTokens, PromptSeen: true, CompletionSeen: true,
+			CacheRead: usage.CacheReadTokens, CacheWrite: usage.CacheWriteTokens, Reasoning: usage.ReasoningTokens,
+		})
+		if source.Known() {
+			usage.Cost, usage.CostKnown, usage.CostEstimated = cost, true, source == model.CostEstimated
+		}
 	}
 	return usage
+}
+
+// agentSubscriptionProvider reports whether a task's recorded provider
+// bills a plan (ChatGPT). Provider names compare case-insensitively.
+func agentSubscriptionProvider(provider string) bool {
+	return model.IsSubscription(strings.ToLower(strings.TrimSpace(provider)))
+}
+
+// legacySubscriptionIDs are the model IDs the pre-catalog price table
+// priced at a known $0 by ID alone (after stripping one "vendor/" prefix),
+// whatever the task's provider. Such a zero never establishes a charge.
+var legacySubscriptionIDs = map[string]bool{
+	"gpt-5.5": true, "gpt-5.4": true, "gpt-5.4-mini": true, "gpt-5.3-codex": true,
+	"gpt-5.3-codex-spark": true, "gpt-6-sol": true, "gpt-6-luna": true,
+}
+
+// legacySubscriptionZero reports whether a stored known $0 for modelID may
+// be the old table's subscription zero rather than a charge.
+func legacySubscriptionZero(modelID string) bool {
+	id := strings.TrimSpace(modelID)
+	if i := strings.IndexByte(id, '/'); i > 0 && i+1 < len(id) {
+		id = id[i+1:]
+	}
+	return legacySubscriptionIDs[id]
 }
 
 // AgentUsageSummary is separate from the main request's context tracker. A
@@ -594,9 +628,10 @@ func AgentUsageSummary(record explore.Record) string {
 	cost := "unknown (tokens or pricing not recorded)"
 	if usage.CostKnown {
 		cost = fmt.Sprintf("$%.4f", usage.Cost)
-		if strings.EqualFold(strings.TrimSpace(record.Provider), "chatgpt") {
-			cost = "$0.00 subscription token charge (plan fees excluded)"
-		} else if usage.UnknownRequests > 0 {
+		if usage.CostEstimated {
+			cost = "~" + cost // a catalog estimate, not the provider's charge
+		}
+		if usage.UnknownRequests > 0 {
 			cost += " reported (total unknown)"
 		}
 	} else if usage.Cost > 0 {
@@ -635,7 +670,11 @@ func TotalAgentUsage(records []explore.Record) explore.Usage {
 		total.PromptKnown = total.PromptKnown && usage.PromptKnown
 		total.CompletionKnown = total.CompletionKnown && usage.CompletionKnown
 		total.Cost += usage.Cost
-		costComplete := usage.UnknownRequests == 0 || strings.EqualFold(strings.TrimSpace(record.Provider), "chatgpt")
+		total.CacheReadTokens += usage.CacheReadTokens
+		total.CacheWriteTokens += usage.CacheWriteTokens
+		total.ReasoningTokens += usage.ReasoningTokens
+		total.CostEstimated = total.CostEstimated || usage.CostKnown && usage.CostEstimated
+		costComplete := usage.UnknownRequests == 0 || agentSubscriptionProvider(record.Provider)
 		total.CostKnown = total.CostKnown && usage.CostKnown && costComplete
 	}
 	if !measured {

@@ -128,6 +128,7 @@ type ui struct {
 	status             string
 	mode               string
 	setup              setupState
+	oauth              oauthFlowState
 	lastModels         []string     // numbered list shown by /models
 	sessionIDs         []string     // ids from the last /sessions listing
 	mention            mentionState // @file completion popup state
@@ -162,7 +163,10 @@ type ui struct {
 	git                   gitState  // last successful git status read; zero value (and !gitStatusOK) on failure
 	gitOK                 bool      // last git status call succeeded; false hides every git segment
 	spend                 float64   // accumulated session cost in US dollars
-	spendKnown            bool      // pricing seen for at least one turn (subscription rows included)
+	spendKnown            bool      // pricing seen for at least one request (subscription rows included)
+	spendEstimated        bool      // at least one priced request was a catalog estimate: spend renders "~$x.xx"
+	runProvider           string    // canonical provider of the active run's client, captured at run start
+	runModel              string    // model of the active run's client, captured at run start
 	freshSession          bool      // started with no stored entries; gates the auto-naming run
 	nameTried             bool      // the one auto-naming attempt already launched
 	toolCatalog           []tools.CatalogEntry
@@ -187,6 +191,10 @@ type ui struct {
 	webConfigState        string          // last loaded web config; a change clears webGrants
 	webConfigSeen         bool
 	grantsMu              sync.Mutex // serializes UI writes with tool-goroutine reads
+
+	// Explore/agent child usage already added to the token totals and spend:
+	// task ID → the newest counted record version and its usage sums.
+	taskUsageCounted map[string]countedTaskUsage
 
 	// Edit diffs (spec transcript-redesign § Diffs). approvedEdits holds the
 	// reviewed diff of each edit this run approved, by call ID, until the
@@ -265,6 +273,15 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 	if conn.Setup {
 		m.mode = modeSetup
 		m.setup.stage = setupProvider
+		for i, p := range model.Providers {
+			if p.Name == conn.ProviderCanonical {
+				m.setup.cursor = i
+				if p.Auth == model.AuthOAuth {
+					m.setup.stage = setupLogin
+				}
+				break
+			}
+		}
 		m.status = "First-run setup"
 		return m
 	}
@@ -297,12 +314,16 @@ type updateAvailableMsg struct{ version string }
 // timeout and compared against the running version. Every failure — fetch,
 // parse, throttle bookkeeping — is silent; the UI simply shows no notice.
 func (m *ui) Init() tea.Cmd {
+	var login tea.Cmd
+	if m.mode == modeSetup && m.setup.stage == setupLogin && !m.setup.checking {
+		login = m.startOAuthLogin(model.Providers[m.setup.cursor])
+	}
 	shouldCheck, mark, err := update.Prepared(m.stateDir)
 	if err != nil || !shouldCheck {
 		// No update check due: only the caret blink loop runs.
-		return blinkCaret()
+		return tea.Batch(blinkCaret(), login)
 	}
-	return tea.Batch(blinkCaret(), func() tea.Msg {
+	return tea.Batch(blinkCaret(), login, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		latest, err := update.Latest(ctx)
@@ -437,6 +458,7 @@ func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
 	m.events = make(chan agent.TurnEvent, 64)
 	m.abandon = make(chan struct{})
 	m.runID++
+	m.runProvider, m.runModel = m.conn.ProviderCanonical, m.modelName
 	m.taskRuntime = nil
 	m.liveToolCalls, m.runToolCalls, m.approvalCall = nil, nil, ""
 	m.approvedEdits = nil
@@ -453,7 +475,9 @@ func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
 			// Steer deliveries join terminal events in the non-droppable
 			// path: the engine has already appended the message to its
 			// history, so the UI must account for it before the run ends.
-			if ev.Kind == "done" || ev.Kind == "error" || ev.Kind == "tool_result" || ev.Kind == "steer" || ev.Kind == "notice" || ev.Kind == "task" || ev.Kind == "task_runtime" || ev.Kind == "tool_checkpoint" {
+			// Usage events too: a cancel must not lose a request that
+			// already completed and was billed.
+			if ev.Kind == "done" || ev.Kind == "error" || ev.Kind == "tool_result" || ev.Kind == "steer" || ev.Kind == "stream_interrupted" || ev.Kind == "notice" || ev.Kind == "task" || ev.Kind == "task_runtime" || ev.Kind == "tool_checkpoint" || ev.Kind == "usage" {
 				select {
 				case events <- ev:
 				case <-abandon:
@@ -473,11 +497,25 @@ func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
 // applyTurnEvent folds one event of the live run into the view. The caller
 // owns re-arming the event read; a returned command is extra work only.
 func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
+	// Every completed model request of the run carries its own usage: the
+	// loop's "usage" event after each round, and a compaction's terminal
+	// event for its one summarize call. Each event is applied exactly once.
+	if v.Usage != nil {
+		provider, modelID := m.runProvider, m.runModel
+		if modelID == "" {
+			provider, modelID = m.conn.ProviderCanonical, m.modelName
+		}
+		m.addRequestUsage(provider, modelID, *v.Usage)
+		if v.Kind == "usage" && v.Usage.PromptSeen {
+			m.lastPromptTokens = v.Usage.Prompt
+		}
+	}
 	switch v.Kind {
 	case "task_runtime":
 		m.taskRuntime = v.TaskRuntime
 	case "task":
 		if v.Task != nil {
+			m.addTaskUsage(*v.Task)
 			m.acceptTaskRecord(*v.Task)
 		}
 	case "tool_checkpoint":
@@ -702,26 +740,6 @@ func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
 	// The footer closes every finished user turn, failed ones
 	// included, below the run's last notice.
 	m.appendTurnFooter(turnTools, turnCancelled)
-	if v.Kind == "done" && m.client != nil {
-		// Provider-reported usage of the just-finished response;
-		// absent usage keeps the ctx/tokens segments at their fallback.
-		if usage, ok := m.client.LastTokenUsage(); ok {
-			m.usagePrompt += usage.Prompt
-			m.usageCompletion += usage.Completion
-			m.lastPromptTokens = usage.Prompt
-			m.usageSeen = true
-			// Session spend (spec tui-layout 1b.6): the subscription
-			// row is a known $0.00, priced models accumulate, and a
-			// model without documented pricing keeps the segment
-			// hidden rather than estimating.
-			if m.conn.ProviderCanonical == "chatgpt" {
-				m.spendKnown = true
-			} else if cost, priced := model.TurnCost(m.modelName, usage.Prompt, usage.Completion); priced {
-				m.spend += cost
-				m.spendKnown = true
-			}
-		}
-	}
 	m.cancelling = false
 	// A run end (done, error, cancel) holds the queue: reconcile the
 	// backstop against the adopted history, then leave the remaining
@@ -731,6 +749,81 @@ func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
 	m.refreshStatusSessionTitle()
 	m.steer = nil
 	return m.autoNameAfterFirstTurn(v.Kind)
+}
+
+// addRequestUsage adds one completed model request to the session token
+// totals and spend (specs/model-metadata § Lookup). The request is priced
+// with the provider and model it was sent to: a provider-reported cost is
+// exact, a subscription is an exact $0, a catalog price is an estimate that
+// marks spend with "~", and an unknown price leaves spend as it was.
+func (m *ui) addRequestUsage(provider, modelID string, u model.RequestUsage) {
+	m.usagePrompt += u.Prompt
+	m.usageCompletion += u.Completion
+	m.usageSeen = true
+	cost, source := model.RequestCost(provider, modelID, u)
+	if !source.Known() {
+		return
+	}
+	m.spend += cost
+	m.spendKnown = true
+	if source == model.CostEstimated {
+		m.spendEstimated = true
+	}
+}
+
+// countedTaskUsage is the part of a task record's usage already added to the
+// session totals.
+type countedTaskUsage struct {
+	version uint64
+	usage   explore.Usage
+}
+
+// addTaskUsage adds the model requests an explore/agent child made since its
+// last counted record to the session token totals and spend, so a run that
+// delegates counts every request it caused (specs/model-metadata § Lookup).
+// The node prices each request with the task's own provider and model when
+// it completes; its record carries the running sums, so only the growth
+// since the newest counted version is added and no request is counted
+// twice. A record restored from storage is the baseline, never new usage.
+// Requests whose cost is unknown leave spend as it was, as on the main loop.
+func (m *ui) addTaskUsage(record explore.Record) {
+	if record.SessionID != m.snapshot.ID || record.ID == "" {
+		return
+	}
+	prev, counted := m.taskUsageCounted[record.ID]
+	if !counted {
+		for _, known := range m.taskRecords {
+			if known.ID == record.ID {
+				prev, counted = countedTaskUsage{version: known.Version, usage: known.Usage}, true
+				break
+			}
+		}
+	}
+	if counted && record.Version <= prev.version {
+		return
+	}
+	if m.taskUsageCounted == nil {
+		m.taskUsageCounted = make(map[string]countedTaskUsage)
+	}
+	m.taskUsageCounted[record.ID] = countedTaskUsage{version: record.Version, usage: record.Usage}
+	next := record.Usage
+	prompt := max(next.PromptTokens-prev.usage.PromptTokens, 0)
+	completion := max(next.CompletionTokens-prev.usage.CompletionTokens, 0)
+	if prompt > 0 || completion > 0 {
+		m.usagePrompt += prompt
+		m.usageCompletion += completion
+		m.usageSeen = true
+	}
+	switch cost := next.Cost - prev.usage.Cost; {
+	case cost > 0:
+		m.spend += cost
+	case next.CostKnown && record.Rounds > 0:
+		// Every request so far is priced, at $0 (a subscription child).
+	default:
+		return
+	}
+	m.spendKnown = true
+	m.spendEstimated = m.spendEstimated || next.CostEstimated
 }
 
 // forceStopRun ends a cancelled run that never delivered its terminal
@@ -855,14 +948,20 @@ func (m *ui) startCompaction(focus string) tea.Cmd {
 	m.events = make(chan agent.TurnEvent, 64)
 	m.abandon = make(chan struct{})
 	m.runID++
+	m.runProvider, m.runModel = m.conn.ProviderCanonical, m.modelName
 	runID := m.runID
 	events := m.events
 	abandon := m.abandon
 	client, history := m.client, m.history
 	go func() {
 		defer close(events)
-		newHistory, summary, err := agent.CompactHistory(ctx, client, history, focus, nil)
+		newHistory, summary, usage, usageOK, err := agent.CompactHistoryUsage(ctx, client, history, focus, nil)
 		ev := agent.TurnEvent{RunID: runID}
+		if usageOK {
+			// The summarize request completed and was billed even when its
+			// summary is rejected; the terminal event carries its usage.
+			ev.Usage = &usage
+		}
 		if err != nil {
 			// The failed call never touched the caller's history; carrying
 			// it in the event leaves the error handler's history swap a
@@ -1163,6 +1262,12 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleModelsProviderFailed(v)
 		return m, nil
 	case nameGeneratedMsg:
+		// The naming request is billed whenever it completed, even when
+		// its name is rejected or arrives too late to apply.
+		if v.usageOK {
+			m.addRequestUsage(v.provider, v.model, v.usage)
+			m.layoutWidth = 0
+		}
 		// Auto-naming (spec tui-layout 1c): a failure or a late result after
 		// a name was applied stays silent — the derived title remains and no
 		// error entry is ever shown.
@@ -1269,7 +1374,10 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setup.checking = false
 		if v.err != nil {
+			// Back on the key field with the key kept: fix it and Enter
+			// retries, Esc picks another provider.
 			m.setup.err = v.err.Error()
+			m.setup.stage = setupKey
 			return m, nil
 		}
 		m.setup.err = ""
@@ -1279,27 +1387,29 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.finishSetup(v.models[0])
 		}
 		m.setup.stage = setupModel
-		m.setup.modelCursor = 0
+		m.setup.filter = nil
+		m.setup.modelCursor = setupDefaultModel(model.Providers[m.setup.cursor], v.models)
 		return m, nil
 	case oauthLoginMsg:
-		if m.mode != modeSetup || m.setup.stage != setupLogin || !m.setup.checking {
-			// A late login result is ignored once the stage moves on.
+		return m, m.handleOAuthLogin(v)
+	case oauthProgressMsg:
+		if v.attempt != m.oauth.id || !m.oauthWaiting() {
 			return m, nil
 		}
-		m.setup.checking = false
-		if v.err != nil {
-			m.setup.err = fmt.Sprintf("ChatGPT sign-in failed: %v — press Enter to retry", v.err)
+		m.oauth.progress = v.text
+		return m, waitOAuthEvent(m.oauth.events)
+	case oauthBrowserErrorMsg:
+		if v.attempt != m.oauth.id || !m.oauthWaiting() {
 			return m, nil
 		}
-		// The Codex backend has no OpenAI-shaped model list; setup offers the
-		// curated ChatGPT models directly.
-		m.setup.err = ""
-		m.setup.creds = v.creds
-		m.setup.models = model.ChatGPTModels
-		m.setup.contextWindows = nil
-		m.setup.modelCursor = 0
-		m.setup.stage = setupModel
+		m.oauth.manualURL = manualOAuthURL(v.url)
+		m.oauth.progress = "Couldn't open the browser automatically. Open the link below to continue."
+		return m, waitOAuthEvent(m.oauth.events)
+	case oauthLogoutMsg:
+		m.handleOAuthLogout(v)
 		return m, nil
+	case setupTickMsg:
+		return m, m.handleSetupTick()
 	case tea.KeyMsg:
 		m.endTextSelectionDrag()
 		inputBeforeKey := string(m.input)
@@ -1868,6 +1978,13 @@ func cancelWatchdog(runID uint64) tea.Cmd {
 type nameGeneratedMsg struct {
 	name string
 	err  error
+	// The naming request's usage, priced with the provider and model the
+	// call was made with; usageOK is false when the request never completed
+	// or reported no usage.
+	usage    model.RequestUsage
+	usageOK  bool
+	provider string
+	model    string
 }
 
 // autoNameAfterFirstTurn names a fresh session after its first COMPLETED
@@ -1881,11 +1998,12 @@ func (m *ui) autoNameAfterFirstTurn(kind string) tea.Cmd {
 	}
 	m.nameTried = true
 	client, history := m.client, m.history
+	provider, modelID := m.conn.ProviderCanonical, m.modelName
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		name, err := agent.GenerateSessionName(ctx, client, history)
-		return nameGeneratedMsg{name: name, err: err}
+		name, usage, usageOK, err := agent.GenerateSessionNameUsage(ctx, client, history)
+		return nameGeneratedMsg{name: name, err: err, usage: usage, usageOK: usageOK, provider: provider, model: modelID}
 	}
 }
 

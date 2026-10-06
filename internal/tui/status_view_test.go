@@ -125,7 +125,8 @@ func TestContextSegmentFormats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := NewUI("/sample", nil, client, "gpt-4o", providers.Connection{Provider: "Local OpenAI-compatible", Verified: true}, t.TempDir(), nil, session.Snapshot{})
+	// The catalog window is provider-scoped: gpt-4o on openai is 128000.
+	m := NewUI("/sample", nil, client, "gpt-4o", providers.Connection{Provider: "OpenAI", ProviderCanonical: "openai", Verified: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.startTurn("first question", nil)
 	defer m.cancel()
@@ -272,30 +273,32 @@ func TestSpendSegmentPricing(t *testing.T) {
 		}
 		m := NewUI("/sample", nil, c, modelName, providers.Connection{Provider: "OpenAI", ProviderCanonical: canonical, Verified: true}, t.TempDir(), nil, session.Snapshot{})
 		m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+		m.nameTried = true // the auto-naming request is priced by its own test
 		return m
 	}
-	// Documented pricing accumulates: 40k prompt + 1k completion on gpt-4o
-	// is $0.10 + $0.01 = $0.11 (cents precision under $1).
+	// Catalog pricing accumulates as an estimate: 40k prompt + 1k
+	// completion on openai/gpt-4o ($2.5/$10 per 1M) is $0.10 + $0.01 =
+	// $0.11 (cents precision under $1), marked "~".
 	m := newSession("gpt-4o", "openai")
 	m.startTurn("first question", nil)
 	defer m.cancel()
 	defer close(m.abandon)
 	driveTurn(m)
-	if !m.spendKnown || m.spendSegment() != "$0.11" {
+	if !m.spendKnown || m.spendSegment() != "~$0.11" {
 		t.Fatalf("priced turn spend = %q (known=%t)", m.spendSegment(), m.spendKnown)
 	}
-	if row := stripANSI(m.statusLineRows(1, 1)[0]); !strings.Contains(row, "$0.11") {
+	if row := stripANSI(m.statusLineRows(1, 1)[0]); !strings.Contains(row, "~$0.11") {
 		t.Fatalf("spend segment missing from the row: %q", row)
 	}
 
-	// The subscription row renders the known zero.
+	// The subscription route does not infer a zero-dollar charge.
 	m = newSession("gpt-5.5", "chatgpt")
 	m.startTurn("first question", nil)
 	defer m.cancel()
 	defer close(m.abandon)
 	driveTurn(m)
-	if !m.spendKnown || m.spendSegment() != "$0.00" {
-		t.Fatalf("subscription spend = %q (known=%t)", m.spendSegment(), m.spendKnown)
+	if m.spendKnown || m.spendSegment() != "" {
+		t.Fatalf("subscription fabricated spend = %q (known=%t)", m.spendSegment(), m.spendKnown)
 	}
 
 	// Unknown pricing keeps the segment hidden.

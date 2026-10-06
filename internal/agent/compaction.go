@@ -20,11 +20,20 @@ const compactInstruction = `Summarize the conversation above into a compact cont
 // the replacement history plus the summary text. The input slice is never
 // modified. Errors leave the caller's history untouched.
 func CompactHistory(ctx context.Context, client *model.Client, history []model.Message, focus string, onText func(string)) ([]model.Message, string, error) {
+	replacement, summary, _, _, err := CompactHistoryUsage(ctx, client, history, focus, onText)
+	return replacement, summary, err
+}
+
+// CompactHistoryUsage is CompactHistory plus the summarization request's own
+// usage breakdown (usageOK=false when the response reported none), so the
+// caller can add it to session spend (specs/model-metadata). Usage is
+// returned whenever the request completed, even if the summary is rejected.
+func CompactHistoryUsage(ctx context.Context, client *model.Client, history []model.Message, focus string, onText func(string)) (replacement []model.Message, summary string, usage model.RequestUsage, usageOK bool, err error) {
 	if client == nil {
-		return nil, "", errors.New("no model client configured")
+		return nil, "", usage, false, errors.New("no model client configured")
 	}
 	if len(history) == 0 {
-		return nil, "", errors.New("nothing to compact")
+		return nil, "", usage, false, errors.New("nothing to compact")
 	}
 	instruction := compactInstruction
 	if f := strings.TrimSpace(focus); f != "" {
@@ -36,17 +45,17 @@ func CompactHistory(ctx context.Context, client *model.Client, history []model.M
 	summarizeMsgs = append(summarizeMsgs, history...)
 	summarizeMsgs = append(summarizeMsgs, model.Message{Role: "user", Content: instruction})
 
-	assistant, err := client.Stream(ctx, summarizeMsgs, nil, onText, nil)
+	assistant, usage, usageOK, err := client.StreamUsage(ctx, summarizeMsgs, nil, onText, nil)
 	if err != nil {
-		return nil, "", err
+		return nil, "", usage, usageOK, err
 	}
-	summary := strings.TrimSpace(assistant.Content)
+	summary = strings.TrimSpace(assistant.Content)
 	if summary == "" {
-		return nil, "", errors.New("model returned an empty summary")
+		return nil, "", usage, usageOK, errors.New("model returned an empty summary")
 	}
-	replacement := []model.Message{{
+	replacement = []model.Message{{
 		Role:    "developer",
 		Content: compactPrefix + summary,
 	}}
-	return replacement, summary, nil
+	return replacement, summary, usage, usageOK, nil
 }

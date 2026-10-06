@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -86,7 +87,7 @@ func TestSetupFlowPicksProviderKeyAndModel(t *testing.T) {
 		t.Fatalf("setup did not start: mode=%q stage=%d", m.mode, m.setup.stage)
 	}
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	if !strings.Contains(m.View(), "Choose a model provider") || !strings.Contains(m.View(), "OpenRouter") {
+	if !strings.Contains(m.View(), "Choose a provider") || !strings.Contains(m.View(), "OpenRouter") {
 		t.Fatalf("provider list not shown: %q", m.View())
 	}
 	// Select the second provider (openrouter) so key entry is exercised.
@@ -175,10 +176,30 @@ func TestSetupCheckFailureShowsClassifiedErrorAndRetries(t *testing.T) {
 	if !strings.Contains(m.View(), "rejected the credentials") {
 		t.Fatalf("failure not surfaced: %q", m.View())
 	}
-	// Esc returns to key entry so the user can retry with a corrected key.
+	// The failure lands back on key entry with the key kept, so the user can
+	// fix it in place: typing clears the error and Enter re-checks.
+	if m.setup.stage != setupKey || string(m.setup.keyInput) != "sk-wrong" {
+		t.Fatalf("failure did not return to key entry with the key kept: stage=%d key=%q", m.setup.stage, string(m.setup.keyInput))
+	}
+	if strings.Contains(m.View(), "sk-wrong") {
+		t.Fatalf("API key rendered in clear text after a failed check: %q", m.View())
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if m.setup.err != "" {
+		t.Fatalf("typing did not clear the error: %q", m.setup.err)
+	}
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil || m.setup.stage != setupChecking {
+		t.Fatalf("enter did not re-check: stage=%d", m.setup.stage)
+	}
+	// Esc cancels the wait back to key entry, and Esc again picks another
+	// provider.
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if m.setup.stage != setupKey {
 		t.Fatalf("esc did not return to key stage: %d", m.setup.stage)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.setup.stage != setupProvider {
+		t.Fatalf("esc did not return to provider stage: %d", m.setup.stage)
 	}
 }
 
@@ -971,14 +992,14 @@ func TestSetupOAuthProviderOpensBrowserLoginStage(t *testing.T) {
 	m := NewUI("/sample", nil, nil, "", providers.Connection{Setup: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	setupCursorOnChatgpt(t, m)
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, firstCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.setup.stage != setupLogin {
 		t.Fatalf("OAuth provider did not enter the login stage: stage=%d", m.setup.stage)
 	}
 	view := m.View()
-	if !strings.Contains(view, "Likha opens your browser to sign in with your ChatGPT account.") ||
-		!strings.Contains(view, "Press Enter to open the browser") ||
-		!strings.Contains(view, "Enter open browser  Esc back") {
+	if !strings.Contains(view, "Likha automatically opens your browser") ||
+		strings.Contains(view, "Press Enter to open your browser") ||
+		firstCmd == nil || !m.setup.checking {
 		t.Fatalf("login stage view incomplete: %q", view)
 	}
 	// Esc returns to the provider list, and re-entering reaches login again.
@@ -990,44 +1011,42 @@ func TestSetupOAuthProviderOpensBrowserLoginStage(t *testing.T) {
 	if m.setup.stage != setupLogin {
 		t.Fatalf("re-entered provider did not return to login stage: %d", m.setup.stage)
 	}
-	// Enter starts the browser flow: checking sets and the command is
-	// produced. The command itself is never run — BrowserLogin binds a real
-	// listener and waits for the callback.
+	// No second launch action: another Enter while waiting is inert.
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil || !m.setup.checking || m.setup.stage != setupLogin {
-		t.Fatalf("enter did not start the browser login: cmd=%v checking=%t stage=%d", cmd, m.setup.checking, m.setup.stage)
+	if cmd != nil || !m.setup.checking || m.setup.stage != setupLogin {
+		t.Fatalf("second Enter changed browser login: cmd=%v checking=%t stage=%d", cmd, m.setup.checking, m.setup.stage)
 	}
-	if !strings.Contains(m.View(), "Waiting for browser sign-in…") {
+	if !strings.Contains(m.View(), "Opening your browser…") {
 		t.Fatalf("sign-in wait status not rendered: %q", m.View())
 	}
+	m.cancelOAuthLogin()
 }
 
 func TestSetupOAuthLoginMsgSuccessMovesToModelStage(t *testing.T) {
 	m := NewUI("/sample", nil, nil, "", providers.Connection{Setup: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	setupCursorOnChatgpt(t, m)
-	m.setup.stage = setupLogin
-	m.setup.checking = true
-	creds := model.OAuthCredentials{Refresh: "refresh-token", Access: "access-token", Expires: 1234567890}
-	m.Update(oauthLoginMsg{creds: creds})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	creds := oauthUICredentials(t, m.stateDir, "issued-model-stage")
+	client, err := oauthCandidate(model.Providers[m.setup.cursor], creds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Update(oauthLoginMsg{attempt: m.oauth.id, creds: creds, client: client, details: []model.ModelDetails{{ID: "real-one"}, {ID: "real-two"}}})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // acknowledge shared plan limits
 	if m.setup.stage != setupModel || m.setup.checking {
 		t.Fatalf("success did not reach the model stage: stage=%d checking=%t", m.setup.stage, m.setup.checking)
 	}
-	if m.setup.creds != creds {
+	if !reflect.DeepEqual(m.setup.creds, creds) {
 		t.Fatalf("credentials not stored: %+v", m.setup.creds)
 	}
-	if len(m.setup.models) != len(model.ChatGPTModels) {
-		t.Fatalf("models = %v, want the curated ChatGPT list %v", m.setup.models, model.ChatGPTModels)
-	}
-	for i, id := range model.ChatGPTModels {
-		if m.setup.models[i] != id {
-			t.Fatalf("models = %v, want %v", m.setup.models, model.ChatGPTModels)
-		}
+	if !reflect.DeepEqual(m.setup.models, []string{"real-one", "real-two"}) {
+		t.Fatalf("models = %v, want account discovery", m.setup.models)
 	}
 	if m.setup.modelCursor != 0 {
 		t.Fatalf("model cursor = %d, want 0", m.setup.modelCursor)
 	}
-	if !strings.Contains(m.View(), "> "+model.ChatGPTModels[0]) {
+	if !strings.Contains(m.View(), "> real-one") {
 		t.Fatalf("model list not rendered: %q", m.View())
 	}
 }
@@ -1036,9 +1055,8 @@ func TestSetupOAuthLoginMsgErrorStaysAndRetries(t *testing.T) {
 	m := NewUI("/sample", nil, nil, "", providers.Connection{Setup: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	setupCursorOnChatgpt(t, m)
-	m.setup.stage = setupLogin
-	m.setup.checking = true
-	m.Update(oauthLoginMsg{err: errors.New("callback timed out")})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(oauthLoginMsg{attempt: m.oauth.id, err: errors.New("callback timed out")})
 	if m.setup.stage != setupLogin || m.setup.checking {
 		t.Fatalf("error did not stay on the login stage: stage=%d checking=%t", m.setup.stage, m.setup.checking)
 	}
@@ -1056,16 +1074,16 @@ func TestSetupOAuthLoginMsgIgnoredAfterEsc(t *testing.T) {
 	m := NewUI("/sample", nil, nil, "", providers.Connection{Setup: true}, t.TempDir(), nil, session.Snapshot{})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	setupCursorOnChatgpt(t, m)
-	m.setup.stage = setupLogin
-	m.setup.checking = true
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	attempt := m.oauth.id
 	// The user gave up waiting and went back to the provider list; a late
 	// login result must not advance setup from there.
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m.Update(oauthLoginMsg{creds: model.OAuthCredentials{Refresh: "late", Access: "late"}})
+	m.Update(oauthLoginMsg{attempt: attempt, creds: model.OAuthCredentials{Refresh: "late", Access: "late"}})
 	if m.setup.stage != setupProvider {
 		t.Fatalf("late login result advanced setup: stage=%d", m.setup.stage)
 	}
-	if m.setup.creds != (model.OAuthCredentials{}) || len(m.setup.models) != 0 {
+	if !reflect.DeepEqual(m.setup.creds, model.OAuthCredentials{}) || len(m.setup.models) != 0 {
 		t.Fatalf("late login result mutated state: creds=%+v models=%v", m.setup.creds, m.setup.models)
 	}
 }
@@ -1076,8 +1094,11 @@ func TestSetupFinishStoresOAuthCredentialForChatGPT(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.setup.cursor = setupCursorOnChatgpt(t, m)
 	m.setup.stage = setupModel
-	m.setup.models = model.ChatGPTModels
-	m.setup.creds = model.OAuthCredentials{Refresh: "refresh-token", Access: "access-token", Expires: 1234567890}
+	m.setup.models = []string{"discovered-model"}
+	m.setup.creds = oauthUICredentials(t, stateDir, "issued-finish-setup")
+	if err := providers.StoreOAuth(stateDir, "chatgpt", m.setup.creds); err != nil {
+		t.Fatal(err)
+	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.setup.stage != setupTheme {
 		t.Fatalf("OAuth finish did not reach the theme stage: stage=%d err=%q", m.setup.stage, m.setup.err)
@@ -1096,15 +1117,14 @@ func TestSetupFinishStoresOAuthCredentialForChatGPT(t *testing.T) {
 		t.Fatalf("OAuth provider stored an API key: %q %v", key, err)
 	}
 	cfg, err := providers.LoadStoredConfig(stateDir)
-	if err != nil || cfg.Provider != "chatgpt" || cfg.Model != model.ChatGPTModels[0] {
+	if err != nil || cfg.Provider != "chatgpt" || cfg.Model != "discovered-model" {
 		t.Fatalf("stored config: %+v %v", cfg, err)
 	}
 }
 
-// TestUsageFooterShowsCodexRateLimits drives one real codex stream against an
-// httptest server and asserts the main-view footer surfaces the client's
-// rate-limit summary.
-func TestUsageFooterShowsCodexRateLimits(t *testing.T) {
+// A public OAuth Responses stream can surface a provider-reported usage hint.
+// Its URL remains the official resource; the transport routes fixture bytes.
+func TestUsageFooterShowsOAuthRateLimits(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Codex backend (/responses) and OpenAI-compatible clients
 		// (/chat/completions) both carry the rate-limit headers the usage
@@ -1113,24 +1133,20 @@ func TestUsageFooterShowsCodexRateLimits(t *testing.T) {
 		w.Header().Set("x-codex-primary-window-minutes", "300")
 		w.Header().Set("Content-Type", "text/event-stream")
 		if strings.HasSuffix(r.URL.Path, "/responses") {
-			fmt.Fprint(w, "event: response.output_text.delta\ndata: {\"delta\":\"hi\"}\n\nevent: response.completed\ndata: {\"response\":{\"output\":[]}}\n\n")
+			fmt.Fprint(w, "event: response.output_text.delta\ndata: {\"delta\":\"hi\"}\n\nevent: response.completed\ndata: {\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n")
 			return
 		}
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"answered\"}}]}\n\ndata: [DONE]\n\n")
 	}))
 	defer server.Close()
-	creds := model.OAuthCredentials{
-		Refresh:   "refresh-token",
-		Access:    "access-token",
-		Expires:   time.Now().Add(time.Hour).UnixMilli(),
-		AccountID: "acct",
-	}
-	client, err := model.NewOAuth(server.URL+"/v1", "gpt-5.5", server.URL, "client_test", creds)
+	routeOAuthUIToServer(t, server)
+	creds := oauthUICredentials(t, t.TempDir(), "issued-usage-footer")
+	client, err := model.NewOAuth(model.ChatGPTResource, "gpt-5.5", creds.Issuer, creds.ClientID, creds)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := client.Stream(context.Background(), []model.Message{{Role: "user", Content: "hi"}}, nil, nil, nil); err != nil {
-		t.Fatalf("codex stream: %v", err)
+		t.Fatalf("public OAuth Responses stream: %v", err)
 	}
 	usage := client.Usage()
 	if usage == "" {

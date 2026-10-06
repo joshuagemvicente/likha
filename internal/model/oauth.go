@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,38 +16,50 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
-// oauthScope is the OAuth scope requested at login: identity claims plus a
-// refresh token.
-const oauthScope = "openid profile email offline_access"
+const (
+	oauthScope         = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
+	oauthAuthorizeURL  = ChatGPTIssuer + "/api/accounts/authorize"
+	oauthTokenURL      = ChatGPTIssuer + "/api/accounts/oauth/token"
+	oauthLoginTimeout  = 5 * time.Minute
+	oauthHTTPTimeout   = 30 * time.Second
+	oauthTokenLifetime = time.Hour
+)
 
-// oauthTokenLifetime is the validity assumed when a token response carries
-// no expires_in.
-const oauthTokenLifetime = 3600 * time.Second
+// ErrPlanScopeRequired means identity was verified, but inference was not
+// authorized. BrowserLogin returns the verified registration alongside this
+// error, so it can be retained without making it an active inference account.
+var ErrPlanScopeRequired = errors.New("ChatGPT plan usage is not enabled; enable ChatGPT plan usage in account settings or configure an API-key provider")
 
-// oauthHTTPTimeout bounds each token request when the caller passes no
-// http.Client.
-const oauthHTTPTimeout = 30 * time.Second
-
-// TokenSet is one OAuth token response plus the parsed account identity.
+// TokenSet contains token-endpoint data and the verified OIDC registration.
+// AccountID is retained for legacy callers only; SIWC never derives identity
+// from an access token or an organization claim.
 type TokenSet struct {
-	IDToken      string
-	AccessToken  string
-	RefreshToken string
-	// Expires is now + expires_in, defaulting to one hour when the response
-	// carries no expires_in.
-	Expires   time.Time
-	AccountID string
+	IDToken       string
+	AccessToken   string
+	RefreshToken  string
+	Expires       time.Time
+	AccountID     string
+	Issuer        string
+	Subject       string
+	Email         string
+	ClientID      string
+	HostID        string
+	TokenType     string
+	Scopes        []string
+	scopeReturned bool
 }
 
-// Credentials converts a TokenSet into storable OAuth credentials.
+// Credentials converts a validated TokenSet to a private storage record.
 func (t TokenSet) Credentials() OAuthCredentials {
 	c := OAuthCredentials{
-		Refresh:   t.RefreshToken,
-		Access:    t.AccessToken,
-		AccountID: t.AccountID,
+		Refresh: t.RefreshToken, Access: t.AccessToken, AccountID: t.AccountID,
+		Issuer: t.Issuer, Subject: t.Subject, Email: t.Email, ClientID: t.ClientID,
+		HostID: t.HostID, IDToken: t.IDToken, TokenType: t.TokenType,
+		Scopes: append([]string(nil), t.Scopes...),
 	}
 	if !t.Expires.IsZero() {
 		c.Expires = t.Expires.UnixMilli()
@@ -56,234 +67,249 @@ func (t TokenSet) Credentials() OAuthCredentials {
 	return c
 }
 
-// tokenResponse is the wire shape of an OAuth token endpoint reply.
-type tokenResponse struct {
-	IDToken      string `json:"id_token"`
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int64  `json:"expires_in"`
+// BrowserLoginOptions describes one pending attempt, never an active account.
+// Zero Credentials registers a new account. A retained registration reuses its
+// issued ID and host ID; HostID may be omitted only for a returning account.
+// HTTPClient is a transport seam, not an issuer override. Public origins stay
+// fixed even when a test RoundTripper routes requests to a local fixture.
+type BrowserLoginOptions struct {
+	HostID         string
+	Credentials    OAuthCredentials
+	Port           int
+	OpenBrowser    func(string) error
+	OnBrowserError func(string, error)
+	HTTPClient     *http.Client
 }
 
-// oauthError is the wire shape of a token endpoint error reply.
-type oauthError struct {
-	Error string `json:"error"`
-}
-
-// snippet shortens a raw response body for error messages.
-func snippet(s string, limit int) string {
-	if len(s) > limit {
-		return s[:limit] + "…"
-	}
-	return s
-}
-
-// tokenFromResponse decodes a successful token endpoint body into a TokenSet,
-// applying the expires_in (defaulting to one hour) and resolving the account
-// identity from the returned tokens.
-func tokenFromResponse(body []byte) (TokenSet, error) {
-	var resp tokenResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return TokenSet{}, fmt.Errorf("decode token response: %w", err)
-	}
-	lifetime := oauthTokenLifetime
-	if resp.ExpiresIn > 0 {
-		lifetime = time.Duration(resp.ExpiresIn) * time.Second
-	}
-	ts := TokenSet{
-		IDToken:      resp.IDToken,
-		AccessToken:  resp.AccessToken,
-		RefreshToken: resp.RefreshToken,
-		Expires:      time.Now().Add(lifetime),
-	}
-	ts.AccountID = AccountIDFromToken(resp.IDToken, resp.AccessToken)
-	return ts, nil
-}
-
-// parseTokenEndpoint consumes a token endpoint response: non-2xx fails with
-// the JSON error field when present, otherwise the body becomes a TokenSet.
-func parseTokenEndpoint(resp *http.Response) (TokenSet, error) {
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return TokenSet{}, fmt.Errorf("read token response: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		var e oauthError
-		_ = json.Unmarshal(body, &e)
-		if e.Error != "" {
-			return TokenSet{}, fmt.Errorf("oauth token endpoint returned %d: %s", resp.StatusCode, e.Error)
-		}
-		return TokenSet{}, fmt.Errorf("oauth token endpoint returned %d: %s", resp.StatusCode, snippet(strings.TrimSpace(string(body)), 200))
-	}
-	return tokenFromResponse(body)
-}
-
-// NewPKCE returns a fresh S256 verifier/challenge pair. The verifier is 43
-// characters from the RFC 7636 unreserved set; challenge = base64url(SHA256(verifier)).
+// NewPKCE returns a fresh RFC 7636 S256 verifier/challenge pair.
 func NewPKCE() (verifier, challenge string, err error) {
-	// 64-symbol alphabet so a masked random byte selects a symbol without
-	// modulo bias. 43 characters is the minimum S256 entropy per RFC 7636.
-	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
-	raw := make([]byte, 43)
-	if _, err := rand.Read(raw); err != nil {
-		return "", "", fmt.Errorf("pkce entropy: %w", err)
+	verifier, err = RandomState()
+	if err != nil {
+		return "", "", err
 	}
-	verifierBytes := make([]byte, len(raw))
-	for i, r := range raw {
-		verifierBytes[i] = alphabet[r&63]
-	}
-	verifier = string(verifierBytes)
 	sum := sha256.Sum256([]byte(verifier))
-	challenge = base64.RawURLEncoding.EncodeToString(sum[:])
-	return verifier, challenge, nil
+	return verifier, base64.RawURLEncoding.EncodeToString(sum[:]), nil
 }
 
-// AuthorizeURL builds the OAuth authorization URL: GET {issuer}/oauth/authorize
-// with the standard ChatGPT/Codex PKCE parameters and the given state.
-func AuthorizeURL(issuer, clientID, redirectURI, verifier, state string) string {
-	sum := sha256.Sum256([]byte(verifier))
-	q := url.Values{
-		"response_type":              {"code"},
-		"client_id":                  {clientID},
-		"redirect_uri":               {redirectURI},
-		"scope":                      {oauthScope},
-		"code_challenge":             {base64.RawURLEncoding.EncodeToString(sum[:])},
-		"code_challenge_method":      {"S256"},
-		"id_token_add_organizations": {"true"},
-		"codex_cli_simplified_flow":  {"true"},
-		"originator":                 {ChatGPTOriginator},
-		"state":                      {state},
-	}
-	return strings.TrimSuffix(issuer, "/") + "/oauth/authorize?" + q.Encode()
-}
-
-// RandomState returns a base64url-encoded 32-byte random state token.
+// RandomState returns a base64url-encoded, 256-bit random value. Login state,
+// nonce, and PKCE use independent calls.
 func RandomState() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("state entropy: %w", err)
+		return "", errors.New("could not generate sign-in entropy")
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// tokenURL resolves the standard token endpoint relative to the issuer.
-func tokenURL(issuer string) string { return strings.TrimSuffix(issuer, "/") + "/oauth/token" }
-
-// postForm issues the form-encoded token request shared by both grants.
-func postForm(ctx context.Context, httpClient *http.Client, tokenEndpoint string, form url.Values) (TokenSet, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint,
-		strings.NewReader(form.Encode()))
-	if err != nil {
-		return TokenSet{}, fmt.Errorf("build token request: %w", err)
+func validIssuedClientID(id string) bool {
+	if id == "" || id == ChatGPTClientID || id == "app_EMoamEEZ73f0CkXaXp7hrann" || len(id) > 256 {
+		return false
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return TokenSet{}, fmt.Errorf("token request: %w", err)
+	for _, c := range id {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.') {
+			return false
+		}
 	}
-	return parseTokenEndpoint(resp)
+	return true
 }
 
-// ExchangeCode exchanges an authorization code for tokens:
-// POST {issuer}/oauth/token with grant_type=authorization_code.
-func ExchangeCode(ctx context.Context, httpClient *http.Client, issuer, clientID, code, verifier, redirectURI string) (TokenSet, error) {
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: oauthHTTPTimeout}
+func loginRegistration(options BrowserLoginOptions) (clientID, hostID string, returning bool, err error) {
+	old := options.Credentials
+	returning = old.Registered()
+	if !returning && (old.ClientID != "" || old.Subject != "" || old.Issuer != "" || old.HostID != "" ||
+		old.Access != "" || old.Refresh != "" || old.IDToken != "" || old.AccountID != "" || old.Email != "" ||
+		old.TokenType != "" || old.Expires != 0 || len(old.Scopes) != 0) {
+		return "", "", false, errors.New("legacy or incomplete ChatGPT credentials require a fresh sign-in")
 	}
-	return postForm(ctx, httpClient, tokenURL(issuer), url.Values{
-		"grant_type":    {"authorization_code"},
-		"code":          {code},
-		"redirect_uri":  {redirectURI},
-		"client_id":     {clientID},
-		"code_verifier": {verifier},
+	hostID = options.HostID
+	if returning && hostID == "" {
+		hostID = old.HostID
+	}
+	if strings.TrimSpace(hostID) == "" || hostID != strings.TrimSpace(hostID) || len(hostID) > 1024 || strings.ContainsAny(hostID, "\r\n\x00") {
+		return "", "", false, errors.New("a stable host identity is required before ChatGPT sign-in")
+	}
+	clientID = ChatGPTClientID
+	if returning {
+		if old.Issuer != ChatGPTIssuer || !validIssuedClientID(old.ClientID) || old.HostID != hostID {
+			return "", "", false, errors.New("ChatGPT registration does not match this issuer and host")
+		}
+		clientID = old.ClientID
+	}
+	return clientID, hostID, returning, nil
+}
+
+func authorizationURL(options BrowserLoginOptions, clientID, hostID, redirectURI, challenge, state, nonce string, returning bool) string {
+	q := url.Values{
+		"response_type": {"code"}, "client_id": {clientID}, "redirect_uri": {redirectURI},
+		"scope": {oauthScope}, "resource": {ChatGPTResource}, "ext_agent_host_id": {hostID},
+		"state": {state}, "nonce": {nonce}, "code_challenge": {challenge}, "code_challenge_method": {"S256"},
+	}
+	if returning {
+		if options.Credentials.IDToken != "" {
+			q.Set("id_token_hint", options.Credentials.IDToken)
+		}
+		if options.Credentials.Email != "" {
+			q.Set("login_hint", options.Credentials.Email)
+		}
+	} else {
+		q.Set("agent_name_hint", "Likha")
+	}
+	return oauthAuthorizeURL + "?" + q.Encode()
+}
+
+func manualAuthorizationURL(authorize string) string {
+	u, _ := url.Parse(authorize) // constructed locally, not supplied by the caller
+	q := u.Query()
+	q.Del("id_token_hint")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func openBrowserCommand() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "open"
+	case "windows":
+		return "rundll32"
+	default:
+		return "xdg-open"
+	}
+}
+
+func openSystemBrowser(ctx context.Context, u string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	args := []string{u}
+	if runtime.GOOS == "windows" {
+		args = []string{"url.dll,FileProtocolHandler", u}
+	}
+	command := exec.CommandContext(ctx, openBrowserCommand(), args...)
+	command.WaitDelay = time.Second
+	return command.Run()
+}
+
+type oauthCallback struct {
+	code     string
+	clientID string
+	err      error
+}
+
+func callbackHandler(state, clientID, callbackHost string, returning bool, results chan<- oauthCallback) http.Handler {
+	var consumed atomic.Bool
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		if r.URL.EscapedPath() != "/auth/callback" || r.Host != callbackHost {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "This callback requires GET.", http.StatusMethodNotAllowed)
+			return
+		}
+		q, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			http.Error(w, "Invalid callback parameters.", http.StatusBadRequest)
+			return
+		}
+		for _, values := range q {
+			if len(values) != 1 {
+				http.Error(w, "Duplicate callback parameters.", http.StatusBadRequest)
+				return
+			}
+		}
+		// Unsolicited callbacks, including errors, must not abort the real attempt.
+		if subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(state)) != 1 {
+			http.Error(w, "Invalid sign-in state.", http.StatusBadRequest)
+			return
+		}
+		result := oauthCallback{code: q.Get("code"), clientID: clientID}
+		if oauthErr := q.Get("error"); oauthErr != "" {
+			if oauthErr == "access_denied" {
+				result.err = fmt.Errorf("%w (access_denied)", ErrPlanScopeRequired)
+			} else {
+				result.err = &OAuthError{Operation: "authorization", Code: safeOAuthCode(oauthErr)}
+			}
+		} else if result.code == "" {
+			result.err = &OAuthError{Operation: "authorization", Code: "invalid_response"}
+		} else if returning {
+			if returned, present := q["client_id"]; present && returned[0] != clientID {
+				result.err = &OAuthError{Operation: "authorization", Code: "client_mismatch"}
+			}
+		} else {
+			result.clientID = q.Get("client_id")
+			if !validIssuedClientID(result.clientID) {
+				result.err = &OAuthError{Operation: "authorization", Code: "incomplete_registration"}
+			}
+		}
+		if !consumed.CompareAndSwap(false, true) {
+			http.Error(w, "This sign-in callback was already received.", http.StatusConflict)
+			return
+		}
+		if result.err != nil {
+			http.Error(w, "Sign-in was not completed. Return to Likha.", http.StatusBadRequest)
+		} else {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = io.WriteString(w, "Return to Likha; verifying sign-in.")
+		}
+		// Flush the neutral response before the main flow can close the server.
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		// Buffered, one-shot, non-blocking delivery also handles cancellation
+		// racing a delayed callback without stranding an HTTP handler.
+		select {
+		case results <- result:
+		default:
+		}
 	})
 }
 
-// RefreshTokens rotates a token set: POST {issuer}/oauth/token with
-// grant_type=refresh_token.
-func RefreshTokens(ctx context.Context, httpClient *http.Client, issuer, clientID, refreshToken string) (TokenSet, error) {
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: oauthHTTPTimeout}
+// BrowserLogin performs official SIWC registration/reauthorization. The
+// listener is loopback-only, bounded, single-use, and closed on every return.
+// No credentials may be activated until the ID token and grant are validated.
+func BrowserLogin(ctx context.Context, options BrowserLoginOptions) (TokenSet, error) {
+	ctx, cancel := context.WithTimeout(ctx, oauthLoginTimeout)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return TokenSet{}, err
 	}
-	return postForm(ctx, httpClient, tokenURL(issuer), url.Values{
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {refreshToken},
-		"client_id":     {clientID},
-	})
-}
-
-// chatgptClaimLocations is the precedence order of claim locations holding
-// the ChatGPT account id inside one token payload.
-type chatgptClaims struct {
-	ChatGPTAccountID string `json:"chatgpt_account_id"`
-	Auth             *struct {
-		ChatGPTAccountID string `json:"chatgpt_account_id"`
-	} `json:"https://api.openai.com/auth"`
-	Organizations []struct {
-		ID string `json:"id"`
-	} `json:"organizations"`
-}
-
-// AccountIDFromToken extracts the ChatGPT account id from a JWT (id_token
-// preferred, then access_token): claims.chatgpt_account_id, else the
-// https://api.openai.com/auth claim, else organizations[0].id. Malformed
-// JWTs yield "" without panicking.
-func AccountIDFromToken(idToken, accessToken string) string {
-	for _, tok := range []string{idToken, accessToken} {
-		if tok == "" {
+	clientID, hostID, returning, err := loginRegistration(options)
+	if err != nil {
+		return TokenSet{}, err
+	}
+	registration := pendingOAuthRegistration{clientID: clientID, hostID: hostID, returning: returning}
+	for attempt := 0; attempt < 2; attempt++ {
+		tokens, err := browserLoginAttempt(ctx, options, &registration)
+		var failure *OAuthError
+		if attempt == 0 && errors.As(err, &failure) && failure.Operation == "code exchange" && failure.Code == "invalid_grant" {
+			// The code is unusable, not the newly issued registration. Start one
+			// fresh authorization using that ID, never dynamic_agent_client again.
+			// The previous listener is closed before a new attempt is started.
+			registration.returning = true
 			continue
 		}
-		if id := accountIDFromToken(tok); id != "" {
-			return id
-		}
+		return tokens, err
 	}
-	return ""
+	return TokenSet{}, &OAuthError{Operation: "code exchange", Code: "invalid_grant"}
 }
 
-// accountIDFromToken decodes one token's middle segment and applies the three
-// claim locations in precedence order.
-func accountIDFromToken(token string) string {
-	parts := strings.Split(token, ".")
-	if len(parts) < 3 {
-		return ""
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return ""
-	}
-	var claims chatgptClaims
-	if err := json.Unmarshal(raw, &claims); err != nil {
-		return ""
-	}
-	if claims.ChatGPTAccountID != "" {
-		return claims.ChatGPTAccountID
-	}
-	if claims.Auth != nil && claims.Auth.ChatGPTAccountID != "" {
-		return claims.Auth.ChatGPTAccountID
-	}
-	if len(claims.Organizations) > 0 {
-		return claims.Organizations[0].ID
-	}
-	return ""
+type pendingOAuthRegistration struct {
+	clientID  string
+	hostID    string
+	returning bool
 }
 
-// openBrowserCommand is the OS command that opens a URL in a browser.
-func openBrowserCommand() string {
-	if runtime.GOOS == "darwin" {
-		return "open"
+func browserLoginAttempt(ctx context.Context, options BrowserLoginOptions, registration *pendingOAuthRegistration) (TokenSet, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return TokenSet{}, err
 	}
-	return "xdg-open"
-}
-
-// BrowserLogin runs the loopback browser authorization flow: it binds
-// 127.0.0.1:{port}, opens the authorize URL, accepts the callback, exchanges
-// the code, and always shuts the listener down. The caller's context bounds
-// the whole wait.
-func BrowserLogin(ctx context.Context, issuer, clientID string, port int, openBrowser func(string) error, httpClient *http.Client) (TokenSet, error) {
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: oauthHTTPTimeout}
-	}
-	verifier, _, err := NewPKCE()
+	clientID, hostID, returning := registration.clientID, registration.hostID, registration.returning
+	verifier, challenge, err := NewPKCE()
 	if err != nil {
 		return TokenSet{}, err
 	}
@@ -291,195 +317,89 @@ func BrowserLogin(ctx context.Context, issuer, clientID string, port int, openBr
 	if err != nil {
 		return TokenSet{}, err
 	}
-
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	nonce, err := RandomState()
 	if err != nil {
-		return TokenSet{}, fmt.Errorf("listen on %d: %w", port, err)
+		return TokenSet{}, err
+	}
+	ln, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(options.Port)))
+	if err != nil {
+		return TokenSet{}, fmt.Errorf("could not open ChatGPT loopback callback on port %d", options.Port)
 	}
 	defer ln.Close()
-
-	redirectURI := fmt.Sprintf("http://localhost:%d/auth/callback", port)
-	codeCh := make(chan string, 1)
-	errCh := make(chan error, 1)
-
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/auth/callback":
-			q := r.URL.Query()
-			if e := q.Get("error"); e != "" {
-				http.Error(w, "authorization failed: "+e, http.StatusBadRequest)
-				errCh <- errors.New(e)
-				return
-			}
-			// Constant-time state check so the loopback endpoint cannot act
-			// as a timing oracle for the one-time state value.
-			if subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(state)) != 1 {
-				http.Error(w, "state mismatch", http.StatusBadRequest)
-				errCh <- errors.New("state mismatch in callback")
-				return
-			}
-			code := q.Get("code")
-			if code == "" {
-				http.Error(w, "missing authorization code", http.StatusBadRequest)
-				errCh <- errors.New("callback carried no code")
-				return
-			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = io.WriteString(w, "<html><body><p>Login complete. You can close this window.</p></body></html>")
-			codeCh <- code
-		case "/cancel":
-			http.Error(w, "login cancelled", http.StatusBadRequest)
-			errCh <- errors.New("login cancelled")
-		default:
-			http.NotFound(w, r)
-		}
-	})}
-	go func() { _ = srv.Serve(ln) }()
+	callbackHost := ln.Addr().String()
+	redirectURI := "http://" + callbackHost + "/auth/callback"
+	results := make(chan oauthCallback, 1)
+	srv := &http.Server{
+		Handler:           callbackHandler(state, clientID, callbackHost, returning, results),
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
+		WriteTimeout: 10 * time.Second, IdleTimeout: 10 * time.Second, MaxHeaderBytes: 8 << 10,
+		BaseContext: func(net.Listener) context.Context { return ctx },
+	}
 	defer srv.Close()
-
-	if openBrowser == nil {
-		openBrowser = func(u string) error { return exec.Command(openBrowserCommand(), u).Start() }
-	}
-	// A failure to open the browser never blocks the flow: the server is
-	// already listening and the user can paste the URL manually.
-	_ = openBrowser(AuthorizeURL(issuer, clientID, redirectURI, verifier, state))
-
-	var code string
-	select {
-	case code = <-codeCh:
-	case err = <-errCh:
-		return TokenSet{}, err
-	case <-ctx.Done():
-		return TokenSet{}, ctx.Err()
-	}
-	return ExchangeCode(ctx, httpClient, issuer, clientID, code, verifier, redirectURI)
-}
-
-// deviceUserCodeRequest is the JSON body of the usercode request.
-type deviceUserCodeRequest struct {
-	ClientID string `json:"client_id"`
-}
-
-// deviceUserCodeResponse is the reply of the usercode endpoint. The real
-// issuer encodes interval as a JSON string ("5"), other servers may use a
-// number, so it decodes tolerantly.
-type deviceUserCodeResponse struct {
-	DeviceAuthID string          `json:"device_auth_id"`
-	UserCode     string          `json:"user_code"`
-	Interval     json.RawMessage `json:"interval"` // seconds; number or numeric string
-}
-
-// intervalSeconds decodes the usercode interval, accepting a JSON number or
-// a numeric string; it returns 0 when absent or unusable.
-func intervalSeconds(raw json.RawMessage) int64 {
-	trimmed := strings.TrimSpace(string(raw))
-	trimmed = strings.Trim(trimmed, `"`)
-	n, err := strconv.ParseInt(trimmed, 10, 64)
-	if err != nil || n < 0 {
-		return 0
-	}
-	return n
-}
-
-// deviceAuthGrant is a successful deviceauth token poll.
-type deviceAuthGrant struct {
-	AuthorizationCode string `json:"authorization_code"`
-	CodeVerifier      string `json:"code_verifier"`
-}
-
-// DeviceLogin runs the headless device flow: request a user code, display it,
-// poll until the authorization code arrives, then exchange it.
-func DeviceLogin(ctx context.Context, issuer, clientID, userAgent string, showCode func(userCode, verifyURL string) error, httpClient *http.Client) (TokenSet, error) {
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: oauthHTTPTimeout}
-	}
-	base := strings.TrimSuffix(issuer, "/")
-
-	// 1. Obtain the device code.
-	body, err := json.Marshal(deviceUserCodeRequest{ClientID: clientID})
-	if err != nil {
-		return TokenSet{}, fmt.Errorf("encode usercode request: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		base+"/api/accounts/deviceauth/usercode", strings.NewReader(string(body)))
-	if err != nil {
-		return TokenSet{}, fmt.Errorf("build usercode request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", userAgent)
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return TokenSet{}, fmt.Errorf("usercode request: %w", err)
-	}
-	payload, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	resp.Body.Close()
-	if readErr != nil {
-		return TokenSet{}, fmt.Errorf("read usercode response: %w", readErr)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return TokenSet{}, fmt.Errorf("usercode endpoint returned %d: %s", resp.StatusCode, snippet(strings.TrimSpace(string(payload)), 200))
-	}
-	var uc deviceUserCodeResponse
-	if err := json.Unmarshal(payload, &uc); err != nil {
-		return TokenSet{}, fmt.Errorf("decode usercode response: %w", err)
-	}
-
-	// 2. Show the code; a display error aborts the flow.
-	if err := showCode(uc.UserCode, base+ChatGPTDevicePath); err != nil {
-		return TokenSet{}, fmt.Errorf("show device code: %w", err)
-	}
-
-	interval := time.Duration(intervalSeconds(uc.Interval)) * time.Second
-	if interval < time.Second {
-		interval = time.Second
-	}
-
-	// 3. Poll until the authorization code is granted, honoring ctx between
-	// polls and retrying only on 403/404 ("not finished yet").
-	pollBody, err := json.Marshal(map[string]string{
-		"device_auth_id": uc.DeviceAuthID,
-		"user_code":      uc.UserCode,
-	})
-	if err != nil {
-		return TokenSet{}, fmt.Errorf("encode device token request: %w", err)
-	}
-	for {
-		pollReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			base+"/api/accounts/deviceauth/token", strings.NewReader(string(pollBody)))
-		if err != nil {
-			return TokenSet{}, fmt.Errorf("build device token request: %w", err)
-		}
-		pollReq.Header.Set("Content-Type", "application/json")
-		pollReq.Header.Set("User-Agent", userAgent)
-		pollResp, err := httpClient.Do(pollReq)
-		if err != nil {
-			return TokenSet{}, fmt.Errorf("device token poll: %w", err)
-		}
-		pollPayload, readErr := io.ReadAll(io.LimitReader(pollResp.Body, 1<<20))
-		pollResp.Body.Close()
-		if readErr != nil {
-			return TokenSet{}, fmt.Errorf("read device token response: %w", readErr)
-		}
-		switch {
-		case pollResp.StatusCode == http.StatusOK:
-			// 4. Exchange the authorization code with the server-supplied
-			// verifier.
-			var grant deviceAuthGrant
-			if err := json.Unmarshal(pollPayload, &grant); err != nil {
-				return TokenSet{}, fmt.Errorf("decode device token response: %w", err)
-			}
-			return ExchangeCode(ctx, httpClient, issuer, clientID, grant.AuthorizationCode,
-				grant.CodeVerifier, base+"/deviceauth/callback")
-		case pollResp.StatusCode == http.StatusForbidden || pollResp.StatusCode == http.StatusNotFound:
-			// The user has not completed the step yet; keep polling.
+	serveErr := make(chan error, 1)
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			select {
-			case <-ctx.Done():
-				return TokenSet{}, ctx.Err()
-			case <-time.After(interval + 3*time.Second):
+			case serveErr <- errors.New("ChatGPT loopback callback stopped unexpectedly"):
+			default:
 			}
-		default:
-			return TokenSet{}, fmt.Errorf("device token endpoint returned %d: %s",
-				pollResp.StatusCode, snippet(strings.TrimSpace(string(pollPayload)), 200))
+		}
+	}()
+
+	httpClient := oauthHTTPClient(ctx, options.HTTPClient)
+	provider, err := discoverOAuthProvider(ctx, httpClient)
+	if err != nil {
+		return TokenSet{}, err
+	}
+	authorize := authorizationURL(options, clientID, hostID, redirectURI, challenge, state, nonce, returning)
+	browserResult := make(chan error, 1)
+	go func() {
+		if options.OpenBrowser != nil {
+			browserResult <- options.OpenBrowser(authorize)
+		} else {
+			browserResult <- openSystemBrowser(ctx, authorize)
+		}
+	}()
+	for {
+		select {
+		case <-ctx.Done():
+			return TokenSet{}, ctx.Err()
+		case err := <-serveErr:
+			return TokenSet{}, err
+		case err := <-browserResult:
+			browserResult = nil
+			if err != nil && options.OnBrowserError != nil {
+				// The opener's error may contain the URL (and its ID-token hint).
+				options.OnBrowserError(manualAuthorizationURL(authorize), errors.New("could not open the system browser"))
+			}
+		case result := <-results:
+			if result.err != nil {
+				return TokenSet{}, result.err
+			}
+			registration.clientID = result.clientID
+			tokens, err := requestOAuthTokens(ctx, httpClient, url.Values{
+				"grant_type": {"authorization_code"}, "client_id": {result.clientID}, "code": {result.code},
+				"code_verifier": {verifier}, "redirect_uri": {redirectURI}, "resource": {ChatGPTResource},
+			}, "code exchange")
+			if err != nil {
+				return TokenSet{}, err
+			}
+			identity, err := verifyOAuthIdentity(ctx, provider, tokens.IDToken, result.clientID, nonce, options.Credentials.Subject)
+			if err != nil {
+				return TokenSet{}, err
+			}
+			tokens.Issuer, tokens.Subject, tokens.Email = identity.issuer, identity.subject, identity.email
+			if !identity.emailPresent && returning {
+				tokens.Email = options.Credentials.Email
+			}
+			tokens.ClientID, tokens.HostID = result.clientID, hostID
+			if err := ctx.Err(); err != nil {
+				return TokenSet{}, err
+			}
+			if !tokens.Credentials().HasPlanScope() {
+				return tokens, ErrPlanScopeRequired
+			}
+			return tokens, nil
 		}
 	}
 }

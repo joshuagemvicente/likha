@@ -7,661 +7,665 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
+	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// shortClient mirrors http.DefaultClient but refuses to hang; everything is
-// loopback only.
-var shortClient = &http.Client{Timeout: 5 * time.Second}
-
-// builder builds an unsigned base64url JWT-shaped token whose payload carries
-// the given claims JSON, so AccountIDFromToken exercises the real decoder
-// without needing a real issuer signature.
-func builder(claims string) string {
-	return "sig." + base64.RawURLEncoding.EncodeToString([]byte(claims)) + ".sig"
-}
-
-// requireEqual fails t when got != want.
-func requireEqual(t *testing.T, what string, got, want any) {
-	t.Helper()
-	if got != want {
-		t.Fatalf("%s: got %#v want %#v", what, got, want)
-	}
-}
-
-// requireForm asserts an application/x-www-form-urlencoded request body and
-// returns its parsed fields.
-func requireForm(t *testing.T, r *http.Request) url.Values {
-	t.Helper()
-	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/x-www-form-urlencoded") {
-		t.Fatalf("content type: got %q", ct)
-	}
-	if err := r.ParseForm(); err != nil {
-		t.Fatalf("parse form: %v", err)
-	}
-	return r.PostForm
-}
-
-// fixtureClaims is the account id carried by the fixture id_token.
-const fixtureClaims = `{"chatgpt_account_id":"acct-fixture"}`
-
-// fixtureTokenBody is a canned OAuth token response whose id_token is a
-// signed-shape (unsigned base64) JWT carrying the fixture account id.
-var fixtureTokenBody = fmt.Sprintf(
-	`{"id_token":%q,"access_token":%q,"refresh_token":%q,"expires_in":7200}`,
-	builder(fixtureClaims), "tok.acc-tok.signed", "tok.rfr-tok.signed")
-
-// requireStandardTokenReply asserts the token endpoint received exactly the
-// wanted form fields, then replies with the fixture body.
-func requireStandardTokenReply(t *testing.T, want url.Values) http.HandlerFunc {
-	t.Helper()
-	return func(w http.ResponseWriter, r *http.Request) {
-		got := requireForm(t, r)
-		if len(got) != len(want) {
-			t.Fatalf("token form fields: got %v want %v", got, want)
-		}
-		for k, wantVals := range want {
-			if len(got[k]) != 1 || got[k][0] != wantVals[0] {
-				t.Fatalf("token form %s: got %v want %v", k, got[k], wantVals)
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(fixtureTokenBody))
-	}
-}
-
 func TestNewPKCE(t *testing.T) {
-	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
-	aVerifier, aChallenge, err := NewPKCE()
+	a, challenge, err := NewPKCE()
 	if err != nil {
-		t.Fatalf("NewPKCE: %v", err)
+		t.Fatal(err)
 	}
-	requireEqual(t, "verifier length", len(aVerifier), 43)
-	for _, c := range aVerifier {
-		if !strings.ContainsRune(alphabet, c) {
-			t.Fatalf("verifier rune %c outside the RFC 7636 unreserved set", c)
+	if len(a) != 43 || strings.ContainsAny(a, "+/=") {
+		t.Fatalf("invalid verifier: %q", a)
+	}
+	sum := sha256.Sum256([]byte(a))
+	if challenge != base64.RawURLEncoding.EncodeToString(sum[:]) {
+		t.Fatal("challenge does not match verifier")
+	}
+	b, _, err := NewPKCE()
+	if err != nil || a == b {
+		t.Fatal("PKCE verifier was not freshly generated")
+	}
+}
+
+func TestSIWCCredentialsAndProvider(t *testing.T) {
+	tokens := TokenSet{
+		AccessToken: "access", RefreshToken: "refresh", IDToken: "id", Expires: time.Now().Add(time.Hour),
+		Issuer: ChatGPTIssuer, Subject: "subject", Email: "user@example.test", ClientID: oauthFixtureClientID,
+		HostID: oauthFixtureHostID, TokenType: "Bearer", Scopes: strings.Fields(oauthScope),
+	}
+	credentials := tokens.Credentials()
+	if !credentials.Registered() || !credentials.HasPlanScope() || credentials.Expires != tokens.Expires.UnixMilli() ||
+		credentials.IDToken != tokens.IDToken || credentials.Subject != tokens.Subject || credentials.AccountID != "" {
+		t.Fatalf("missing verified credential data: %#v", credentials)
+	}
+	credentials.Scopes[0] = "changed"
+	if tokens.Scopes[0] == "changed" {
+		t.Fatal("Credentials aliases the token set's scopes")
+	}
+	credentials = tokens.Credentials()
+	encoded, err := json.Marshal(credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundtrip OAuthCredentials
+	if err := json.Unmarshal(encoded, &roundtrip); err != nil || !reflect.DeepEqual(credentials, roundtrip) {
+		t.Fatalf("credential roundtrip: %v", err)
+	}
+	var fields map[string]any
+	_ = json.Unmarshal(encoded, &fields)
+	for _, key := range []string{"refresh", "access", "expires", "issuer", "subject", "email", "client_id", "ext_agent_host_id", "id_token", "token_type", "scopes"} {
+		if _, ok := fields[key]; !ok {
+			t.Errorf("missing JSON field %q", key)
 		}
 	}
-	sum := sha256.Sum256([]byte(aVerifier))
-	requireEqual(t, "challenge", aChallenge, base64.RawURLEncoding.EncodeToString(sum[:]))
-
-	bVerifier, bChallenge, err := NewPKCE()
-	if err != nil {
-		t.Fatalf("NewPKCE second call: %v", err)
-	}
-	if aVerifier == bVerifier || aChallenge == bChallenge {
-		t.Fatal("two NewPKCE calls returned identical values")
-	}
-}
-
-func TestAuthorizeURL(t *testing.T) {
-	got := AuthorizeURL(ChatGPTIssuer, ChatGPTClientID, "http://localhost:1455/auth/callback",
-		"test-verifier-value", "test-state-value")
-	u, err := url.Parse(got)
-	if err != nil {
-		t.Fatalf("parse authorize URL %q: %v", got, err)
-	}
-	if u.Scheme != "https" || u.Host != "auth.openai.com" || u.Path != "/oauth/authorize" {
-		t.Fatalf("authorize endpoint wrong: %s", got)
-	}
-	q := u.Query()
-	wantParams := map[string]string{
-		"response_type":              "code",
-		"client_id":                  ChatGPTClientID,
-		"redirect_uri":               "http://localhost:1455/auth/callback",
-		"scope":                      "openid profile email offline_access",
-		"code_challenge_method":      "S256",
-		"id_token_add_organizations": "true",
-		"codex_cli_simplified_flow":  "true",
-		"originator":                 ChatGPTOriginator,
-		"state":                      "test-state-value",
-	}
-	for k, want := range wantParams {
-		requireEqual(t, "authorize param "+k, q.Get(k), want)
-	}
-	if q.Get("code_challenge") == "" {
-		t.Fatal("code_challenge missing")
-	}
-	// Single encoding: each parameter appears exactly once and no value is
-	// percent-encoded twice.
-	if strings.Count(got, "redirect_uri=") != 1 {
-		t.Fatalf("redirect_uri emitted more than once: %s", got)
-	}
-	if strings.Contains(got, "%25") {
-		t.Fatalf("unwanted double-encoding in %s", got)
-	}
-}
-
-func TestExchangeCode(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(requireStandardTokenReply(t, url.Values{
-		"grant_type":    {"authorization_code"},
-		"code":          {"the-code"},
-		"redirect_uri":  {"http://localhost:1455/auth/callback"},
-		"client_id":     {ChatGPTClientID},
-		"code_verifier": {"the-verifier"},
-	})))
-	t.Cleanup(srv.Close)
-
-	ts, err := ExchangeCode(context.Background(), shortClient, srv.URL, ChatGPTClientID,
-		"the-code", "the-verifier", "http://localhost:1455/auth/callback")
-	if err != nil {
-		t.Fatalf("ExchangeCode: %v", err)
-	}
-	requireEqual(t, "access token", ts.AccessToken, "tok.acc-tok.signed")
-	requireEqual(t, "refresh token", ts.RefreshToken, "tok.rfr-tok.signed")
-	requireEqual(t, "account id", ts.AccountID, "acct-fixture")
-	if ts.Expires.IsZero() {
-		t.Fatal("Expires not set from expires_in")
-	}
-	if remaining := time.Until(ts.Expires); remaining < 7000*time.Second || remaining > 7300*time.Second {
-		t.Fatalf("Expires not ~now+7200s: %v", ts.Expires)
-	}
-}
-
-func TestExchangeCodeSurfacesErrorField(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"bad code"}`))
-	}))
-	t.Cleanup(srv.Close)
-	_, err := ExchangeCode(context.Background(), shortClient, srv.URL, ChatGPTClientID, "c", "v", "http://localhost:1455/auth/callback")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "invalid_grant") {
-		t.Fatalf("error field not surfaced: %v", err)
-	}
-	if !strings.Contains(err.Error(), "400") {
-		t.Fatalf("status not surfaced: %v", err)
-	}
-}
-
-func TestRefreshTokens(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(requireStandardTokenReply(t, url.Values{
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {"tok.rfr-tok.signed"},
-		"client_id":     {ChatGPTClientID},
-	})))
-	t.Cleanup(srv.Close)
-
-	ts, err := RefreshTokens(context.Background(), shortClient, srv.URL, ChatGPTClientID, "tok.rfr-tok.signed")
-	if err != nil {
-		t.Fatalf("RefreshTokens: %v", err)
-	}
-	requireEqual(t, "access token", ts.AccessToken, "tok.acc-tok.signed")
-	requireEqual(t, "account id", ts.AccountID, "acct-fixture")
-	if ts.Expires.IsZero() {
-		t.Fatal("Expires not set from expires_in")
-	}
-}
-
-func TestTokenSetCredentials(t *testing.T) {
-	expires := time.Now().Add(7200 * time.Second)
-	ts := TokenSet{IDToken: "i", AccessToken: "a", RefreshToken: "r", Expires: expires, AccountID: "acct-x"}
-	c := ts.Credentials()
-	requireEqual(t, "refresh", c.Refresh, "r")
-	requireEqual(t, "access", c.Access, "a")
-	requireEqual(t, "account", c.AccountID, "acct-x")
-	requireEqual(t, "expires unix ms", c.Expires, expires.UnixMilli())
-}
-
-func TestAccountIDFromToken(t *testing.T) {
-	direct := builder(`{"chatgpt_account_id":"acct-direct","organizations":[{"id":"acct-org"}]}`)
-	nested := builder(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-nested"},"organizations":[{"id":"acct-org"}]}`)
-	orgOnly := builder(`{"organizations":[{"id":"acct-org"},{"id":"acct-org2"}]}`)
-
-	requireEqual(t, "direct claim", AccountIDFromToken(direct, ""), "acct-direct")
-	requireEqual(t, "nested claim", AccountIDFromToken(nested, ""), "acct-nested")
-	requireEqual(t, "org fallback", AccountIDFromToken(orgOnly, ""), "acct-org")
-
-	// Precedence within one token: direct > nested > organizations[0].
-	all := builder(`{"chatgpt_account_id":"acct-direct","https://api.openai.com/auth":{"chatgpt_account_id":"acct-nested"},"organizations":[{"id":"acct-org"}]}`)
-	requireEqual(t, "direct beats nested and org", AccountIDFromToken("", all), "acct-direct")
-	requireEqual(t, "nested beats org", AccountIDFromToken("", nested), "acct-nested")
-
-	// id_token preferred over access_token (different account ids).
-	idTok := builder(`{"chatgpt_account_id":"from-id"}`)
-	accTok := builder(`{"chatgpt_account_id":"from-access"}`)
-	requireEqual(t, "id_token preferred", AccountIDFromToken(idTok, accTok), "from-id")
-	// access_token used when id_token carries nothing.
-	requireEqual(t, "access token fallback", AccountIDFromToken("", accTok), "from-access")
-
-	requireEqual(t, "no usable claims", AccountIDFromToken(builder(`{"sub":"u"}`), ""), "")
-
-	// Garbage tokens return "" and never panic.
-	for _, bad := range []string{"", "not-a-jwt", "a.b", "h.###.s", "a.!!!.b", "...", "x.@@.y"} {
-		requireEqual(t, "garbage token", AccountIDFromToken(bad, ""), "")
-	}
-	requireEqual(t, "both empty", AccountIDFromToken("", ""), "")
-}
-
-// freePort yields a port that binds cleanly, for the callback listener.
-func freePort(t *testing.T) int {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("find free port: %v", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	if err := ln.Close(); err != nil {
-		t.Fatalf("release port: %v", err)
-	}
-	return port
-}
-
-// awaited asserts BrowserLogin ends on the expected terminal outcome within
-// five seconds, then returns the TokenSet or the error.
-func awaited(t *testing.T, done <-chan TokenSet, fail <-chan error) (TokenSet, error) {
-	t.Helper()
-	select {
-	case ts := <-done:
-		return ts, nil
-	case err := <-fail:
-		return TokenSet{}, err
-	case <-time.After(5 * time.Second):
-		t.Fatal("BrowserLogin did not return in time")
-		return TokenSet{}, nil
-	}
-}
-
-// requireRebindable asserts the loopback listener was shut down by checking
-// the port binds again.
-func requireRebindable(t *testing.T, port int) {
-	t.Helper()
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		t.Fatalf("listener still open: %v", err)
-	}
-	_ = ln.Close()
-}
-
-// issuerPolicy is a fake OAuth issuer over httptest.
-func issuerPolicy(t *testing.T, handle func(w http.ResponseWriter, r *http.Request)) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(handle))
-	t.Cleanup(srv.Close)
-	return srv
-}
-
-func TestBrowserLogin(t *testing.T) {
-	port := freePort(t)
-	callback := fmt.Sprintf("http://localhost:%d/auth/callback", port)
-
-	authorizeSeen := make(chan *url.URL, 4)
-	srv := issuerPolicy(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/oauth/authorize":
-			authorizeSeen <- r.URL
-			_, _ = w.Write([]byte("authorize page"))
-		case r.URL.Path == "/oauth/token":
-			got := requireForm(t, r)
-			if got.Get("grant_type") != "authorization_code" {
-				t.Errorf("grant_type: %q", got.Get("grant_type"))
-			}
-			if got.Get("code") != "good-code" {
-				t.Errorf("code: %q", got.Get("code"))
-			}
-			if got.Get("code_verifier") == "" {
-				t.Error("code_verifier missing")
-			}
-			if got.Get("redirect_uri") != callback {
-				t.Errorf("redirect_uri: %q", got.Get("redirect_uri"))
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(fixtureTokenBody))
-		default:
-			http.NotFound(w, r)
+	for _, change := range []func(*OAuthCredentials){
+		func(c *OAuthCredentials) { c.ClientID = ChatGPTClientID },
+		func(c *OAuthCredentials) { c.ClientID = "" },
+		func(c *OAuthCredentials) { c.Subject = "" },
+		func(c *OAuthCredentials) { c.Issuer = "" },
+		func(c *OAuthCredentials) { c.HostID = "" },
+	} {
+		invalid := credentials
+		change(&invalid)
+		if invalid.Registered() {
+			t.Errorf("incomplete registration accepted: %#v", invalid)
 		}
-	})
+	}
+	if (OAuthCredentials{Scopes: []string{"openid", ChatGPTPlanScope + ".extra"}}).HasPlanScope() {
+		t.Fatal("identity or prefix scope accepted as plan permission")
+	}
+	provider, ok := LookupProvider("chatgpt")
+	if !ok || provider.BaseURL != ChatGPTResource || provider.DefaultModel != "" || provider.SessionHeader != "" || provider.Auth != AuthOAuth ||
+		ChatGPTClientID != "dynamic_agent_client" || ChatGPTCallbackPort != 0 || len(ChatGPTModels) != 0 {
+		t.Fatalf("ChatGPT provider still uses legacy defaults: %#v", provider)
+	}
+}
 
-	done := make(chan TokenSet, 1)
-	fail := make(chan error, 1)
-	opened := make(chan string, 2)
-	// The faked browser: record the authorize URL, then "navigate" to it so
-	// the fake issuer sees the request.
-	go func() {
-		ts, err := BrowserLogin(context.Background(), srv.URL, ChatGPTClientID, port,
-			func(u string) error {
-				opened <- u
-				resp, getErr := http.Get(u)
-				if getErr == nil {
-					resp.Body.Close()
+func TestBrowserLoginDynamicRegistration(t *testing.T) {
+	fixture := newOAuthFixture(t)
+	attempt := startOAuthLogin(t, fixture, BrowserLoginOptions{})
+	q := attempt.authorize.Query()
+	want := map[string]string{
+		"client_id": ChatGPTClientID, "agent_name_hint": "Likha", "ext_agent_host_id": oauthFixtureHostID,
+		"response_type": "code", "scope": oauthScope, "resource": ChatGPTResource, "code_challenge_method": "S256",
+	}
+	if attempt.authorize.Scheme != "https" || attempt.authorize.Host != "auth.openai.com" || attempt.authorize.Path != "/api/accounts/authorize" {
+		t.Fatalf("authorize origin/path: %s", attempt.authorize)
+	}
+	for key, value := range want {
+		if q.Get(key) != value || len(q[key]) != 1 {
+			t.Errorf("authorization parameter %s: %q, want %q", key, q.Get(key), value)
+		}
+	}
+	for _, key := range []string{"nonce", "state", "code_challenge"} {
+		if q.Get(key) == "" {
+			t.Errorf("missing %s", key)
+		}
+	}
+	if q.Get("nonce") == q.Get("state") || q.Has("id_token_hint") || q.Has("login_hint") || q.Has("originator") || q.Has("codex_cli_simplified_flow") {
+		t.Fatal("authorization reused entropy or included legacy/returning parameters")
+	}
+	callback, err := url.Parse(q.Get("redirect_uri"))
+	if err != nil || callback.Scheme != "http" || callback.Hostname() != "127.0.0.1" || callback.Port() == "" || callback.Port() == "0" || callback.Path != "/auth/callback" {
+		t.Fatalf("not the actual loopback callback: %v, %v", callback, err)
+	}
+	status, body := attempt.callback(t, attempt.goodCallback())
+	if status != http.StatusOK || !strings.Contains(body, "verifying") || strings.Contains(strings.ToLower(body), "complete") || strings.Contains(strings.ToLower(body), "success") {
+		t.Fatalf("callback claimed unverified success: %d %q", status, body)
+	}
+	result := attempt.await(t)
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	c := result.tokens.Credentials()
+	if c.Issuer != ChatGPTIssuer || c.Subject != oauthFixtureSubject || c.ClientID != oauthFixtureClientID || c.HostID != oauthFixtureHostID ||
+		c.Email != "user@example.test" || c.IDToken == "" || c.TokenType != "Bearer" || !c.HasPlanScope() || c.AccountID != "" || c.Refresh != "refresh-fixture" {
+		t.Fatalf("verified registration was not retained: %#v", c)
+	}
+	if remaining := time.Until(result.tokens.Expires); remaining < 3590*time.Second || remaining > time.Hour {
+		t.Fatalf("invalid access-token expiry: %v", remaining)
+	}
+	requireOAuthListenerClosed(t, callback.Host)
+}
+
+func TestBrowserLoginReturningRegistration(t *testing.T) {
+	for _, includeClientID := range []bool{false, true} {
+		t.Run(fmt.Sprintf("callback_client_id_%t", includeClientID), func(t *testing.T) {
+			fixture := newOAuthFixture(t)
+			old := fixture.credentials()
+			attempt := startOAuthLogin(t, fixture, BrowserLoginOptions{Credentials: old})
+			q := attempt.authorize.Query()
+			if q.Get("client_id") != old.ClientID || q.Has("agent_name_hint") || q.Get("id_token_hint") != old.IDToken || q.Get("login_hint") != old.Email ||
+				q.Get("ext_agent_host_id") != old.HostID {
+				t.Fatalf("returning parameters: %v", q)
+			}
+			callback := attempt.goodCallback()
+			if !includeClientID {
+				callback.Del("client_id")
+			}
+			attempt.callback(t, callback)
+			result := attempt.await(t)
+			if result.err != nil || result.tokens.ClientID != old.ClientID || result.tokens.Subject != old.Subject {
+				t.Fatalf("returning login failed: %v", result.err)
+			}
+		})
+	}
+}
+
+func TestBrowserLoginRejectsIncompleteOrChangedClient(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		returning bool
+		clientID  string
+		omit      bool
+	}{
+		{name: "new_missing", omit: true},
+		{name: "new_dynamic", clientID: ChatGPTClientID},
+		{name: "new_legacy_client", clientID: "app_EMoamEEZ73f0CkXaXp7hrann"},
+		{name: "new_invalid", clientID: "client with whitespace"},
+		{name: "returning_changed", returning: true, clientID: "oaiapp_other"},
+		{name: "returning_empty", returning: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newOAuthFixture(t)
+			var exchanges atomic.Int32
+			fixture.tokenHook = func(url.Values) { exchanges.Add(1) }
+			options := BrowserLoginOptions{}
+			if test.returning {
+				options.Credentials = fixture.credentials()
+			}
+			attempt := startOAuthLogin(t, fixture, options)
+			callback := attempt.goodCallback()
+			if test.omit {
+				callback.Del("client_id")
+			} else {
+				callback.Set("client_id", test.clientID)
+			}
+			status, _ := attempt.callback(t, callback)
+			result := attempt.await(t)
+			if status != http.StatusBadRequest || result.err == nil || result.tokens.Subject != "" || exchanges.Load() != 0 {
+				t.Fatalf("invalid client was exchanged: status=%d err=%v exchanges=%d", status, result.err, exchanges.Load())
+			}
+		})
+	}
+}
+
+func TestBrowserLoginOIDCValidation(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		returning bool
+		change    func(map[string]any)
+		badSigner bool
+		omitID    bool
+	}{
+		{name: "nonce_mismatch", change: func(c map[string]any) { c["nonce"] = "other-nonce" }},
+		{name: "nonce_missing", change: func(c map[string]any) { delete(c, "nonce") }},
+		{name: "audience", change: func(c map[string]any) { c["aud"] = ChatGPTClientID }},
+		{name: "issuer", change: func(c map[string]any) { c["iss"] = "https://evil.example/secret-claim" }},
+		{name: "expired", change: func(c map[string]any) { c["exp"] = time.Now().Add(-time.Minute).Unix() }},
+		{name: "no_expiry", change: func(c map[string]any) { delete(c, "exp") }},
+		{name: "not_yet_valid", change: func(c map[string]any) { c["nbf"] = time.Now().Add(time.Hour).Unix() }},
+		{name: "subject_missing", change: func(c map[string]any) {
+			delete(c, "sub")
+			c["organizations"] = []any{map[string]any{"id": "not-a-subject"}}
+		}},
+		{name: "returning_account_mismatch", returning: true, change: func(c map[string]any) { c["sub"] = "other-account" }},
+		{name: "multiple_audiences_without_azp", change: func(c map[string]any) { c["aud"] = []string{oauthFixtureClientID, "other"} }},
+		{name: "wrong_azp", change: func(c map[string]any) { c["azp"] = "other" }},
+		{name: "signature", badSigner: true},
+		{name: "id_token_missing", omitID: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newOAuthFixture(t)
+			fixture.tokenReply = func(url.Values) map[string]any {
+				reply := fixture.defaultTokens()
+				claims := fixture.claims()
+				if test.change != nil {
+					test.change(claims)
 				}
-				return getErr
-			}, shortClient)
-		if err != nil {
-			fail <- err
-			return
-		}
-		done <- ts
-	}()
-
-	// The fake issuer captured the authorize URL: assert its shape and take
-	// the state to echo back in the callback.
-	var authorize *url.URL
-	select {
-	case authorize = <-authorizeSeen:
-	case <-time.After(5 * time.Second):
-		t.Fatal("authorize URL not requested")
+				key := oauthFixtureRSA(t)
+				if test.badSigner {
+					key = oauthWrongRSA(t)
+				}
+				reply["id_token"] = signOAuthFixture(t, key, claims)
+				if test.omitID {
+					delete(reply, "id_token")
+				}
+				return reply
+			}
+			options := BrowserLoginOptions{}
+			if test.returning {
+				options.Credentials = fixture.credentials()
+			}
+			attempt := startOAuthLogin(t, fixture, options)
+			attempt.callback(t, attempt.goodCallback())
+			result := attempt.await(t)
+			if result.err == nil || result.tokens.Subject != "" {
+				t.Fatalf("invalid ID token accepted: %v", result.err)
+			}
+			for _, secret := range []string{"secret-claim", "other-account", "other-nonce", "access-fixture", "refresh-fixture"} {
+				if strings.Contains(result.err.Error(), secret) {
+					t.Errorf("verification error leaked %q: %v", secret, result.err)
+				}
+			}
+		})
 	}
-	if authorize.Query().Get("client_id") != ChatGPTClientID {
-		t.Fatalf("authorize client_id: %s", authorize)
-	}
-	authorizeURLString := <-opened
-	requireEqual(t, "openBrowser URL equals authorize URL", authorizeURLString, fmt.Sprintf("%s/oauth/authorize?%s", srv.URL, authorize.RawQuery))
-	state := authorize.Query().Get("state")
-	if state == "" {
-		t.Fatalf("authorize state empty: %s", authorize)
-	}
-
-	// Good callback: 200 + a user-facing "close this window" page.
-	resp, err := http.Get(callback + "?code=good-code&state=" + url.QueryEscape(state))
-	if err != nil {
-		t.Fatalf("callback request: %v", err)
-	}
-	resp.Body.Close()
-	requireEqual(t, "callback status", resp.StatusCode, http.StatusOK)
-
-	ts, err := awaited(t, done, fail)
-	if err != nil {
-		t.Fatalf("BrowserLogin: %v", err)
-	}
-	requireEqual(t, "access token", ts.AccessToken, "tok.acc-tok.signed")
-	requireEqual(t, "account id", ts.AccountID, "acct-fixture")
-
-	// The listener is closed after return: the port binds again.
-	requireRebindable(t, port)
 }
 
-// TestBrowserLoginWrongState starts one flow, hits /auth/callback with a bad
-// state (400, flow fails) and verifies the port is freed afterwards.
-func TestBrowserLoginWrongState(t *testing.T) {
-	port := freePort(t)
-	callback := fmt.Sprintf("http://localhost:%d/auth/callback", port)
-	srv := issuerPolicy(t, func(w http.ResponseWriter, r *http.Request) {
-		// No browser actually navigates; the flow just waits.
-	})
-	done := make(chan TokenSet, 1)
-	fail := make(chan error, 1)
-	go func() {
-		ts, err := BrowserLogin(context.Background(), srv.URL, ChatGPTClientID, port,
-			func(string) error { return nil }, shortClient)
-		if err != nil {
-			fail <- err
-			return
-		}
-		done <- ts
-	}()
-
-	resp, err := http.Get(callback + "?code=x&state=wrong")
-	if err != nil {
-		t.Fatalf("wrong-state request: %v", err)
+func TestBrowserLoginRejectsUnsignedIDToken(t *testing.T) {
+	fixture := newOAuthFixture(t)
+	fixture.tokenReply = func(url.Values) map[string]any {
+		reply := fixture.defaultTokens()
+		payload, _ := json.Marshal(fixture.claims())
+		reply["id_token"] = base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." + base64.RawURLEncoding.EncodeToString(payload) + "."
+		return reply
 	}
-	resp.Body.Close()
-	requireEqual(t, "wrong-state status", resp.StatusCode, http.StatusBadRequest)
-
-	if _, err := awaited(t, done, fail); err == nil {
-		t.Fatal("expected wrong-state callback to fail the flow")
+	attempt := startOAuthLogin(t, fixture, BrowserLoginOptions{})
+	attempt.callback(t, attempt.goodCallback())
+	if result := attempt.await(t); result.err == nil {
+		t.Fatal("unsigned identity accepted")
 	}
-	requireRebindable(t, port)
 }
 
-// TestBrowserLoginProviderError: the callback carries error=...; the provider's
-// message surfaces and the flow fails with 400.
-func TestBrowserLoginProviderError(t *testing.T) {
-	port := freePort(t)
-	callback := fmt.Sprintf("http://localhost:%d/auth/callback", port)
-	srv := issuerPolicy(t, func(w http.ResponseWriter, r *http.Request) {})
-	done := make(chan TokenSet, 1)
-	fail := make(chan error, 1)
-	go func() {
-		_, err := BrowserLogin(context.Background(), srv.URL, ChatGPTClientID, port,
-			func(string) error { return nil }, shortClient)
-		if err != nil {
-			fail <- err
-		}
-	}()
-	resp, err := http.Get(callback + "?error=access_denied&state=x")
-	if err != nil {
-		t.Fatalf("error-param request: %v", err)
+func TestBrowserLoginGrantedScopes(t *testing.T) {
+	for _, scope := range []any{nil, "openid profile email", "", ChatGPTPlanScope + ".extra", "openid " + ChatGPTPlanScope} {
+		t.Run(fmt.Sprintf("%v", scope), func(t *testing.T) {
+			fixture := newOAuthFixture(t)
+			fixture.tokenReply = func(url.Values) map[string]any {
+				reply := fixture.defaultTokens()
+				if scope == nil {
+					delete(reply, "scope")
+				} else {
+					reply["scope"] = scope
+				}
+				return reply
+			}
+			attempt := startOAuthLogin(t, fixture, BrowserLoginOptions{})
+			callback := attempt.goodCallback()
+			callback.Set("scope", oauthScope) // untrusted callback scope never grants inference
+			attempt.callback(t, callback)
+			result := attempt.await(t)
+			if scope == "openid "+ChatGPTPlanScope {
+				if result.err != nil || !result.tokens.Credentials().HasPlanScope() {
+					t.Fatalf("granted plan scope rejected: %v", result.err)
+				}
+			} else if !errors.Is(result.err, ErrPlanScopeRequired) || !result.tokens.Credentials().Registered() || result.tokens.Credentials().HasPlanScope() {
+				t.Fatalf("identity-only registration not retained safely: %v", result.err)
+			}
+		})
 	}
-	resp.Body.Close()
-	requireEqual(t, "provider-error status", resp.StatusCode, http.StatusBadRequest)
-	if _, err := awaited(t, done, fail); err == nil || !strings.Contains(err.Error(), "access_denied") {
-		t.Fatalf("provider error not surfaced: %v", err)
-	}
-	requireRebindable(t, port)
 }
 
-// TestBrowserLoginCancelAndUnknownPaths: GET /cancel fails the login with
-// "login cancelled"; other paths 404 without failing the flow.
-func TestBrowserLoginCancelAndUnknownPaths(t *testing.T) {
-	port := freePort(t)
-	srv := issuerPolicy(t, func(w http.ResponseWriter, r *http.Request) {})
-	done := make(chan TokenSet, 1)
-	fail := make(chan error, 1)
-	go func() {
-		_, err := BrowserLogin(context.Background(), srv.URL, ChatGPTClientID, port,
-			func(string) error { return nil }, shortClient)
-		if err != nil {
-			fail <- err
+func TestBrowserLoginUnsolicitedCallbacksDoNotAbort(t *testing.T) {
+	fixture := newOAuthFixture(t)
+	attempt := startOAuthLogin(t, fixture, BrowserLoginOptions{})
+	for _, params := range []url.Values{
+		{"state": {"wrong"}, "code": {"attacker-code"}, "client_id": {oauthFixtureClientID}},
+		{"state": {"wrong"}, "error": {"access_denied"}},
+		{"error": {"access_denied"}},
+		{"state": {attempt.authorize.Query().Get("state"), "wrong"}, "code": {"attacker-code"}},
+	} {
+		status, _ := attempt.callback(t, params)
+		if status != http.StatusBadRequest {
+			t.Fatalf("unsolicited callback status: %d", status)
 		}
-	}()
-
-	// Unknown path 404s but does NOT kill the flow: the flow is still live
-	// afterwards and produces the /cancel outcome we ask for next.
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/other", port))
-	if err != nil {
-		t.Fatalf("unknown-path request: %v", err)
-	}
-	resp.Body.Close()
-	requireEqual(t, "unknown-path status", resp.StatusCode, http.StatusNotFound)
-
-	cancelResp, err := http.Get(fmt.Sprintf("http://localhost:%d/cancel", port))
-	if err != nil {
-		t.Fatalf("cancel request: %v", err)
-	}
-	cancelResp.Body.Close()
-	requireEqual(t, "cancel status", cancelResp.StatusCode, http.StatusBadRequest)
-	if _, err := awaited(t, done, fail); err == nil || !strings.Contains(err.Error(), "login cancelled") {
-		t.Fatalf("cancel not surfaced: %v", err)
-	}
-	requireRebindable(t, port)
-}
-
-// TestBrowserLoginContextDeadline exercises the nil-openBrowser default (no
-// one visits the callback) and the context deadline: the flow aborts with a
-// deadline error within the context window.
-func TestBrowserLoginContextDeadline(t *testing.T) {
-	port := freePort(t)
-	srv := issuerPolicy(t, func(w http.ResponseWriter, r *http.Request) {})
-	// The openBrowser stub records that the login URL was prepared without
-	// ever completing the flow.
-	opened := make(chan string, 1)
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-	var alternateOpenBrowser func(string) error = func(u string) error { opened <- u; return nil }
-	_, err := BrowserLogin(ctx, srv.URL, ChatGPTClientID, port, alternateOpenBrowser, shortClient)
-	if err == nil {
-		t.Fatal("expected deadline error")
-	}
-	if !strings.Contains(err.Error(), "deadline") {
-		t.Fatalf("deadline error: %v", err)
 	}
 	select {
-	case u := <-opened:
-		if !strings.Contains(u, "/oauth/authorize?") {
-			t.Fatalf("openBrowser URL: %s", u)
-		}
+	case result := <-attempt.done:
+		t.Fatalf("unsolicited callback aborted real login: %v", result.err)
 	default:
-		t.Fatal("authorize URL was never opened")
 	}
-	requireRebindable(t, port)
+	attempt.callback(t, attempt.goodCallback())
+	if result := attempt.await(t); result.err != nil {
+		t.Fatal(result.err)
+	}
 }
 
-// TestBrowserLoginNilBrowserOpenScript exercises the nil-openBrowser default
-// command selection without launching anything.
-func TestBrowserLoginNilBrowserOpenScript(t *testing.T) {
-	requireEqual(t, "open command on darwin", openBrowserCommand(), "open")
-}
-
-func TestDeviceLogin(t *testing.T) {
-	const deviceAuthID = "dev-123"
-	const userCode = "ABCD-1234"
-	const authorizationCode = "dev-code"
-	const codeVerifier = "dev-verifier"
-	var mu sync.Mutex
-	polls := 0
-	pollGuard := func() int {
-		mu.Lock()
-		defer mu.Unlock()
-		return polls
-	}
-
-	var srv *httptest.Server
-	srv = issuerPolicy(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/accounts/deviceauth/usercode":
-			if ua := r.Header.Get("User-Agent"); ua != "likha-test-agent" {
-				t.Errorf("usercode User-Agent: %q", ua)
-			}
-			var req struct {
-				ClientID string `json:"client_id"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				t.Errorf("decode usercode body: %v", err)
-				http.Error(w, "bad json", http.StatusBadRequest)
-				return
-			}
-			if req.ClientID != ChatGPTClientID {
-				t.Errorf("usercode client_id: %q", req.ClientID)
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"device_auth_id":%q,"user_code":%q,"interval":1}`, deviceAuthID, userCode)))
-		case r.URL.Path == "/api/accounts/deviceauth/token":
-			mu.Lock()
-			polls++
-			n := polls
-			mu.Unlock()
-			var req struct {
-				DeviceAuthID string `json:"device_auth_id"`
-				UserCode     string `json:"user_code"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
-				req.DeviceAuthID != deviceAuthID || req.UserCode != userCode {
-				w.WriteHeader(http.StatusBadRequest)
-				_, _ = w.Write([]byte(`{"error":"bad device payload"}`))
-				return
-			}
-			if n == 1 {
-				// First poll: provider says not finished yet (404), flow must
-				// keep polling rather than fail.
-				w.WriteHeader(http.StatusNotFound)
-				_, _ = w.Write([]byte(`{"error":"authorization_pending"}`))
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"authorization_code":%q,"code_verifier":%q}`, authorizationCode, codeVerifier)))
-		case r.URL.Path == "/oauth/token":
-			got := requireForm(t, r)
-			requireEqual(t, "device grant_type", got.Get("grant_type"), "authorization_code")
-			requireEqual(t, "device code", got.Get("code"), authorizationCode)
-			requireEqual(t, "device code_verifier (server-supplied)", got.Get("code_verifier"), codeVerifier)
-			requireEqual(t, "device redirect_uri", got.Get("redirect_uri"), srv.URL+"/deviceauth/callback")
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(fixtureTokenBody))
-		default:
-			http.NotFound(w, r)
-		}
+func TestBrowserLoginDenialRequiresState(t *testing.T) {
+	fixture := newOAuthFixture(t)
+	var exchanges atomic.Int32
+	fixture.tokenHook = func(url.Values) { exchanges.Add(1) }
+	attempt := startOAuthLogin(t, fixture, BrowserLoginOptions{})
+	status, body := attempt.callback(t, url.Values{
+		"state": {attempt.authorize.Query().Get("state")}, "error": {"access_denied"}, "error_description": {"secret-denial-text"},
 	})
+	result := attempt.await(t)
+	if status != http.StatusBadRequest || !errors.Is(result.err, ErrPlanScopeRequired) || exchanges.Load() != 0 ||
+		strings.Contains(body, "secret-denial-text") || strings.Contains(result.err.Error(), "secret-denial-text") {
+		t.Fatalf("denial handling: status=%d err=%v exchanges=%d", status, result.err, exchanges.Load())
+	}
+}
 
-	var shownUser, shownURL string
-	shownOnce := 0
-	ts, err := DeviceLogin(context.Background(), srv.URL, ChatGPTClientID, "likha-test-agent",
-		func(userCodeArg, verifyURL string) error {
-			shownUser, shownURL = userCodeArg, verifyURL
-			shownOnce++
-			return nil
-		}, shortClient)
+func TestBrowserLoginCallbackMethodPathAndDuplicates(t *testing.T) {
+	fixture := newOAuthFixture(t)
+	attempt := startOAuthLogin(t, fixture, BrowserLoginOptions{})
+	callback := attempt.goodCallback()
+	for _, key := range []string{"code", "client_id", "scope", "error"} {
+		params := cloneOAuthValues(callback)
+		params[key] = []string{"first", "second"}
+		if status, _ := attempt.callback(t, params); status != http.StatusBadRequest {
+			t.Errorf("duplicate %s: status %d", key, status)
+		}
+	}
+	for _, path := range []string{"/other", "/cancel", "/callback", "/auth/%63allback"} {
+		u, _ := url.Parse(attempt.redirectURI)
+		u.Path, u.RawPath = path, ""
+		if path == "/auth/%63allback" {
+			u.Path, u.RawPath = "/auth/callback", path
+		}
+		response, err := oauthLoopbackClient.Get(u.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusNotFound {
+			t.Errorf("wrong path %s: status %d", path, response.StatusCode)
+		}
+	}
+	request, _ := http.NewRequest(http.MethodPost, attempt.redirectURI+"?"+callback.Encode(), nil)
+	response, err := oauthLoopbackClient.Do(request)
 	if err != nil {
-		t.Fatalf("DeviceLogin: %v", err)
+		t.Fatal(err)
 	}
-	requireEqual(t, "shown code", shownUser, userCode)
-	requireEqual(t, "verify URL", shownURL, srv.URL+ChatGPTDevicePath)
-	requireEqual(t, "showCode called once", shownOnce, 1)
-	requireEqual(t, "poll count", pollGuard(), 2)
-	requireEqual(t, "access token", ts.AccessToken, "tok.acc-tok.signed")
-	requireEqual(t, "account id", ts.AccountID, "acct-fixture")
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("POST callback accepted: %d", response.StatusCode)
+	}
+	attempt.callback(t, callback)
+	if result := attempt.await(t); result.err != nil {
+		t.Fatal(result.err)
+	}
 }
 
-// The real issuer encodes interval as a JSON string; the device flow must
-// tolerate both encodings (regression against a live-probe failure).
-func TestDeviceLoginStringInterval(t *testing.T) {
-	srv := issuerPolicy(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/accounts/deviceauth/usercode":
-			_, _ = w.Write([]byte(`{"device_auth_id":"d","user_code":"C","interval":"2"}`))
-		case r.URL.Path == "/api/accounts/deviceauth/token":
-			w.WriteHeader(http.StatusForbidden)
+func TestBrowserLoginCallbackConsumedOnceDuringExchange(t *testing.T) {
+	fixture := newOAuthFixture(t)
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	var exchanges atomic.Int32
+	fixture.tokenHook = func(url.Values) {
+		exchanges.Add(1)
+		entered <- struct{}{}
+		<-release
+	}
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
 		}
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	attempt := startOAuthLogin(t, fixture, BrowserLoginOptions{})
+	callback := attempt.goodCallback()
+	attempt.callback(t, callback)
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("code exchange did not start")
+	}
+	for range 3 {
+		if status, _ := attempt.callback(t, callback); status != http.StatusConflict {
+			t.Errorf("repeated callback status %d", status)
+		}
+	}
+	close(release)
+	if result := attempt.await(t); result.err != nil || exchanges.Load() != 1 {
+		t.Fatalf("code exchanged more than once: %v (%d)", result.err, exchanges.Load())
+	}
+}
+
+func TestBrowserLoginCancellationAndRetry(t *testing.T) {
+	fixture := newOAuthFixture(t)
+	attempt := startOAuthLogin(t, fixture, BrowserLoginOptions{})
+	attempt.cancel()
+	if result := attempt.await(t); !errors.Is(result.err, context.Canceled) {
+		t.Fatalf("cancel: %v", result.err)
+	}
+	u, _ := url.Parse(attempt.redirectURI)
+	requireOAuthListenerClosed(t, u.Host)
+	if response, err := oauthLoopbackClient.Get(attempt.redirectURI + "?" + attempt.goodCallback().Encode()); err == nil {
+		_ = response.Body.Close()
+		t.Fatal("delayed callback reached a cancelled listener")
+	}
+	_, portString, _ := net.SplitHostPort(u.Host)
+	port, _ := strconv.Atoi(portString)
+	next := startOAuthLogin(t, fixture, BrowserLoginOptions{Port: port})
+	if next.authorize.Query().Get("state") == attempt.authorize.Query().Get("state") || next.authorize.Query().Get("nonce") == attempt.authorize.Query().Get("nonce") {
+		t.Fatal("retry reused state or nonce")
+	}
+	next.callback(t, next.goodCallback())
+	if result := next.await(t); result.err != nil {
+		t.Fatal(result.err)
+	}
+}
+
+func TestBrowserLoginDeadline(t *testing.T) {
+	fixture := newOAuthFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	_, err := DeviceLogin(ctx, srv.URL, ChatGPTClientID, "likha-test-agent",
-		func(string, string) error { return nil }, shortClient)
-	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("expected polling to continue (deadline hit), got: %v", err)
+	opened := make(chan string, 1)
+	_, err := BrowserLogin(ctx, BrowserLoginOptions{HostID: oauthFixtureHostID, HTTPClient: fixture.client, OpenBrowser: func(u string) error { opened <- u; return nil }})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("deadline was not honored: %v", err)
+	}
+	select {
+	case authorize := <-opened:
+		u, _ := url.Parse(authorize)
+		callback, _ := url.Parse(u.Query().Get("redirect_uri"))
+		requireOAuthListenerClosed(t, callback.Host)
+	default:
+		t.Fatal("browser was not opened")
 	}
 }
 
-func TestDeviceLoginShowCodeError(t *testing.T) {
-	polled := make(chan struct{}, 1)
-	srv := issuerPolicy(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/accounts/deviceauth/usercode":
-			_, _ = w.Write([]byte(`{"device_auth_id":"d","user_code":"C","interval":1}`))
-		case r.URL.Path == "/api/accounts/deviceauth/token":
-			select {
-			case polled <- struct{}{}:
-			default:
+func TestBrowserLoginBrowserFailureOffersRedactedFallback(t *testing.T) {
+	fixture := newOAuthFixture(t)
+	old := fixture.credentials()
+	fallback := make(chan string, 1)
+	attempt := startOAuthLogin(t, fixture, BrowserLoginOptions{
+		Credentials: old,
+		OpenBrowser: func(u string) error { return fmt.Errorf("open failed: %s", u) },
+		OnBrowserError: func(u string, err error) {
+			if strings.Contains(u, old.IDToken) || strings.Contains(err.Error(), old.IDToken) || strings.Contains(u, "id_token_hint") {
+				t.Error("ID token escaped in browser failure fallback")
 			}
-			w.WriteHeader(http.StatusForbidden)
-		}
+			fallback <- u
+		},
 	})
-	ts, err := DeviceLogin(context.Background(), srv.URL, ChatGPTClientID, "likha-test-agent",
-		func(string, string) error { return fmt.Errorf("cannot display code") }, shortClient)
-	requireEqual(t, "show-code error surfaced", err != nil, true)
-	if !strings.Contains(err.Error(), "cannot display code") {
-		t.Fatalf("show-code error: %v", err)
+	select {
+	case manual := <-fallback:
+		u, _ := url.Parse(manual)
+		if u.Query().Get("state") != attempt.authorize.Query().Get("state") || u.Query().Get("client_id") != old.ClientID || u.Query().Has("id_token_hint") {
+			t.Fatalf("invalid manual fallback: %s", manual)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("browser failure did not offer manual URL")
 	}
-	requireEqual(t, "aborts without polling", len(polled), 0)
-	requireEqual(t, "zero TokenSet", ts, TokenSet{})
+	attempt.callback(t, attempt.goodCallback())
+	if result := attempt.await(t); result.err != nil {
+		t.Fatalf("browser launch failure cancelled the listener: %v", result.err)
+	}
 }
 
-func TestDeviceLoginServerError(t *testing.T) {
-	srv := issuerPolicy(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/accounts/deviceauth/usercode":
-			_, _ = w.Write([]byte(`{"device_auth_id":"d","user_code":"C","interval":1}`))
-		case r.URL.Path == "/api/accounts/deviceauth/token":
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"error":"slow down"}`))
+func TestBrowserLoginRejectsLegacyAndWrongHostBeforeOpening(t *testing.T) {
+	fixture := newOAuthFixture(t)
+	for _, options := range []BrowserLoginOptions{
+		{},
+		{HostID: oauthFixtureHostID, Credentials: OAuthCredentials{Refresh: "legacy-refresh", AccountID: "legacy-account"}},
+		{HostID: "another-host", Credentials: fixture.credentials()},
+	} {
+		options.HTTPClient = fixture.client
+		options.OpenBrowser = func(string) error { t.Error("invalid registration opened a browser"); return nil }
+		if _, err := BrowserLogin(context.Background(), options); err == nil {
+			t.Fatal("incomplete/legacy/wrong-host registration accepted")
 		}
+	}
+}
+
+func TestBrowserLoginDiscoveryIsPinned(t *testing.T) {
+	for _, field := range []string{"issuer", "authorization_endpoint", "token_endpoint", "jwks_uri"} {
+		t.Run(field, func(t *testing.T) {
+			fixture := newOAuthFixture(t)
+			fixture.discoveryHook = func(metadata map[string]any) { metadata[field] = "https://untrusted.example/endpoint-secret" }
+			_, err := BrowserLogin(context.Background(), BrowserLoginOptions{
+				HostID: oauthFixtureHostID, HTTPClient: fixture.client,
+				OpenBrowser: func(string) error { t.Error("untrusted discovery opened browser"); return nil },
+			})
+			if err == nil || strings.Contains(err.Error(), "endpoint-secret") {
+				t.Fatalf("untrusted discovery accepted or leaked: %v", err)
+			}
+		})
+	}
+}
+
+func TestBrowserLoginCancellationClosesJWKSRequest(t *testing.T) {
+	fixture := newOAuthFixture(t)
+	entered, stopped := make(chan struct{}, 1), make(chan struct{}, 1)
+	fixture.jwksHook = func(w http.ResponseWriter, r *http.Request) bool {
+		entered <- struct{}{}
+		<-r.Context().Done()
+		stopped <- struct{}{}
+		return true
+	}
+	attempt := startOAuthLogin(t, fixture, BrowserLoginOptions{})
+	attempt.callback(t, attempt.goodCallback())
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("JWKS fetch did not start")
+	}
+	attempt.cancel()
+	if result := attempt.await(t); !errors.Is(result.err, context.Canceled) {
+		t.Fatalf("JWKS cancellation: %v", result.err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelled login left its JWKS HTTP request running")
+	}
+}
+
+func TestBrowserLoginBlockingInjectedOpenerRemainsCancellable(t *testing.T) {
+	fixture := newOAuthFixture(t)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	attempt := startOAuthLogin(t, fixture, BrowserLoginOptions{
+		OpenBrowser: func(string) error { <-release; return nil },
 	})
-	_, err := DeviceLogin(context.Background(), srv.URL, ChatGPTClientID, "likha-test-agent",
-		func(string, string) error { return nil }, shortClient)
-	if err == nil {
-		t.Fatal("expected 500 to abort the device flow")
+	start := time.Now()
+	attempt.cancel()
+	result := attempt.await(t)
+	if !errors.Is(result.err, context.Canceled) || time.Since(start) > time.Second {
+		t.Fatalf("blocking opener prevented cancellation: %v", result.err)
 	}
-	if !strings.Contains(err.Error(), "500") {
-		t.Fatalf("500 not surfaced: %v", err)
+	u, _ := url.Parse(attempt.redirectURI)
+	requireOAuthListenerClosed(t, u.Host)
+}
+
+func TestBrowserLoginCodeInvalidGrantRestartsWithIssuedClient(t *testing.T) {
+	for _, failAgain := range []bool{false, true} {
+		t.Run(fmt.Sprintf("retry_also_fails_%t", failAgain), func(t *testing.T) {
+			fixture := newOAuthFixture(t)
+			var exchanges atomic.Int32
+			fixture.tokenHTTPHook = func(w http.ResponseWriter, r *http.Request) bool {
+				if exchanges.Add(1) == 1 || failAgain {
+					form := parseOAuthFixtureForm(t, r)
+					if form.Get("client_id") != oauthFixtureClientID || form.Get("grant_type") != "authorization_code" {
+						t.Errorf("initial failed exchange lost issued client: %v", form)
+					}
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = io.WriteString(w, `{"error":"invalid_grant","error_description":"secret-invalid-code"}`)
+					return true
+				}
+				return false
+			}
+			opened := make(chan *url.URL, 2)
+			first := startOAuthLogin(t, fixture, BrowserLoginOptions{
+				OpenBrowser: func(raw string) error { u, _ := url.Parse(raw); opened <- u; return nil },
+			})
+			<-opened // the dynamic-registration request
+			first.callback(t, first.goodCallback())
+			var second *url.URL
+			select {
+			case second = <-opened:
+			case <-time.After(3 * time.Second):
+				t.Fatal("invalid_grant did not start fresh authorization")
+			}
+			firstQuery, secondQuery := first.authorize.Query(), second.Query()
+			if secondQuery.Get("client_id") != oauthFixtureClientID || secondQuery.Has("agent_name_hint") || secondQuery.Get("ext_agent_host_id") != firstQuery.Get("ext_agent_host_id") ||
+				secondQuery.Has("id_token_hint") {
+				t.Fatalf("restart used dynamic registration or unverified identity: %v", secondQuery)
+			}
+			for _, key := range []string{"state", "nonce", "code_challenge"} {
+				if secondQuery.Get(key) == "" || secondQuery.Get(key) == firstQuery.Get(key) {
+					t.Errorf("restart reused %s", key)
+				}
+			}
+			firstRedirect, _ := url.Parse(first.redirectURI)
+			secondRedirect, _ := url.Parse(secondQuery.Get("redirect_uri"))
+			if firstRedirect.Scheme != secondRedirect.Scheme || firstRedirect.Hostname() != secondRedirect.Hostname() || firstRedirect.Path != secondRedirect.Path {
+				t.Fatal("restart changed callback scheme, host, or path")
+			}
+			retry := oauthAttempt{authorize: second, redirectURI: secondRedirect.String(), done: first.done, cancel: first.cancel}
+			retry.callback(t, retry.goodCallback())
+			result := retry.await(t)
+			if failAgain {
+				var failure *OAuthError
+				if !errors.As(result.err, &failure) || failure.Code != "invalid_grant" || result.tokens.Subject != "" || strings.Contains(result.err.Error(), "secret-invalid-code") {
+					t.Fatalf("bounded restart saved unverified identity: %v", result.err)
+				}
+			} else if result.err != nil || result.tokens.Subject != oauthFixtureSubject || result.tokens.ClientID != oauthFixtureClientID {
+				t.Fatalf("fresh issued-client authorization failed: %v", result.err)
+			}
+			if exchanges.Load() != 2 {
+				t.Fatalf("unbounded code exchange retries: %d", exchanges.Load())
+			}
+			requireOAuthListenerClosed(t, secondRedirect.Host)
+		})
 	}
+}
+
+func TestOAuthCallbackDeliveryNeverBlocksOnAbandonedResult(t *testing.T) {
+	results := make(chan oauthCallback, 1)
+	results <- oauthCallback{code: "previous-result"}
+	handler := callbackHandler("expected-state", ChatGPTClientID, "127.0.0.1:12345", false, results)
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:12345/auth/callback?state=expected-state&code=code&client_id="+oauthFixtureClientID, nil)
+	finished := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(httptest.NewRecorder(), request)
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("delayed callback blocked on an abandoned result channel")
+	}
+}
+
+func requireOAuthListenerClosed(t *testing.T, host string) {
+	t.Helper()
+	listener, err := net.Listen("tcp4", host)
+	if err != nil {
+		t.Fatalf("callback listener remained open: %v", err)
+	}
+	_ = listener.Close()
+}
+
+func readOAuthTestBody(t *testing.T, response *http.Response) string {
+	t.Helper()
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
 }

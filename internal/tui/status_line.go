@@ -292,13 +292,17 @@ func envLabel(goos string) string {
 	return goos
 }
 
-// spendSegment renders the accumulated session cost once a turn carried
-// usable pricing: two decimals always ("$0.42"; a subscription row is the
-// known zero "$0.00"). A model without documented pricing never fabricates
-// an amount (spec tui-layout 1b.6).
+// spendSegment renders the accumulated session cost once a request carried
+// usable pricing: two decimals always ("$0.42"), with a leading "~" when any
+// priced request was a
+// catalog estimate rather than the provider's own figure ("~$0.42"). A model
+// without known pricing never fabricates an amount (specs/model-metadata).
 func (m *ui) spendSegment() string {
 	if !m.spendKnown {
 		return ""
+	}
+	if m.spendEstimated {
+		return fmt.Sprintf("~$%.2f", m.spend)
 	}
 	return fmt.Sprintf("$%.2f", m.spend)
 }

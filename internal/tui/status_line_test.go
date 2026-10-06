@@ -311,7 +311,7 @@ func deterministicMcp() *mcp.McpManager {
 
 func TestStatusCtxPercentAndWarningThreshold(t *testing.T) {
 	m := statusTestUI(t, "minimal", 100, 24, providers.StoredStatusLineConfig{})
-	m.modelName = "gpt-4o" // known catalog window: 128000
+	m.conn.ProviderCanonical, m.modelName = "openai", "gpt-4o" // catalog window for the exact pair: 128000
 	m.resolveContextWindow()
 	m.contextSeen = true
 	for _, tc := range []struct {

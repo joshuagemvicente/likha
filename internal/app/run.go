@@ -51,8 +51,10 @@ Options:
                     outside the list run with a visible "unverified" warning.
   --sessions        List saved sessions for the selected repository; no model needed.
   --resume ID       Resume a saved session for the selected repository.
-  --device-login    Sign in to the selected OAuth provider (e.g. chatgpt)
-                    headlessly and store the login; no TUI or repository needed.
+  --login           Open your system browser for ChatGPT sign-in and consent,
+                    validate account-specific models, and store the login.
+                    Defaults to --provider chatgpt; no TUI or repository needed.
+  --device-login    Unsupported legacy flag. Use --provider chatgpt --login.
   --debug-models    Log model IDs and context metadata to
                     model-metadata.log (also LIKHA_DEBUG_MODELS=1).
   --ascii           Draw transcript block glyphs and the composer box in plain
@@ -62,8 +64,9 @@ Options:
 
 First-run setup: launching with no provider configured (interactive terminal)
 prompts for a provider, your API key, and a model, and stores the choice.
-ChatGPT signs in through your browser at first run instead of using an API
-key; the login is stored for later runs.
+Selecting ChatGPT automatically opens your browser; after sign-in and consent,
+setup continues automatically. Usage shares your ChatGPT plan allowance and
+limits. Credits apply only if opted in in ChatGPT Settings; API billing is separate.
 
 Environment: LIKHA_MODEL, LIKHA_ENDPOINT, LIKHA_PROVIDER, LIKHA_API_KEY,
 LIKHA_DEBUG_MODELS, LIKHA_ASCII, LIKHA_STATE_DIR (private storage directory;
@@ -162,7 +165,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	asciiFlag := flags.Bool("ascii", os.Getenv("LIKHA_ASCII") == "1", "draw transcript block glyphs and the composer box in plain ASCII")
 	debugModels := flags.Bool("debug-models", os.Getenv("LIKHA_DEBUG_MODELS") == "1", "log connected model metadata to the private state directory")
 	showVersion := flags.Bool("version", false, "print the build version")
-	deviceLogin := flags.Bool("device-login", false, "sign in to the selected OAuth provider headlessly and store the login")
+	deviceLogin := flags.Bool("device-login", false, "unsupported legacy login; use --provider chatgpt --login")
+	login := flags.Bool("login", false, "automatically open the browser for ChatGPT authorization and store the login")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -172,6 +176,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if *showVersion {
 		fmt.Fprintf(stdout, "Likha %s\n", tui.Version)
 		return 0
+	}
+	if *deviceLogin {
+		fmt.Fprintln(stderr, "likha: --device-login is no longer supported; use likha --provider chatgpt --login for browser authorization, or select ChatGPT in the interactive setup")
+		return 2
 	}
 	if flags.NArg() > 1 {
 		fmt.Fprintln(stderr, "likha: expected at most one repository path")
@@ -184,6 +192,28 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	if flags.NArg() == 1 {
 		path = flags.Arg(0)
+	}
+	if *login {
+		if *listSessions || *resumeID != "" {
+			fmt.Fprintln(stderr, "likha: --login cannot be combined with --sessions or --resume")
+			return 2
+		}
+		loginProvider := strings.TrimSpace(*providerName)
+		if loginProvider == "" {
+			loginProvider = "chatgpt"
+		}
+		if p, ok := model.LookupProvider(loginProvider); ok && p.Auth == model.AuthOAuth {
+			if err := validateOAuthEndpoint(p, *endpoint); err != nil {
+				fmt.Fprintf(stderr, "likha: %v\n", err)
+				return 2
+			}
+		}
+		stateDir, err := resolveStateDir(stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "likha: locate login storage: %v\n", err)
+			return 2
+		}
+		return browserLoginFlow(loginProvider, stateDir, stdout, stderr)
 	}
 	root, err := resolveRoot(path)
 	if err != nil {
@@ -239,9 +269,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			*name = stored.Model
 		}
 	}
-	if *deviceLogin {
-		return deviceLoginFlow(effectiveProvider, stateDir, stdout, stderr)
-	}
 	themeName := *themeFlag
 	themeExplicit := false
 	flags.Visit(func(f *flag.Flag) {
@@ -281,6 +308,21 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	var selected model.Provider
 	var modelName string
 	var client *model.Client
+	selected, _ = model.LookupProvider(effectiveProvider)
+	if selected.Auth == model.AuthOAuth {
+		if err := validateOAuthEndpoint(selected, *endpoint); err != nil {
+			fmt.Fprintf(stderr, "likha: %v\n", err)
+			return 2
+		}
+		needsLogin, err := oauthSetupRequired(selected, stateDir, interactive)
+		if err != nil {
+			fmt.Fprintf(stderr, "likha: %v\n", err)
+			return 2
+		}
+		if needsLogin {
+			setupNeeded, display, verified = true, selected.DisplayName, true
+		}
+	}
 	if !setupNeeded {
 		res, err = providers.ResolveProvider(effectiveProvider, *endpoint, *apiKey, persistKey, stateDir)
 		if err != nil {
@@ -289,14 +331,15 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		chosen, verified, display, key = res.Endpoint, res.Verified, res.Display, res.Key
 		selected, _ = model.LookupProvider(effectiveProvider)
-		modelName, err = resolveModel(*name, selected, chosen, key)
-		if err != nil {
-			fmt.Fprintf(stderr, "likha: %v\n", err)
-			return 2
-		}
 		if res.OAuth {
-			client, err = model.NewOAuth(res.Endpoint, modelName, model.ChatGPTIssuer, model.ChatGPTClientID, res.Creds)
+			modelName = strings.TrimSpace(*name)
+			client, err = model.NewOAuth(res.Endpoint, modelName, res.Creds.Issuer, res.Creds.ClientID, res.Creds)
 		} else {
+			modelName, err = resolveModel(*name, selected, chosen, key)
+			if err != nil {
+				fmt.Fprintf(stderr, "likha: %v\n", err)
+				return 2
+			}
 			client, err = model.New(chosen, modelName, key)
 		}
 		if err != nil {
@@ -304,12 +347,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		if res.OAuth {
-			// By the time NewOAuth returns, a stored login exists, so the
-			// provider name must resolve; providers.ResolveProvider already validated
-			// it. The saver persists every refreshed token set.
-			client.SetOAuthSaver(func(c model.OAuthCredentials) error {
-				return providers.StoreOAuth(stateDir, selected.Name, c)
-			})
+			bindOAuthStorage(client, stateDir, selected.Name)
 		}
 	}
 	repo, err := repository.New(root)
@@ -346,8 +384,20 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		// first prompt. A failure is reported in the interface, not fatal, so
 		// the session stays available for another attempt. In setup mode the
 		// connection is verified interactively instead.
-		startupErr = client.EnsureConnected(context.Background())
-		if !res.OAuth {
+		if res.OAuth {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			start := time.Now()
+			var details []model.ModelDetails
+			modelName, contextWindows, details, startupErr = discoverOAuthModel(ctx, client, modelName)
+			cancel()
+			if metadataObserver != nil {
+				metadataObserver(selected.Name, "startup authenticated /models", time.Since(start), details, startupErr)
+			}
+			if startupErr == nil {
+				startupErr = client.SetModel(modelName)
+			}
+		} else {
+			startupErr = client.EnsureConnected(context.Background())
 			providerID := selected.Name
 			if providerID == "" {
 				providerID = "custom"
@@ -433,47 +483,4 @@ func resolveRoot(path string) (string, error) {
 		return "", errors.New("repository path is not a directory")
 	}
 	return root, nil
-}
-
-// deviceLoginFlow runs the headless device authorization flow for one OAuth
-// provider and stores the resulting login in the private state directory. It
-// needs no interactive terminal, no repository, and no TUI: printing to stdout
-// keeps the code and verification URL visible even when output is piped.
-func deviceLoginFlow(providerName, stateDir string, stdout, stderr io.Writer) int {
-	name := strings.TrimSpace(providerName)
-	if name == "" {
-		fmt.Fprintln(stderr, "likha: --device-login needs a provider; choose one with --provider (e.g. --provider chatgpt)")
-		return 2
-	}
-	p, ok := model.LookupProvider(name)
-	if !ok {
-		fmt.Fprintf(stderr, "likha: unknown provider %q (see --help)\n", name)
-		return 2
-	}
-	if p.Auth != model.AuthOAuth {
-		fmt.Fprintln(stderr, "likha: --device-login applies to OAuth providers (chatgpt)")
-		return 2
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	tokenSet, err := model.DeviceLogin(ctx, model.ChatGPTIssuer, model.ChatGPTClientID, model.UserAgent, func(userCode, verifyURL string) error {
-		fmt.Fprintf(stdout, "Open %s and enter code: %s\n", verifyURL, userCode)
-		fmt.Fprintln(stdout, "Waiting for approval… (Ctrl+C aborts)")
-		return nil
-	}, nil)
-	if err != nil {
-		fmt.Fprintf(stderr, "likha: %v\n", err)
-		return 1
-	}
-	creds := tokenSet.Credentials()
-	if err := providers.StoreOAuth(stateDir, p.Name, creds); err != nil {
-		fmt.Fprintf(stderr, "likha: store login: %v\n", err)
-		return 1
-	}
-	account := creds.AccountID
-	if account == "" {
-		account = "unknown account"
-	}
-	fmt.Fprintf(stdout, "Signed in as %s; login stored in %s\n", account, providers.KeyFilePath(stateDir))
-	return 0
 }

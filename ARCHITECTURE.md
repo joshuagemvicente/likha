@@ -8,7 +8,7 @@ and where the five most likely changes land. Status: implemented (local)
 
 ```mermaid
 flowchart TD
-    cmd["cmd/likha\nmain → app.Run"] --> app["internal/app\ncomposition root:\nRun, resolveModel,\nresolveRoot, deviceLoginFlow"]
+    cmd["cmd/likha\nmain → app.Run"] --> app["internal/app\ncomposition root:\nRun, resolveModel,\nresolveRoot, browserLoginFlow"]
     app --> tui["internal/tui\nBubbletea UI:\nmodel, dialogs, setup,\nstatus, composer"]
     app --> providers["internal/providers\nConnection, ResolveProvider,\nconfig.json, providers.json"]
     app --> sess["internal/session"]
@@ -39,7 +39,7 @@ lint — depguard is a recorded follow-up); `internal/` stays internal.
 
 | Package | Owns | May import | Must never import |
 |---|---|---|---|
-| `app` | CLI composition: flags, `Run`, model/root resolution, device login, the single `tea.NewProgram(tui.NewUI(...))` call | `tui`, `providers`, `model`, `session`, `repository`, `mcp`, `ui` | nothing else; no UI logic |
+| `app` | CLI composition: flags, `Run`, model/root resolution, browser login, the single `tea.NewProgram(tui.NewUI(...))` call | `tui`, `providers`, `model`, `session`, `repository`, `mcp`, `ui` | nothing else; no UI logic |
 | `tui` | All Bubbletea UI: `ui` struct, `NewUI`, `Update` dispatch, dialogs, setup, status, composer/editor/scroll/popups, `Version`, `logo` | `agent`, `providers`, `model`, `session`, `repository`, `mcp`, `ui`, `update` | `app` (would cycle) |
 | `agent` | Turn loop: `RunTurn`, `TurnEvent`/`ApprovalRequest`, `CompactHistory`, `GenerateSessionName`, mention expansion + index helpers | `actions`, `model`, `repository`, `mcp` (manager type only) | `bubbletea`, `lipgloss`, `tui`, `providers` |
 | `providers` | Provider identity + persistence: `Connection`, `ResolveProvider`, `SwitchModelID`, `CustomEndpointTarget`, `Load/SaveStoredConfig`, `Store/StoredKey/OAuth`, paths | `model`, `mcp` (manager type only) | `tui`, `agent`, Bubbletea |

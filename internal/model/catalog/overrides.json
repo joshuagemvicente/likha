@@ -1,0 +1,31 @@
+{
+  "providers": {
+    "chatgpt": {
+      "billing": "subscription",
+      "ref": "specs/chatgpt-plus/spec.md",
+      "verified": "2026-10-04",
+      "models": {
+        "gpt-5.5": {"ref": "internal/model/provider.go ChatGPTModels", "verified": "2026-10-04", "note": "Curated Codex model; billed to the ChatGPT plan, no per-token price; context window not publicly documented."},
+        "gpt-5.4": {"ref": "internal/model/provider.go ChatGPTModels", "verified": "2026-10-04", "note": "Curated Codex model; billed to the ChatGPT plan, no per-token price; context window not publicly documented."},
+        "gpt-5.4-mini": {"ref": "internal/model/provider.go ChatGPTModels", "verified": "2026-10-04", "note": "Curated Codex model; billed to the ChatGPT plan, no per-token price; context window not publicly documented."},
+        "gpt-5.3-codex-spark": {"ref": "internal/model/provider.go ChatGPTModels", "verified": "2026-10-04", "note": "Curated Codex model; billed to the ChatGPT plan, no per-token price; context window not publicly documented."},
+        "gpt-6-sol": {"ref": "internal/model/provider.go ChatGPTModels", "verified": "2026-10-04", "note": "Curated Codex model; billed to the ChatGPT plan, no per-token price; context window not publicly documented."},
+        "gpt-6-luna": {"ref": "internal/model/provider.go ChatGPTModels", "verified": "2026-10-04", "note": "Curated Codex model; billed to the ChatGPT plan, no per-token price; context window not publicly documented."}
+      }
+    },
+    "claude": {
+      "models": {
+        "claude-sonnet-4-5": {"context": 200000, "ref": "https://platform.claude.com/docs/en/build-with-claude/context-windows", "verified": "2026-10-04", "note": "Anthropic: \"Other Claude models, including Claude Sonnet 4.5, have a 200k-token context window\"; 1M applies to 4.6 and later. models.dev lists 1M."},
+        "claude-sonnet-4-5-20250929": {"context": 200000, "ref": "https://platform.claude.com/docs/en/build-with-claude/context-windows", "verified": "2026-10-04", "note": "Anthropic: \"Other Claude models, including Claude Sonnet 4.5, have a 200k-token context window\"; 1M applies to 4.6 and later. models.dev lists 1M."}
+      }
+    },
+    "deepseek": {
+      "models": {
+        "deepseek-flash": {"cost": {"input": 0.3, "output": 1.2, "cache_read": 0.006}, "ref": "https://api-docs.deepseek.com/quick_start/pricing", "verified": "2026-10-04", "note": "Peak card. Off-peak (all hours except 01:00-04:00 and 06:00-10:00 UTC on weekdays) bills half; time-of-day pricing is a non-goal, so estimates use the higher rate and are an upper bound."},
+        "deepseek-v4-flash": {"cost": {"input": 0.3, "output": 1.2, "cache_read": 0.006}, "ref": "https://api-docs.deepseek.com/quick_start/pricing", "verified": "2026-10-04", "note": "Legacy name served and billed as deepseek-flash. Peak card; off-peak bills half, so estimates are an upper bound."},
+        "deepseek-v4-flash-vision-exp": {"cost": {"input": 0.3, "output": 1.2, "cache_read": 0.006}, "ref": "https://api-docs.deepseek.com/quick_start/pricing", "verified": "2026-10-04", "note": "Legacy name served and billed as deepseek-flash. Peak card; off-peak bills half, so estimates are an upper bound."},
+        "deepseek-v4-pro": {"cost": {"input": 1.32, "output": 3.96, "cache_read": 0.044}, "ref": "https://api-docs.deepseek.com/quick_start/pricing", "verified": "2026-10-04", "note": "Peak card. Off-peak (all hours except 01:00-04:00 and 06:00-10:00 UTC on weekdays) bills half; time-of-day pricing is a non-goal, so estimates use the higher rate and are an upper bound."}
+      }
+    }
+  }
+}

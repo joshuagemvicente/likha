@@ -50,9 +50,8 @@ type ResolvedProvider struct {
 // provider's own LIKHA_<NAME>_API_KEY, then the private state-directory store.
 // Keys are never read from the selected repository. An explicitly passed key is
 // stored when persistKey is set, so the next run needs no flag. OAuth
-// providers have no API key at all: they resolve to a stored login
-// (providers.json), which must be created beforehand with --device-login or an
-// interactive browser sign-in.
+// providers have no API key at all: they resolve to a validated stored browser
+// sign-in and cannot send credentials to an endpoint override.
 func ResolveProvider(providerName, endpointFlag, apiKeyFlag string, persistKey bool, stateDir string) (ResolvedProvider, error) {
 	endpoint := strings.TrimSpace(endpointFlag)
 	name := strings.TrimSpace(providerName)
@@ -76,20 +75,22 @@ func ResolveProvider(providerName, endpointFlag, apiKeyFlag string, persistKey b
 		return ResolvedProvider{}, fmt.Errorf("unknown provider %q; accepted providers: %s", name, strings.Join(accepted, ", "))
 	}
 	if p.Auth == model.AuthOAuth {
-		// OAuth providers are hosted but keyless: no --api-key, env variable,
-		// or stored key applies. The credential is the OAuth login in the
-		// private state directory.
-		if endpoint == "" {
-			endpoint = p.BaseURL
+		if strings.TrimSpace(apiKeyFlag) != "" || strings.TrimSpace(os.Getenv("LIKHA_API_KEY")) != "" || strings.TrimSpace(os.Getenv("LIKHA_CHATGPT_API_KEY")) != "" {
+			return ResolvedProvider{}, fmt.Errorf("ChatGPT uses browser sign-in, not an API key; remove --api-key/LIKHA_API_KEY/LIKHA_CHATGPT_API_KEY or select --provider openai for separately billed API access")
+		}
+		for _, override := range []string{endpoint, strings.TrimSpace(os.Getenv("LIKHA_ENDPOINT"))} {
+			if override != "" && strings.TrimRight(override, "/") != model.ChatGPTResource {
+				return ResolvedProvider{}, fmt.Errorf("ChatGPT sign-in uses only %s; remove the custom --endpoint/LIKHA_ENDPOINT override", model.ChatGPTResource)
+			}
 		}
 		creds, ok, err := StoredOAuth(stateDir, p.Name)
 		if err != nil {
 			return ResolvedProvider{}, err
 		}
 		if !ok {
-			return ResolvedProvider{}, fmt.Errorf("provider %s uses ChatGPT login; run likha in an interactive terminal to sign in, or run likha --provider %s --device-login", p.Name, p.Name)
+			return ResolvedProvider{}, oauthLoginRequired("no validated ChatGPT registration is signed in; legacy Codex credentials require a fresh browser sign-in")
 		}
-		return ResolvedProvider{Endpoint: endpoint, Verified: true, Display: p.DisplayName, Creds: creds, OAuth: true}, nil
+		return ResolvedProvider{Endpoint: model.ChatGPTResource, Verified: true, Display: p.DisplayName, Creds: creds, OAuth: true}, nil
 	}
 	if p.Hosted {
 		key := apiKeyFlag

@@ -59,17 +59,22 @@ func (c *Client) Fork() (*Client, error) {
 	if s := child.oauth; s != nil {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if s.client == nil || s.client.http == nil || strings.TrimSpace(s.issuer) == "" || strings.TrimSpace(s.clientID) == "" {
+		if s.client == nil || s.client.http == nil || s.lifetime == nil || s.stop == nil {
 			return nil, errors.New("fork model client: inherited OAuth session is unavailable")
 		}
-		if s.creds.Access == "" && s.creds.Expires == 0 {
-			return nil, errors.New("fork model client: inherited OAuth login is unavailable; sign in again")
+		if child.base != ChatGPTResource || s.invalidated {
+			return nil, fmt.Errorf("fork model client: %w", errChatgptLoginExpired)
 		}
-		// Keep the session and its owner intact: access serializes refresh and
-		// credential persistence with s.mu, using the owner's HTTP client and
-		// saver only. Rebinding s.client would race and redirect sibling refreshes;
-		// copying credentials would reuse an already-rotated refresh token.
-		child.oauthSave = s.client.oauthSave
+		if err := validateClientOAuthCredentials(s.creds); err != nil {
+			return nil, fmt.Errorf("fork model client: %w", err)
+		}
+		if s.creds.Access == "" && s.creds.Refresh == "" {
+			return nil, fmt.Errorf("fork model client: %w", errChatgptLoginExpired)
+		}
+		// Keep the session and owner intact. Copying credentials would reuse
+		// an already-rotated token; rebinding the owner would gate refreshes
+		// through a task fork and race siblings. Callbacks and invalidation
+		// belong to the shared session, not to this child.
 	}
 	return child, nil
 }

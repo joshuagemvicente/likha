@@ -5,9 +5,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"likha/internal/model"
+	"likha/internal/model/catalog"
 	"likha/internal/providers"
 )
 
@@ -53,12 +55,36 @@ func (l *modelMetadataLog) observe(provider, operation string, elapsed time.Dura
 	}
 	l.logger.Printf("model-list provider=%q operation=%q elapsed=%s models=%d", provider, operation, elapsed.Round(time.Millisecond), len(details))
 	for _, detail := range details {
+		entry := catalogLogFields(provider, detail.ID)
 		if detail.ContextWindow > 0 {
-			l.logger.Printf("model provider=%q id=%q context_window=%d field=%q", provider, detail.ID, detail.ContextWindow, detail.ContextWindowSource)
+			l.logger.Printf("model provider=%q id=%q context_window=%d field=%q%s", provider, detail.ID, detail.ContextWindow, detail.ContextWindowSource, entry)
 			continue
 		}
-		l.logger.Printf("model provider=%q id=%q context_window=unknown", provider, detail.ID)
+		l.logger.Printf("model provider=%q id=%q context_window=unknown%s", provider, detail.ID, entry)
 	}
+}
+
+// catalogLogFields names the bundled catalog row for the exact provider and
+// model pair (specs/model-metadata): its source, plus the upstream update
+// date or the override's verification date. Empty when the pair has no row.
+// Only public catalog metadata is written; never credentials.
+func catalogLogFields(provider, modelID string) string {
+	entry, ok := catalog.Lookup(provider, modelID)
+	if !ok {
+		return ""
+	}
+	fields := fmt.Sprintf(" catalog_source=%q", entry.Source)
+	if entry.Updated != "" {
+		fields += fmt.Sprintf(" catalog_updated=%q", entry.Updated)
+	}
+	if entry.Verified != "" {
+		fields += fmt.Sprintf(" catalog_verified=%q", entry.Verified)
+	}
+	if len(entry.Overridden) > 0 {
+		// The override's date vouches only for these fields.
+		fields += fmt.Sprintf(" catalog_overridden=%q", strings.Join(entry.Overridden, ","))
+	}
+	return fields
 }
 
 func (l *modelMetadataLog) observer() providers.ModelMetadataObserver {

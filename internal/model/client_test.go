@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -341,49 +342,6 @@ func TestLastTokenUsageBeforeAnyStream(t *testing.T) {
 	}
 }
 
-func TestContextWindowCatalog(t *testing.T) {
-	cases := []struct {
-		model  string
-		want   int64
-		wantOK bool
-	}{
-		{"gpt-4o", 128000, true},
-		{"gpt-4o-mini", 128000, true},
-		{"gpt-4o-2024-11-20", 128000, true},
-		{"gpt-4.1", 1000000, true},
-		{"gpt-4.1-mini", 1000000, true},
-		{"gpt-4.1-nano-2025-04-14", 1000000, true},
-		{"o1", 200000, true},
-		{"o1-mini", 128000, true},
-		{"o1-preview", 128000, true},
-		{"o3", 200000, true},
-		{"o3-mini", 200000, true},
-		{"o3-2025-04-16", 200000, true},
-		{"o4-mini", 200000, true},
-		{"deepseek-chat", 128000, true},
-		{"deepseek-reasoner", 128000, true},
-		{"claude-sonnet-4", 200000, true},
-		{"claude-opus-4-1", 200000, true},
-		{"claude-3-7-sonnet-20250219", 200000, true},
-		{"claude-haiku-4-5", 200000, true},
-		// ChatGPT-curated gpt-5.x ids have no publicly documented window.
-		{"gpt-5.5", 0, false},
-		{"gpt-5", 0, false},
-		{"gpt-3.7", 0, false},
-		{"", 0, false},
-		{"  ", 0, false},
-		{"some-unknown-model", 0, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.model, func(t *testing.T) {
-			window, ok := ContextWindow(tc.model)
-			if ok != tc.wantOK || window != tc.want {
-				t.Fatalf("ContextWindow(%q) = (%d, %v), want (%d, %v)", tc.model, window, ok, tc.want, tc.wantOK)
-			}
-		})
-	}
-}
-
 func TestNewAcceptsListedAndLocalEndpoints(t *testing.T) {
 	for _, endpoint := range append([]string{
 		"https://openrouter.ai/api/v1", "https://dialagram.me/router/v1",
@@ -587,12 +545,11 @@ func (r *oauthRecorder) chatAuths() []string {
 	return append([]string(nil), r.auths...)
 }
 
-// writeToken answers a token endpoint request with a fresh token set. The
-// access token carries no account claims, so a refreshed login keeps the
-// stored account ID.
+// writeToken answers a SIWC token endpoint request without a replacement ID
+// token. The previously validated registration identity must be retained.
 func writeToken(w http.ResponseWriter, access string) {
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"access_token":%q,"refresh_token":"refresh-new","expires_in":3600}`, access)
+	fmt.Fprintf(w, `{"access_token":%q,"refresh_token":"refresh-new","expires_in":3600,"token_type":"Bearer","scope":"openid profile email offline_access chatgpt.tokens.use.direct"}`, access)
 }
 
 // codexOK writes a minimal terminal Codex SSE stream answering "ok".
@@ -601,7 +558,7 @@ func codexOK(w http.ResponseWriter) {
 	fmt.Fprint(w, "event: response.output_text.delta\n")
 	fmt.Fprint(w, "data: {\"delta\":\"ok\"}\n\n")
 	fmt.Fprint(w, "event: response.completed\n")
-	fmt.Fprint(w, `data: {"response":{"output":[]}}`+"\n\n")
+	fmt.Fprint(w, `data: {"response":{"status":"completed","output":[]}}`+"\n\n")
 }
 
 // codexSSE writes text deltas followed by one streamed function call and the
@@ -618,16 +575,48 @@ func codexSSE(w http.ResponseWriter, deltas ...string) {
 	fmt.Fprint(w, "event: response.function_call_arguments.delta\n")
 	fmt.Fprint(w, `data: {"item_id":"fc_1","delta":"\"a.go\"}"}`+"\n\n")
 	fmt.Fprint(w, "event: response.completed\n")
-	fmt.Fprint(w, `data: {"response":{"output":[]}}`+"\n\n")
+	fmt.Fprint(w, `data: {"response":{"status":"completed","output":[{"id":"fc_1","type":"function_call","status":"completed","call_id":"call_1","namespace":"likha","name":"read","arguments":"{\"path\":\"a.go\"}"}]}}`+"\n\n")
 }
 
 func newOAuthTestClient(t *testing.T, issuer, base string, creds OAuthCredentials) *Client {
 	t.Helper()
-	client, err := NewOAuth(base, "gpt-5.5", issuer, "client_test", creds)
+	client, err := NewOAuth(ChatGPTResource, "gpt-5.5", ChatGPTIssuer, creds.ClientID, creds)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Exercise the pinned public URLs through real fixture HTTP. The constructor
+	// never accepts a local/test OAuth issuer or inference endpoint.
+	client.http.Transport = &clientOAuthRerouteTransport{t: t, issuer: issuer, resource: base, next: http.DefaultTransport}
 	return client
+}
+
+type clientOAuthRerouteTransport struct {
+	t                *testing.T
+	issuer, resource string
+	next             http.RoundTripper
+}
+
+func (tr *clientOAuthRerouteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var target string
+	switch req.URL.Scheme + "://" + req.URL.Host {
+	case ChatGPTIssuer:
+		target = tr.issuer
+	case "https://api.openai.com":
+		if req.URL.Path != "/v1/responses" && req.URL.Path != "/v1/models" {
+			tr.t.Errorf("unexpected public resource path %q", req.URL.Path)
+		}
+		target = tr.resource
+	default:
+		return nil, fmt.Errorf("fixture refused unpinned OAuth origin %q", req.URL.Scheme+"://"+req.URL.Host)
+	}
+	local, err := url.Parse(target)
+	if err != nil {
+		return nil, err
+	}
+	routed := req.Clone(req.Context())
+	routed.URL.Scheme, routed.URL.Host = local.Scheme, local.Host
+	routed.Host = ""
+	return tr.next.RoundTrip(routed)
 }
 
 func validOAuthCredentials() OAuthCredentials {
@@ -636,6 +625,14 @@ func validOAuthCredentials() OAuthCredentials {
 		Access:    "access-old",
 		Expires:   time.Now().Add(time.Hour).UnixMilli(),
 		AccountID: "acct_123",
+		Issuer:    ChatGPTIssuer,
+		Subject:   "siwc-subject",
+		Email:     "fixture@example.invalid",
+		ClientID:  "issued-client-test",
+		HostID:    "urn:uuid:11111111-1111-4111-8111-111111111111",
+		IDToken:   "previously-validated-id-token",
+		TokenType: "Bearer",
+		Scopes:    []string{"openid", "profile", "email", "offline_access", ChatGPTPlanScope},
 	}
 }
 
@@ -645,11 +642,11 @@ func expiredOAuthCredentials() OAuthCredentials {
 	return creds
 }
 
-func TestOAuthStreamSendsCodexHeadersAndParsesSSE(t *testing.T) {
+func TestOAuthStreamSendsOnlyPublicHeadersAndParsesSSE(t *testing.T) {
 	var sawAuth, sawAccount, sawSession, sawOriginator, sawUA, sawPath, sawModel, sawInstructions string
 	var sawTemperature bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/oauth/token" {
+		if r.URL.Path == "/api/accounts/oauth/token" {
 			t.Errorf("token endpoint hit with a valid stored token")
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -700,10 +697,10 @@ func TestOAuthStreamSendsCodexHeadersAndParsesSSE(t *testing.T) {
 	if !reflect.DeepEqual(chunks, []string{"Hello "}) {
 		t.Fatalf("chunks: %#v", chunks)
 	}
-	if sawAuth != "Bearer access-old" || sawAccount != "acct_123" || sawSession != "ses_1" {
+	if sawAuth != "Bearer access-old" || sawAccount != "" || sawSession != "" {
 		t.Fatalf("auth %q, account %q, session %q", sawAuth, sawAccount, sawSession)
 	}
-	if sawOriginator != ChatGPTOriginator || sawUA != UserAgent {
+	if sawOriginator != "" || sawUA != UserAgent {
 		t.Fatalf("originator %q, user agent %q", sawOriginator, sawUA)
 	}
 	if !strings.HasSuffix(sawPath, "/responses") || strings.Contains(sawPath, "/chat/completions") {
@@ -722,14 +719,15 @@ func TestOAuthStreamSendsCodexHeadersAndParsesSSE(t *testing.T) {
 
 func TestOAuthRefreshesExpiredTokenAndCallsSaver(t *testing.T) {
 	var rec oauthRecorder
-	var grantType, clientID, refreshToken string
+	var grantType, clientID, refreshToken, resource, scope string
 	var saved OAuthCredentials
 	var saveCalls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/oauth/token":
+		case r.URL.Path == "/api/accounts/oauth/token":
 			rec.hitToken()
 			grantType, clientID, refreshToken = r.FormValue("grant_type"), r.FormValue("client_id"), r.FormValue("refresh_token")
+			resource, scope = r.FormValue("resource"), r.FormValue("scope")
 			writeToken(w, "access-new")
 		case strings.HasSuffix(r.URL.Path, "/responses"):
 			rec.hitChat(r.Header.Get("Authorization"))
@@ -754,8 +752,11 @@ func TestOAuthRefreshesExpiredTokenAndCallsSaver(t *testing.T) {
 	if answer.Content != "ok" {
 		t.Fatalf("answer = %+v", answer)
 	}
-	if grantType != "refresh_token" || clientID != "client_test" || refreshToken != "refresh-old" {
+	if grantType != "refresh_token" || clientID != "issued-client-test" || refreshToken != "refresh-old" {
 		t.Fatalf("token request: grant %q, client %q, refresh %q", grantType, clientID, refreshToken)
+	}
+	if resource != ChatGPTResource || scope != "" {
+		t.Fatalf("refresh resource %q, scope %q; want the public resource and omitted scope", resource, scope)
 	}
 	if auths := rec.chatAuths(); len(auths) != 1 || auths[0] != "Bearer access-new" {
 		t.Fatalf("chat authorizations: %#v", auths)
@@ -763,7 +764,7 @@ func TestOAuthRefreshesExpiredTokenAndCallsSaver(t *testing.T) {
 	if saveCalls != 1 {
 		t.Fatalf("saver calls = %d, want 1", saveCalls)
 	}
-	if saved.Access != "access-new" || saved.Refresh != "refresh-new" || saved.AccountID != "acct_123" {
+	if saved.Access != "access-new" || saved.Refresh != "refresh-new" || saved.Subject != "siwc-subject" || saved.ClientID != "issued-client-test" || !saved.HasPlanScope() {
 		t.Fatalf("saved credentials: %+v", saved)
 	}
 	if saved.Expires <= oldExpires {
@@ -776,7 +777,7 @@ func TestOAuthUnauthorizedForcesRefreshAndRetries(t *testing.T) {
 		var rec oauthRecorder
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
-			case r.URL.Path == "/oauth/token":
+			case r.URL.Path == "/api/accounts/oauth/token":
 				rec.hitToken()
 				writeToken(w, "access-new")
 			case strings.HasSuffix(r.URL.Path, "/responses"):
@@ -815,7 +816,7 @@ func TestOAuthUnauthorizedForcesRefreshAndRetries(t *testing.T) {
 		var rec oauthRecorder
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
-			case r.URL.Path == "/oauth/token":
+			case r.URL.Path == "/api/accounts/oauth/token":
 				rec.hitToken()
 				writeToken(w, "access-new")
 			case strings.HasSuffix(r.URL.Path, "/responses"):
@@ -841,13 +842,22 @@ func TestOAuthUnauthorizedForcesRefreshAndRetries(t *testing.T) {
 	})
 }
 
-func TestOAuthCheckValidatesLoginWithoutModelList(t *testing.T) {
-	t.Run("hits only the token endpoint", func(t *testing.T) {
+func TestOAuthCheckRefreshesAndFetchesAuthenticatedModelList(t *testing.T) {
+	t.Run("hits the token endpoint and models", func(t *testing.T) {
 		var rec oauthRecorder
+		var models int
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/oauth/token" {
+			if r.URL.Path == "/api/accounts/oauth/token" {
 				rec.hitToken()
 				writeToken(w, "access-new")
+				return
+			}
+			if r.URL.Path == "/v1/models" {
+				models++
+				if r.Header.Get("Authorization") != "Bearer access-new" {
+					t.Errorf("models bearer = %q", r.Header.Get("Authorization"))
+				}
+				fmt.Fprint(w, `{"models":[{"slug":"fixture-model","display_name":"Fixture Model","visibility":"list"}]}`)
 				return
 			}
 			t.Errorf("unexpected path %q", r.URL.Path)
@@ -861,6 +871,9 @@ func TestOAuthCheckValidatesLoginWithoutModelList(t *testing.T) {
 		if rec.tokenCount() != 1 {
 			t.Fatalf("token endpoint hits = %d, want 1", rec.tokenCount())
 		}
+		if models != 1 {
+			t.Fatalf("models requests = %d, want 1", models)
+		}
 	})
 	t.Run("unreachable token endpoint", func(t *testing.T) {
 		client := newOAuthTestClient(t, "http://127.0.0.1:1", "http://127.0.0.1:1/v1", expiredOAuthCredentials())
@@ -868,8 +881,8 @@ func TestOAuthCheckValidatesLoginWithoutModelList(t *testing.T) {
 		if err == nil {
 			t.Fatal("Check on unreachable token endpoint succeeded")
 		}
-		if !strings.Contains(err.Error(), "token request") || !strings.Contains(err.Error(), "sign in again") {
-			t.Fatalf("error = %v, want a clear token-request failure", err)
+		if strings.Contains(err.Error(), "sign in again") {
+			t.Fatalf("transient transport failure incorrectly requires sign-in: %v", err)
 		}
 	})
 }
@@ -883,19 +896,19 @@ func TestLastTokenUsageCodexWire(t *testing.T) {
 	}{
 		{
 			name:     "usage in completed event",
-			terminal: `{"response":{"output":[],"usage":{"input_tokens":110,"output_tokens":25}}}`,
+			terminal: `{"response":{"status":"completed","output":[],"usage":{"input_tokens":110,"output_tokens":25}}}`,
 			want:     TokenUsage{Prompt: 110, Completion: 25, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
 			name:     "alias naming in completed event",
-			terminal: `{"response":{"output":[],"usage":{"prompt_tokens":7,"completion_tokens":2}}}`,
+			terminal: `{"response":{"status":"completed","output":[],"usage":{"prompt_tokens":7,"completion_tokens":2}}}`,
 			want:     TokenUsage{Prompt: 7, Completion: 2, PromptSeen: true},
 			wantSeen: true,
 		},
 		{
 			name:     "no usage in completed event",
-			terminal: `{"response":{"output":[]}}`,
+			terminal: `{"response":{"status":"completed","output":[]}}`,
 			wantSeen: false,
 		},
 	}
@@ -976,7 +989,7 @@ func TestOAuthConcurrentStreamsShareOneRefresh(t *testing.T) {
 	var rec oauthRecorder
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/oauth/token":
+		case r.URL.Path == "/api/accounts/oauth/token":
 			rec.hitToken()
 			time.Sleep(50 * time.Millisecond)
 			writeToken(w, "access-new")

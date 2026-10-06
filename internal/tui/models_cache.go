@@ -53,9 +53,10 @@ func (c *modelsCache) snapshot(activeCanonical, activeBase string, keep map[stri
 	for _, p := range model.Providers {
 		inTable[p.Name] = true
 	}
-	// (1) active first: BaseURL match wins, else canonical name match.
+	// (1) active first: canonical identity wins. ChatGPT and the API-key
+	// provider share the public resource URL but are different accounts.
 	var active *modelsSection
-	if activeBase != "" {
+	if activeBase != "" && activeCanonical == "" {
 		for _, p := range model.Providers {
 			s, ok := c.sections[p.Name]
 			if ok && s.provider.BaseURL == activeBase && allowed(s.provider.Name) {

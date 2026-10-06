@@ -344,20 +344,15 @@ func TestAllModelsUnconfiguredProvidersAbsent(t *testing.T) {
 	}
 }
 
-// TestAllModelsChatGPTCuratedListNoNetwork verifies the signed-in chatgpt
-// row contributes the curated list without any HTTP traffic.
-func TestAllModelsChatGPTCuratedListNoNetwork(t *testing.T) {
+// ChatGPT must contribute actual authenticated models, not a keyless public
+// list or any static/curated fallback.
+func TestAllModelsChatGPTAuthenticatedDiscovery(t *testing.T) {
 	stateDir := t.TempDir()
 	storedProviderKey(t, stateDir, "openai", "k-openai")
-	if err := providers.StoreOAuth(stateDir, "chatgpt", model.OAuthCredentials{Refresh: "r", Access: "a", Expires: 9999999999999}); err != nil {
-		t.Fatal(err)
-	}
-	fetched := false
+	storedTestOAuth(t, stateDir)
+	stubOAuthModels(t, []model.ModelDetails{{ID: "account-specific-id", DisplayName: "Account model", ContextWindow: 12345}}, nil)
 	prev := listModelsFunc
 	listModelsFunc = func(ctx context.Context, base, apiKey string) ([]string, error) {
-		if strings.Contains(base, "chatgpt.com") {
-			fetched = true
-		}
 		return []string{"o-a"}, nil
 	}
 	t.Cleanup(func() { listModelsFunc = prev })
@@ -368,14 +363,11 @@ func TestAllModelsChatGPTCuratedListNoNetwork(t *testing.T) {
 	m := modelsTestUI(t, client, "o-a", providers.Connection{Provider: "OpenAI", ProviderCanonical: "openai", Verified: true}, stateDir)
 	msgs := openModels(t, m)
 	sections := arrivedSections(msgs)
-	if fetched {
-		t.Fatal("chatgpt row fetched over the network")
-	}
 	found := false
 	for _, s := range sections {
 		if s.provider.Name == "chatgpt" {
 			found = true
-			if len(s.models) != len(model.ChatGPTModels) {
+			if !reflect.DeepEqual(s.models, []string{"account-specific-id"}) || s.contextWindows["account-specific-id"] != 12345 {
 				t.Fatalf("chatgpt models = %v", s.models)
 			}
 		}

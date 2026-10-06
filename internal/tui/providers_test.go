@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -726,12 +725,7 @@ func TestCustomEndpointGate(t *testing.T) {
 // the private state dir for a test.
 func storedTestOAuth(t *testing.T, stateDir string) model.OAuthCredentials {
 	t.Helper()
-	creds := model.OAuthCredentials{
-		Refresh:   "refresh-token",
-		Access:    "access-token",
-		Expires:   time.Now().Add(time.Hour).UnixMilli(),
-		AccountID: "acct_test",
-	}
+	creds := oauthUICredentials(t, stateDir, "issued-provider-test")
 	if err := providers.StoreOAuth(stateDir, "chatgpt", creds); err != nil {
 		t.Fatal(err)
 	}
@@ -739,36 +733,36 @@ func storedTestOAuth(t *testing.T, stateDir string) model.OAuthCredentials {
 }
 
 // TestProvidersChatgptStateNotSignedIn drives the keyless path: the chatgpt
-// row's auth view reports the missing sign-in and points at first-run setup
-// or --device-login; Enter does nothing (the modal is for keys only) and the
-// live client is untouched.
+// row immediately starts browser authorization; a second Enter is unnecessary
+// and the unrelated live provider stays untouched.
 func TestProvidersChatgptStateNotSignedIn(t *testing.T) {
 	stateDir := t.TempDir()
 	m := newProvidersUI(t, stateDir, "https://example.invalid/v1")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	prevClient := m.client
 
-	if cmd := runCommand(m, "/providers chatgpt"); cmd != nil {
-		t.Fatal("chatgpt auth view returned a command")
+	if cmd := runCommand(m, "/providers chatgpt"); cmd == nil {
+		t.Fatal("chatgpt auth view did not auto-launch browser authorization")
 	}
 	if !m.keyModal.open || !m.keyModal.auth || m.keyModal.provider.Name != "chatgpt" {
 		t.Fatalf("auth view not opened for chatgpt: %+v", m.keyModal)
 	}
 	view := m.View()
-	if !strings.Contains(view, "Not signed in") || !strings.Contains(view, "--device-login") {
-		t.Fatalf("auth view missing the sign-in hint: %q", view)
+	if !strings.Contains(view, "Opening your browser") || strings.Contains(view, "--device-login") {
+		t.Fatalf("auth view missing browser progress: %q", view)
 	}
 	if strings.Contains(view, "Signed in") {
 		t.Fatalf("unsigned-in chatgpt shows a signed-in state: %q", view)
 	}
 	// Enter is a no-op: no sign-in here, no key modal.
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil || m.keyModal.checking {
+	if cmd != nil || !m.keyModal.checking {
 		t.Fatalf("Enter on unsigned-in chatgpt did something: cmd=%v modal=%+v", cmd, m.keyModal)
 	}
 	if m.client != prevClient || m.modelName != "start-model" {
 		t.Fatalf("chatgpt auth view changed the session: client=%v model=%q", m.client, m.modelName)
 	}
+	m.cancelOAuthLogin()
 }
 
 // TestProvidersChatgptStateSignedIn drives the signed-in path: with a stored
@@ -802,7 +796,7 @@ func TestProvidersChatgptStateSignedIn(t *testing.T) {
 	if !m.keyModal.open || !m.keyModal.auth || !m.keyModal.signedIn {
 		t.Fatalf("signed-in auth view not opened: %+v", m.keyModal)
 	}
-	if !strings.Contains(m.View(), "Signed in") {
+	if !strings.Contains(m.View(), "[active]") || !strings.Contains(m.View(), "user@example.test") {
 		t.Fatalf("auth view missing the signed-in state: %q", m.View())
 	}
 	// Enter does nothing even when signed in: the modal is for keys only.
@@ -882,7 +876,7 @@ func TestProvidersDialogOAuthRow(t *testing.T) {
 		}
 		return ""
 	}
-	if row := chatgptRow(m.dialogItems); row == "" || !strings.Contains(row, "not signed in (first-run setup or --device-login)") || strings.Contains(row, "✔") {
+	if row := chatgptRow(m.dialogItems); row == "" || !strings.Contains(row, "browser sign-in required") || strings.Contains(row, "✔") {
 		t.Fatalf("unsigned-in chatgpt row = %q", row)
 	}
 

@@ -64,8 +64,7 @@ type Client struct {
 	sessionHeader string // provider-required per-conversation session header
 	sessionID     string // stable per-conversation session identifier
 
-	oauth     *oauthSession // non-nil for OAuth providers (ChatGPT/Codex)
-	oauthSave func(OAuthCredentials) error
+	oauth *oauthSession // shared Sign in with ChatGPT session, including forks
 
 	rateMu              sync.Mutex // guards the last-seen Codex rate-limit headers and captured token usage
 	rateUsedPercent     string
@@ -77,6 +76,7 @@ type Client struct {
 	tokenPromptSeen     bool
 	tokenCompletionSeen bool
 	tokenRequest        uint64
+	tokenReport         usageReport // last request's full report, for LastRequest
 }
 
 // New accepts a local loopback HTTP /v1 base URL or an HTTPS endpoint from the
@@ -187,142 +187,6 @@ func (c *Client) APIKey() string {
 	return c.apiKey
 }
 
-// NewOAuth builds a client for an OAuth provider (ChatGPT/Codex). The
-// endpoint follows the same validation rules as New; chat requests go to
-// base + "/responses" (OpenAI Responses wire) instead of /chat/completions.
-// creds is the stored login; it is refreshed transparently when expired.
-func NewOAuth(baseURL, modelName, issuer, clientID string, creds OAuthCredentials) (*Client, error) {
-	base, err := parseEndpoint(baseURL)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(modelName) == "" {
-		return nil, errors.New("model name is required")
-	}
-	if strings.TrimSpace(issuer) == "" || strings.TrimSpace(clientID) == "" {
-		return nil, errors.New("oauth issuer and client ID are required")
-	}
-	c := &Client{
-		url:   base + "/responses",
-		base:  base,
-		model: modelName,
-		http:  noRedirectHTTPClient(),
-	}
-	c.oauth = &oauthSession{issuer: issuer, clientID: clientID, creds: creds}
-	c.oauth.client = c
-	return c, nil
-}
-
-// SetOAuthSaver registers the callback invoked with the fresh credential
-// set after every successful token refresh, so the app layer can persist
-// it. Refreshes still work when unset.
-func (c *Client) SetOAuthSaver(save func(OAuthCredentials) error) {
-	if c == nil || c.oauth == nil {
-		return
-	}
-	c.oauth.mu.Lock()
-	c.oauthSave = save
-	c.oauth.mu.Unlock()
-}
-
-// errChatgptLoginExpired marks an unusable refresh: only a new browser or
-// device login fixes it.
-var errChatgptLoginExpired = errors.New("chatgpt login expired; sign in again")
-
-// oauthSession holds one OAuth provider login and mints access tokens,
-// refreshing the stored credential when it is stale. A refresh is
-// single-flight: concurrent callers wait for the in-flight one.
-type oauthSession struct {
-	client   *Client // back-reference for the shared HTTP client and token saver
-	issuer   string
-	clientID string
-
-	mu    sync.Mutex
-	creds OAuthCredentials
-
-	// In-flight refresh state, guarded by mu. refreshDone is non-nil while
-	// a refresh runs and is closed with the outcome.
-	refreshing  bool
-	refreshDone chan struct{}
-	refreshTok  string
-	refreshErr  error
-}
-
-// accessTokenGrace is how long before expiry a cached access token is
-// considered stale, so requests never start with a token about to lapse.
-const accessTokenGrace = 30 * time.Second
-
-// refreshRequestTimeout bounds each token refresh request.
-const refreshRequestTimeout = 30 * time.Second
-
-// access returns a usable access token, refreshing the login when it is
-// expired (or when a rejected request forces it). The returned error for a
-// failed refresh always mentions signing in again.
-func (s *oauthSession) access(ctx context.Context, force bool) (string, error) {
-	s.mu.Lock()
-	if !force && s.creds.Access != "" && time.Now().UnixMilli() < s.creds.Expires-accessTokenGrace.Milliseconds() {
-		token := s.creds.Access
-		s.mu.Unlock()
-		return token, nil
-	}
-	if s.creds.Access == "" && s.creds.Expires == 0 {
-		s.mu.Unlock()
-		return "", errors.New("no stored access token; sign in again")
-	}
-	if s.refreshing {
-		done := s.refreshDone
-		s.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-done:
-		}
-		s.mu.Lock()
-		token, err := s.refreshTok, s.refreshErr
-		s.mu.Unlock()
-		return token, err
-	}
-	s.refreshing = true
-	s.refreshDone = make(chan struct{})
-	refreshToken := s.creds.Refresh
-	save := s.client.oauthSave
-	s.mu.Unlock()
-
-	refreshCtx, cancel := context.WithTimeout(ctx, refreshRequestTimeout)
-	defer cancel()
-	ts, err := RefreshTokens(refreshCtx, s.client.http, s.issuer, s.clientID, refreshToken)
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err != nil {
-		s.refreshTok = ""
-		s.refreshErr = fmt.Errorf("%w: %v", errChatgptLoginExpired, err)
-	} else {
-		creds := ts.Credentials()
-		if creds.AccountID == "" {
-			creds.AccountID = s.creds.AccountID // the new token set carries no account claim
-		}
-		s.creds = creds
-		s.refreshTok = creds.Access
-		s.refreshErr = nil
-		if save != nil {
-			_ = save(creds) // a persistence failure never fails the request
-		}
-	}
-	s.refreshing = false
-	done := s.refreshDone
-	s.refreshDone = nil
-	close(done)
-	return s.refreshTok, s.refreshErr
-}
-
-// accountID returns the ChatGPT account ID sent with codex requests.
-func (s *oauthSession) accountID() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.creds.AccountID
-}
-
 type requestMessage struct {
 	Role       string            `json:"role"`
 	Content    string            `json:"content"`
@@ -353,9 +217,27 @@ type requestTool struct {
 // returned as a successful answer. Reasoning is never sent back on a later
 // request.
 func (c *Client) Stream(ctx context.Context, messages []Message, tools []ToolDefinition, onText func(string), onReasoning func(string)) (Message, error) {
+	message, _, err := c.stream(ctx, messages, tools, onText, onReasoning)
+	return message, err
+}
+
+// StreamUsage is Stream plus this request's own usage breakdown
+// (specs/model-metadata § Token accounting). usageOK is false when the
+// response carried no usage object. Unlike LastTokenUsage, the result
+// belongs to this call even when other requests share the client.
+func (c *Client) StreamUsage(ctx context.Context, messages []Message, tools []ToolDefinition, onText func(string), onReasoning func(string)) (message Message, usage RequestUsage, usageOK bool, err error) {
+	message, report, err := c.stream(ctx, messages, tools, onText, onReasoning)
+	if err != nil || !report.ok {
+		return message, RequestUsage{}, false, err
+	}
+	return message, report.request(), true, nil
+}
+
+// stream runs one request and returns its parsed usage report.
+func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDefinition, onText func(string), onReasoning func(string)) (Message, usageReport, error) {
 	var result Message
 	if c == nil {
-		return result, errors.New("model client is nil")
+		return result, usageReport{}, errors.New("model client is nil")
 	}
 	requestID := c.beginTokenUsage()
 	if c.oauth != nil {
@@ -374,15 +256,15 @@ func (c *Client) Stream(ctx context.Context, messages []Message, tools []ToolDef
 	body.StreamOptions = &streamOptions{IncludeUsage: true}
 	for _, m := range messages {
 		if m.Role != "system" && m.Role != "developer" && m.Role != "user" && m.Role != "assistant" && m.Role != "tool" {
-			return result, fmt.Errorf("invalid message role %q", m.Role)
+			return result, usageReport{}, fmt.Errorf("invalid message role %q", m.Role)
 		}
 		if m.Role == "tool" && m.ToolCallID == "" {
-			return result, errors.New("tool result requires a tool call ID")
+			return result, usageReport{}, errors.New("tool result requires a tool call ID")
 		}
 		rm := requestMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
 		for _, call := range m.ToolCalls {
 			if m.Role != "assistant" || call.ID == "" || call.Name == "" || !json.Valid([]byte(call.Arguments)) {
-				return result, errors.New("invalid assistant tool call")
+				return result, usageReport{}, errors.New("invalid assistant tool call")
 			}
 			rc := requestToolCall{ID: call.ID, Type: "function"}
 			rc.Function.Name, rc.Function.Arguments = call.Name, call.Arguments
@@ -392,7 +274,7 @@ func (c *Client) Stream(ctx context.Context, messages []Message, tools []ToolDef
 	}
 	for _, t := range tools {
 		if t.Name == "" || len(t.Parameters) == 0 || !json.Valid(t.Parameters) {
-			return result, fmt.Errorf("invalid tool definition %q", t.Name)
+			return result, usageReport{}, fmt.Errorf("invalid tool definition %q", t.Name)
 		}
 		rt := requestTool{Type: "function"}
 		rt.Function.Name, rt.Function.Description, rt.Function.Parameters = t.Name, t.Description, t.Parameters
@@ -418,15 +300,15 @@ func (c *Client) Stream(ctx context.Context, messages []Message, tools []ToolDef
 	for attempt := 0; attempt < 2; attempt++ {
 		payload, err := json.Marshal(body)
 		if err != nil {
-			return result, fmt.Errorf("encode model request: %w", err)
+			return result, usageReport{}, fmt.Errorf("encode model request: %w", err)
 		}
 		req, err := newRequest(payload)
 		if err != nil {
-			return result, err
+			return result, usageReport{}, err
 		}
 		resp, err = c.http.Do(req)
 		if err != nil {
-			return result, fmt.Errorf("model request: %w", err)
+			return result, usageReport{}, fmt.Errorf("model request: %w", err)
 		}
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			break
@@ -434,7 +316,7 @@ func (c *Client) Stream(ctx context.Context, messages []Message, tools []ToolDef
 		detail, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBytes+1))
 		resp.Body.Close()
 		if readErr != nil {
-			return result, fmt.Errorf("model HTTP %s (reading error: %v)", resp.Status, readErr)
+			return result, usageReport{}, fmt.Errorf("model HTTP %s (reading error: %v)", resp.Status, readErr)
 		}
 		if len(detail) > maxErrorBytes {
 			detail = detail[:maxErrorBytes]
@@ -448,21 +330,22 @@ func (c *Client) Stream(ctx context.Context, messages []Message, tools []ToolDef
 		}
 		message := fmt.Sprintf("model HTTP %s: %s", resp.Status, strings.TrimSpace(string(detail)))
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return result, fmt.Errorf("%w: %s", ErrUnauthorized, message)
+			return result, usageReport{}, fmt.Errorf("%w: %s", ErrUnauthorized, message)
 		}
-		return result, errors.New(message)
+		return result, usageReport{}, errors.New(message)
 	}
 	defer resp.Body.Close()
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || mediaType != "text/event-stream" {
-		return result, fmt.Errorf("model returned incompatible content type %q (expected SSE)", resp.Header.Get("Content-Type"))
+		return result, usageReport{}, fmt.Errorf("model returned incompatible content type %q (expected SSE)", resp.Header.Get("Content-Type"))
 	}
 	message, report, err := consumeStream(ctx, io.LimitReader(resp.Body, maxResponseBytes+1), onText, onReasoning)
-	if err == nil {
-		c.setTokenUsage(requestID, report)
-		c.markConnected()
+	if err != nil {
+		return message, usageReport{}, err
 	}
-	return message, err
+	c.setTokenUsage(requestID, report)
+	c.markConnected()
+	return message, report, nil
 }
 
 func streamUsageOptionRejected(status int, detail []byte) bool {
@@ -516,7 +399,7 @@ func parseFinalUsageDetailed(raw json.RawMessage) usageReport {
 	result.Prompt, result.Completion = prompt, completion
 	result.PromptSeen = hasPrompt
 	if hasPrompt || hasCompletion {
-		return usageReport{usage: result, seen: usageSeen{prompt: hasPrompt, completion: hasCompletion}, ok: true}
+		return usageReport{usage: result, seen: usageSeen{prompt: hasPrompt, completion: hasCompletion}, detail: parseUsageDetail(usage), ok: true}.withAdditiveReasoning()
 	}
 	// Preserve the historical signal for a valid usage object with no known
 	// token fields; malformed recognized fields, by contrast, are ignored.
@@ -530,84 +413,36 @@ func parseFinalUsageDetailed(raw json.RawMessage) usageReport {
 	return usageReport{usage: result, ok: true}
 }
 
-// streamCodex runs the ChatGPT/Codex (OpenAI Responses wire) turn: it
-// refreshes the login when needed, posts to base+"/responses", retries once
-// after a forced refresh on HTTP 401, and parses the SSE stream. The three
-// x-codex-primary-* rate-limit headers of the last response are captured for
-// Usage, and the terminal event's token usage for LastTokenUsage.
-func (c *Client) streamCodex(ctx context.Context, messages []Message, tools []ToolDefinition, onText func(string), onReasoning func(string), requestID uint64) (Message, error) {
+// streamCodex runs a public Responses API turn with Sign in with ChatGPT.
+// Optional rate headers and terminal token usage are captured when present.
+func (c *Client) streamCodex(ctx context.Context, messages []Message, tools []ToolDefinition, onText func(string), onReasoning func(string), requestID uint64) (Message, usageReport, error) {
 	var result Message
-	token, err := c.oauth.access(ctx, false)
-	if err != nil {
-		return result, err
-	}
 	payload, err := BuildCodexRequest(c.model, messages, tools)
 	if err != nil {
-		return result, err
+		return result, usageReport{}, err
 	}
-	for attempt := 0; ; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(payload))
-		if err != nil {
-			return result, fmt.Errorf("create model request: %w", err)
-		}
-		c.setCodexHeaders(req, token)
-		resp, err := c.http.Do(req)
-		if err != nil {
-			return result, fmt.Errorf("model request: %w", err)
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			detail, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBytes+1))
-			resp.Body.Close()
-			if readErr != nil {
-				return result, fmt.Errorf("model HTTP %s (reading error: %v)", resp.Status, readErr)
-			}
-			if len(detail) > maxErrorBytes {
-				detail = detail[:maxErrorBytes]
-			}
-			if resp.StatusCode == http.StatusUnauthorized && attempt == 0 {
-				// The access token may have been revoked mid-flight: force
-				// one refresh and retry the request exactly once.
-				token, err = c.oauth.access(ctx, true)
-				if err != nil {
-					return result, err
-				}
-				continue
-			}
-			message := fmt.Sprintf("model HTTP %s: %s", resp.Status, strings.TrimSpace(string(detail)))
-			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-				return result, fmt.Errorf("%w: %s", ErrUnauthorized, message)
-			}
-			return result, errors.New(message)
-		}
-		c.captureRateLimit(resp.Header)
-		mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-		if err != nil || mediaType != "text/event-stream" {
-			resp.Body.Close()
-			return result, fmt.Errorf("model returned incompatible content type %q (expected SSE)", resp.Header.Get("Content-Type"))
-		}
-		message, report, err := consumeCodexStreamDetailed(ctx, io.LimitReader(resp.Body, maxResponseBytes+1), onText, onReasoning)
-		resp.Body.Close()
-		if err == nil {
-			c.setTokenUsage(requestID, report)
-			c.markConnected()
-		}
-		return message, err
+	requestCtx, cancel := c.oauth.requestContext(ctx)
+	defer cancel()
+	resp, err := c.doOAuthRequest(requestCtx, http.MethodPost, "/responses", payload, "text/event-stream")
+	if err != nil {
+		return result, usageReport{}, fmt.Errorf("model request: %w", err)
 	}
-}
-
-// setCodexHeaders applies the ChatGPT/Codex request headers.
-func (c *Client) setCodexHeaders(req *http.Request, token string) {
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("User-Agent", UserAgent)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("originator", ChatGPTOriginator)
-	if id := c.oauth.accountID(); id != "" {
-		req.Header.Set("ChatGPT-Account-Id", id)
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return result, usageReport{}, oauthHTTPError(resp)
 	}
-	if c.sessionHeader != "" && c.sessionID != "" {
-		req.Header.Set(c.sessionHeader, c.sessionID)
+	c.captureRateLimit(resp.Header)
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || mediaType != "text/event-stream" {
+		return result, usageReport{}, fmt.Errorf("model returned incompatible content type %q (expected SSE)", resp.Header.Get("Content-Type"))
 	}
+	message, report, err := consumeCodexStreamDetailed(requestCtx, io.LimitReader(resp.Body, maxResponseBytes+1), onText, onReasoning, tools)
+	if err != nil {
+		return message, usageReport{}, err
+	}
+	c.setTokenUsage(requestID, report)
+	c.markConnected()
+	return message, report, nil
 }
 
 // captureRateLimit records the last-seen Codex rate-limit response headers.
@@ -647,6 +482,7 @@ func (c *Client) beginTokenUsage() uint64 {
 	defer c.rateMu.Unlock()
 	c.tokenRequest++
 	c.tokenPrompt, c.tokenCompletion, c.tokenSeen, c.tokenPromptSeen, c.tokenCompletionSeen = 0, 0, false, false, false
+	c.tokenReport = usageReport{}
 	return c.tokenRequest
 }
 
@@ -662,6 +498,7 @@ func (c *Client) setTokenUsage(requestID uint64, report usageReport) {
 	}
 	c.tokenPrompt, c.tokenCompletion, c.tokenSeen = report.usage.Prompt, report.usage.Completion, report.ok
 	c.tokenPromptSeen, c.tokenCompletionSeen = report.usage.PromptSeen, report.ok && report.seen.completion
+	c.tokenReport = report
 	c.rateMu.Unlock()
 }
 
@@ -704,10 +541,9 @@ func (c *Client) Check(ctx context.Context) error {
 		return errors.New("model client is nil")
 	}
 	if c.oauth != nil {
-		// The Codex backend has no OpenAI-shaped model list, so the check is
-		// only that the login is valid (refreshing it when stale). No
-		// conversation content is ever sent.
-		_, err := c.oauth.access(ctx, false)
+		// Probe the authenticated public catalog even with a cached token:
+		// a local expiry check cannot detect remote revocation.
+		_, err := c.Models(ctx)
 		return err
 	}
 	raw, err := fetchModelList(ctx, c.base, c.apiKey)
@@ -743,6 +579,7 @@ func ListModels(ctx context.Context, endpoint, apiKey string) ([]string, error) 
 // zero when the model list has no supported positive context-window metadata.
 type ModelDetails struct {
 	ID                  string
+	DisplayName         string // account catalog label; empty when not provided
 	ContextWindow       int64
 	ContextWindowSource string // response field that supplied ContextWindow; empty when unknown
 }
@@ -921,9 +758,10 @@ func fetchModelList(ctx context.Context, base, apiKey string) ([]byte, error) {
 	return body, nil
 }
 
-// EnsureConnected reports the connection state, probing once with a short
-// deadline when this client has not yet answered a check or stream. A failed
-// check is not remembered, so a later run probes again.
+// EnsureConnected probes with a short deadline before an agent run. OAuth
+// sessions always probe the authenticated catalog to detect remote revocation
+// and another process's account changes before prompts. API-key clients retain
+// the successful-check cache; failed checks are never remembered.
 func (c *Client) EnsureConnected(ctx context.Context) error {
 	if c == nil {
 		return errors.New("model client is nil")
@@ -931,7 +769,7 @@ func (c *Client) EnsureConnected(ctx context.Context) error {
 	c.mu.Lock()
 	checked := c.checked
 	c.mu.Unlock()
-	if checked {
+	if checked && c.oauth == nil {
 		return nil
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)

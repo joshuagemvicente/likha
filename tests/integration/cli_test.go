@@ -61,3 +61,43 @@ func TestStartupCommandRejectsUnknownProvider(t *testing.T) {
 		t.Fatalf("CLI did not list accepted providers: %q", out)
 	}
 }
+
+func TestChatGPTStartupWithoutAuthDirectsBrowserLogin(t *testing.T) {
+	cmd := exec.Command("go", "run", "./cmd/likha", "--provider", "chatgpt", t.TempDir())
+	cmd.Dir = filepath.Join("..", "..")
+	cmd.Env = append(os.Environ(), "LIKHA_MODEL=", "LIKHA_API_KEY=", "LIKHA_ENDPOINT=", "LIKHA_STATE_DIR="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "--provider chatgpt --login") || strings.Contains(string(out), "--device-login") {
+		t.Fatalf("missing ChatGPT login did not direct official browser authorization: %q", out)
+	}
+}
+
+func TestDeprecatedDeviceLoginRejectedWithoutRepository(t *testing.T) {
+	cmd := exec.Command("go", "run", "./cmd/likha", "--provider", "chatgpt", "--device-login", "/not/a/repository")
+	cmd.Dir = filepath.Join("..", "..")
+	cmd.Env = append(os.Environ(), "LIKHA_STATE_DIR="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "no longer supported") || !strings.Contains(string(out), "--provider chatgpt --login") || strings.Contains(string(out), "enter code") {
+		t.Fatalf("deprecated device flag attempted a flow instead of actionable rejection: %q", out)
+	}
+}
+
+func TestBrowserLoginFlagRejectsAPIKeyProvider(t *testing.T) {
+	cmd := exec.Command("go", "run", "./cmd/likha", "--provider", "openai", "--login")
+	cmd.Dir = filepath.Join("..", "..")
+	cmd.Env = append(os.Environ(), "LIKHA_STATE_DIR="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "use --provider chatgpt") {
+		t.Fatalf("browser login flag did not explain its provider: %q", out)
+	}
+}
+
+func TestChatGPTCustomEndpointRejectedBeforeAuthorization(t *testing.T) {
+	cmd := exec.Command("go", "run", "./cmd/likha", "--provider", "chatgpt", "--endpoint", "https://example.invalid/v1", "--login")
+	cmd.Dir = filepath.Join("..", "..")
+	cmd.Env = append(os.Environ(), "LIKHA_ENDPOINT=", "LIKHA_STATE_DIR="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "official public OpenAI API") {
+		t.Fatalf("custom OAuth endpoint was not rejected: %q", out)
+	}
+}

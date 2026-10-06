@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,7 +15,7 @@ import (
 
 // modelsSection is one configured provider's contribution to the /models
 // dialog: the provider record plus its reported model ids in reported order.
-// The chatgpt row carries the curated list with no network.
+// ChatGPT contributes only authenticated account-specific discovery.
 //
 // All-provider models (specs/all-models): openDialog fans out one command
 // per configured provider and the section handlers render the sections in
@@ -22,6 +24,7 @@ type modelsSection struct {
 	provider       model.Provider
 	models         []string
 	contextWindows map[string]int64
+	modelNames     map[string]string
 }
 
 // modelsRow is one selectable dialog row: a model id plus the section's
@@ -32,6 +35,7 @@ type modelsRow struct {
 	provider      model.Provider
 	model         string
 	contextWindow int64
+	displayName   string
 }
 
 // modelsSectionMsg carries one provider's arrived /models section. gen is
@@ -87,32 +91,48 @@ var listModelsFunc = func(ctx context.Context, base, apiKey string) ([]string, e
 // the slow-path log hook set it.
 var observeModelsFetch func(provider string, elapsed time.Duration, err error)
 
-// modelsTarget is one fetch unit: the provider plus the key to list with.
-// oauth targets skip the network and contribute the curated list.
+// modelsTarget is one fetch unit. OAuth targets always use an OAuth client,
+// never the keyless public ListModels helper.
 type modelsTarget struct {
 	provider         model.Provider
 	key              string
 	oauth            bool
+	creds            model.OAuthCredentials
+	stateDir         string
+	client           *model.Client
+	modelNames       map[string]string
 	metadataObserver providers.ModelMetadataObserver
 }
 
-// fetchModelsTarget lists one target: oauth targets contribute the curated
-// list with no network, API targets list ids and metadata through
-// listModelsFunc under the existing 5 s bound and report through
-// observeModelsFetch.
+// fetchModelsTarget lists one target under the existing 5 s bound and reports
+// actual model metadata through the diagnostics observer.
 func fetchModelsTarget(tg modelsTarget) ([]string, map[string]int64, error) {
-	if tg.oauth {
-		if tg.metadataObserver != nil {
-			tg.metadataObserver(tg.provider.Name, "models dialog (curated OAuth list; no /models endpoint)", 0, nil, nil)
-		}
-		return model.ChatGPTModels, nil, nil
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	sink := &modelDetailsSink{}
 	ctx = context.WithValue(ctx, modelDetailsContextKey{}, sink)
 	start := time.Now()
-	ids, err := listModelsFunc(ctx, tg.provider.BaseURL, tg.key)
+	var ids []string
+	var err error
+	if tg.oauth {
+		client := tg.client
+		if client == nil {
+			client, err = model.NewOAuth(tg.provider.BaseURL, "", tg.creds.Issuer, tg.creds.ClientID, tg.creds)
+			if err == nil {
+				bindOAuthStorage(client, tg.stateDir, tg.provider.Name)
+			}
+		}
+		if err == nil {
+			sink.details, err = oauthModelsFunc(ctx, client)
+			for _, detail := range sink.details {
+				if detail.ID != "" {
+					ids = append(ids, detail.ID)
+				}
+			}
+		}
+	} else {
+		ids, err = listModelsFunc(ctx, tg.provider.BaseURL, tg.key)
+	}
 	elapsed := time.Since(start)
 	if tg.metadataObserver != nil {
 		tg.metadataObserver(tg.provider.Name, "models dialog /models", elapsed, sink.details, err)
@@ -125,6 +145,9 @@ func fetchModelsTarget(tg modelsTarget) ([]string, map[string]int64, error) {
 	}
 	contextWindows := make(map[string]int64)
 	for _, detail := range sink.details {
+		if detail.DisplayName != "" && tg.modelNames != nil {
+			tg.modelNames[detail.ID] = detail.DisplayName
+		}
 		if detail.ID != "" && detail.ContextWindow > 0 {
 			if _, exists := contextWindows[detail.ID]; !exists {
 				contextWindows[detail.ID] = detail.ContextWindow
@@ -143,10 +166,6 @@ func fetchModelsTarget(tg modelsTarget) ([]string, map[string]int64, error) {
 // holds no stored credential it lists through the live client's key
 // (flag/env sessions), and a live client outside the predefined list falls
 // back to a single live fetch so custom endpoints keep today's behavior.
-//
-// chatgpt contributes model.ChatGPTModels with no network: the Codex backend
-// has no OpenAI-shaped list route, which is also why /models on a chatgpt
-// session errors today.
 func buildModelsTargets(stateDir, activeBase, activeCanonical, activeKey, activeDisplay string) []modelsTarget {
 	var targets []modelsTarget
 	creds, err := providers.ReadCredentials(stateDir)
@@ -155,8 +174,8 @@ func buildModelsTargets(stateDir, activeBase, activeCanonical, activeKey, active
 	}
 	for _, p := range model.Providers {
 		if p.Auth == model.AuthOAuth {
-			if creds != nil && creds[p.Name].Type == "oauth" {
-				targets = append(targets, modelsTarget{provider: p, oauth: true})
+			if account, signedIn, err := providers.StoredOAuth(stateDir, p.Name); err == nil && signedIn {
+				targets = append(targets, modelsTarget{provider: p, oauth: true, creds: account, stateDir: stateDir})
 			}
 			continue
 		}
@@ -165,15 +184,17 @@ func buildModelsTargets(stateDir, activeBase, activeCanonical, activeKey, active
 		}
 	}
 	activeIdx := -1
-	for i, t := range targets {
-		if activeBase != "" && t.provider.BaseURL == activeBase {
-			activeIdx = i
-			break
-		}
-	}
-	if activeIdx < 0 && activeCanonical != "" {
+	if activeCanonical != "" {
 		for i, t := range targets {
 			if strings.EqualFold(t.provider.Name, activeCanonical) {
+				activeIdx = i
+				break
+			}
+		}
+	}
+	if activeIdx < 0 && activeCanonical == "" {
+		for i, t := range targets {
+			if activeBase != "" && t.provider.BaseURL == activeBase {
 				activeIdx = i
 				break
 			}
@@ -189,7 +210,8 @@ func buildModelsTargets(stateDir, activeBase, activeCanonical, activeKey, active
 	} else if activeIdx < 0 && activeBase != "" {
 		if p, ok := lookupProviderByBase(activeBase, activeCanonical); ok {
 			if p.Auth == model.AuthOAuth {
-				targets = append([]modelsTarget{{provider: p, oauth: true}}, targets...)
+				account, _, _ := providers.StoredOAuth(stateDir, p.Name)
+				targets = append([]modelsTarget{{provider: p, oauth: true, creds: account, stateDir: stateDir}}, targets...)
 			} else {
 				targets = append([]modelsTarget{{provider: p, key: activeKey}}, targets...)
 			}
@@ -220,7 +242,7 @@ func (m *ui) modelsSources() (apis []model.Provider, oauth []model.Provider) {
 	}
 	for _, p := range model.Providers {
 		if p.Auth == model.AuthOAuth {
-			if creds[p.Name].Type == "oauth" {
+			if _, signedIn, err := providers.StoredOAuth(m.stateDir, p.Name); err == nil && signedIn {
 				oauth = append(oauth, p)
 			}
 			continue
@@ -235,13 +257,15 @@ func (m *ui) modelsSources() (apis []model.Provider, oauth []model.Provider) {
 // lookupProviderByBase resolves the live client's base URL (falling back to
 // the stored canonical name) to its predefined row.
 func lookupProviderByBase(base, canonical string) (model.Provider, bool) {
+	// ChatGPT and OpenAI API-key clients deliberately share the public resource
+	// URL. Their canonical identity, not that URL, selects the auth mechanism.
+	if canonical != "" {
+		return model.LookupProvider(canonical)
+	}
 	for _, p := range model.Providers {
 		if base != "" && p.BaseURL == base {
 			return p, true
 		}
-	}
-	if canonical != "" {
-		return model.LookupProvider(canonical)
 	}
 	return model.Provider{}, false
 }
@@ -263,6 +287,10 @@ func (m *ui) startModelsFetch() tea.Cmd {
 	targets := buildModelsTargets(stateDir, activeBase, canonical, activeKey, display)
 	for i := range targets {
 		targets[i].metadataObserver = m.conn.ModelMetadataObserver
+		targets[i].modelNames = map[string]string{}
+		if targets[i].oauth && m.isLiveProvider(targets[i].provider) {
+			targets[i].client = m.client
+		}
 	}
 	m.modelsArrived = map[string]modelsSection{}
 	m.modelsTargetOrder = m.modelsTargetOrder[:0]
@@ -297,12 +325,6 @@ func (m *ui) startModelsFetch() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(targets))
 	for _, tg := range targets {
 		tg := tg
-		if tg.oauth {
-			cmds = append(cmds, func() tea.Msg {
-				return modelsSectionMsg{gen: gen, section: modelsSection{provider: tg.provider, models: model.ChatGPTModels}}
-			})
-			continue
-		}
 		cmds = append(cmds, func() tea.Msg {
 			ids, contextWindows, err := fetchModelsTarget(tg)
 			if err != nil || len(ids) == 0 {
@@ -312,7 +334,7 @@ func (m *ui) startModelsFetch() tea.Cmd {
 				}
 				return modelsProviderFailedMsg{gen: gen, displayName: tg.provider.DisplayName, errSample: sample}
 			}
-			return modelsSectionMsg{gen: gen, section: modelsSection{provider: tg.provider, models: ids, contextWindows: contextWindows}}
+			return modelsSectionMsg{gen: gen, section: modelsSection{provider: tg.provider, models: ids, contextWindows: contextWindows, modelNames: tg.modelNames}}
 		})
 	}
 	return tea.Batch(cmds...)
@@ -377,7 +399,7 @@ func (m *ui) applyModelsSections(sections []modelsSection) {
 				continue
 			}
 			seen[id] = true
-			rows = append(rows, modelsRow{provider: s.provider, model: id, contextWindow: s.contextWindows[id]})
+			rows = append(rows, modelsRow{provider: s.provider, model: id, contextWindow: s.contextWindows[id], displayName: s.modelNames[id]})
 			flat = append(flat, id)
 			counts[id]++
 		}
@@ -469,13 +491,48 @@ func (m *ui) isLiveProvider(p model.Provider) bool {
 func (m *ui) modelLabel(orig int) string {
 	row := m.dialogModelRows[orig]
 	label := row.model
+	if row.displayName != "" && row.displayName != row.model {
+		label = row.displayName + " (" + row.model + ")"
+	}
 	if m.dialogModelCounts[row.model] > 1 {
-		label = row.model + " · " + row.provider.DisplayName
+		label += " · " + row.provider.DisplayName
 	}
 	if row.model == m.modelName && m.isLiveProvider(row.provider) {
 		return label + " (current)"
 	}
 	return label
+}
+
+// modelDetailParts returns a /models row's known metadata, context first
+// then price per 1M tokens ("1M ctx", "$4/$20"), from the row's live
+// /models window, else the bundled catalog's exact (provider, model) pair
+// (specs/model-metadata). Unknown parts are omitted, never guessed.
+func (m *ui) modelDetailParts(orig int) []string {
+	row := m.dialogModelRows[orig]
+	var parts []string
+	if window, ok := model.ResolveContextWindow(row.provider.Name, row.model, 0, row.contextWindow); ok {
+		parts = append(parts, humanTokens(window)+" ctx")
+	}
+	if price := modelPriceLabel(row.provider.Name, row.model); price != "" {
+		parts = append(parts, price)
+	}
+	return parts
+}
+
+// modelPriceLabel renders the catalog's input/output price per 1M tokens
+// for the exact pair ("$4/$20", "$0.15/$0.6"), or "" when unknown.
+func modelPriceLabel(provider, modelID string) string {
+	input, output, ok := model.ModelPrice(provider, modelID)
+	if !ok {
+		return ""
+	}
+	return "$" + compactPrice(input) + "/$" + compactPrice(output)
+}
+
+// compactPrice formats dollars without trailing zeros: 4, 2.5, 0.15, 0.075.
+// Four decimals bound the precision of an unusual rate.
+func compactPrice(dollars float64) string {
+	return strconv.FormatFloat(math.Round(dollars*10_000)/10_000, 'f', -1, 64)
 }
 
 // applyModelRow switches to the selected row. The dialog is already closed
@@ -487,6 +544,10 @@ func (m *ui) modelLabel(orig int) string {
 // just-completed list fetch is the freshness signal: no second verify
 // round-trip.
 func (m *ui) applyModelRow(row modelsRow) {
+	if m.working || m.pending != nil {
+		m.entries = append(m.entries, entry{role: "Error", content: "Cancel the active run and resolve its review before switching models or providers."})
+		return
+	}
 	if m.isLiveProvider(row.provider) {
 		m.applyModel(row.model)
 		m.setActiveContextWindows(row.provider, row.model, row.contextWindow, true)
@@ -500,18 +561,16 @@ func (m *ui) applyModelRow(row modelsRow) {
 		}
 		if !ok {
 			m.status = "Error"
-			m.entries = append(m.entries, entry{role: "Error", content: row.provider.DisplayName + " has no stored sign-in; sign in during first-run setup or run likha --provider chatgpt --device-login"})
+			m.entries = append(m.entries, entry{role: "Error", content: row.provider.DisplayName + " has no stored browser sign-in; use /providers chatgpt to reconnect."})
 			return
 		}
-		client, err := model.NewOAuth(row.provider.BaseURL, row.model, model.ChatGPTIssuer, model.ChatGPTClientID, creds)
+		client, err := model.NewOAuth(row.provider.BaseURL, row.model, creds.Issuer, creds.ClientID, creds)
 		if err != nil {
 			m.status = "Error"
 			m.entries = append(m.entries, entry{role: "Error", content: "Switch to " + row.provider.DisplayName + " failed: " + err.Error()})
 			return
 		}
-		client.SetOAuthSaver(func(c model.OAuthCredentials) error {
-			return providers.StoreOAuth(m.stateDir, row.provider.Name, c)
-		})
+		bindOAuthStorage(client, m.stateDir, row.provider.Name)
 		m.activateModelClient(row.provider, client, row.model)
 		return
 	}
@@ -543,6 +602,9 @@ func (m *ui) activateModelClient(p model.Provider, client *model.Client, modelID
 	if p.SessionHeader != "" {
 		client.SetSessionHeader(p.SessionHeader)
 		client.SetSession(m.snapshot.ID)
+	}
+	if m.client != nil && m.client != client {
+		m.client.InvalidateOAuth()
 	}
 	m.client = client
 	m.modelName = modelID

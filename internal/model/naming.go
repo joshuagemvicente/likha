@@ -17,17 +17,17 @@ type displayNameEntry struct {
 	name   string // display name shown in the status bar
 }
 
-// displayNames is the curated catalog: provider defaults and catalog IDs of
-// provider.go, exact IDs first, then family prefixes.
+// displayNames is the curated catalog: provider defaults and known model IDs,
+// exact IDs first, then family prefixes.
 var displayNames = []displayNameEntry{
 	// Exact IDs first.
-	{"gpt-5.5", "", "GPT-5.5"},                         // provider.go: ChatGPTModels (subscription row)
-	{"gpt-5.4", "", "GPT-5.4"},                         // provider.go: ChatGPTModels
-	{"gpt-5.4-mini", "", "GPT-5.4 mini"},               // provider.go: ChatGPTModels
-	{"gpt-5.3-codex-spark", "", "GPT-5.3 Codex Spark"}, // provider.go: ChatGPTModels
+	{"gpt-5.5", "", "GPT-5.5"},                         // documented ChatGPT model (legacy curated row)
+	{"gpt-5.4", "", "GPT-5.4"},                         // documented ChatGPT model (legacy curated row)
+	{"gpt-5.4-mini", "", "GPT-5.4 mini"},               // documented ChatGPT model (legacy curated row)
+	{"gpt-5.3-codex-spark", "", "GPT-5.3 Codex Spark"}, // documented ChatGPT model (legacy curated row)
 	{"gpt-5.3-codex", "", "GPT-5.3 Codex"},             // provider.go: opencode-zen default
-	{"gpt-6-sol", "", "GPT-6 Sol"},                     // provider.go: ChatGPTModels (placeholder name pending release docs)
-	{"gpt-6-luna", "", "GPT-6 Luna"},                   // provider.go: ChatGPTModels (placeholder name pending release docs)
+	{"gpt-6-sol", "", "GPT-6 Sol"},                     // legacy curated row (placeholder name pending release docs)
+	{"gpt-6-luna", "", "GPT-6 Luna"},                   // legacy curated row (placeholder name pending release docs)
 	{"gpt-4o-mini", "", "GPT-4o mini"},                 // provider.go: openai default; OpenAI docs model list
 	{"glm-5.3-flash", "", "GLM-5.3 Flash"},             // provider.go: opencode-go default (placeholder name pending live probe)
 	{"deepseek-chat", "", "DeepSeek Chat"},             // DeepSeek docs: api-docs.deepseek.com model list

@@ -31,6 +31,11 @@ type TurnEvent struct {
 	TaskRuntime      *explore.Manager
 	Ask              *AskInteraction
 	Consent          *ConsentRequest
+	// Usage is one model request's breakdown (Kind "usage"), emitted after
+	// every successful request of a run so spend counts each tool round.
+	// A "stream_interrupted" event (steer now) carries the stopped request's
+	// usage when the provider reported any, and nil when it did not.
+	Usage *model.RequestUsage
 }
 
 // ConsentRequest asks for one conversation-scoped web grant. Search consents

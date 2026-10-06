@@ -26,14 +26,19 @@ import (
 // configured provider (auth) or the dedicated API-key entry screen for an
 // unconfigured one. The key is stored only after the connection check passes.
 type keyState struct {
-	open     bool
-	auth     bool // auth-state view: the stored credential, not key entry
-	provider model.Provider
-	signedIn bool   // auth view (OAuth): a stored login is present
-	source   string // auth view (key): where the stored key came from
-	input    []rune
-	checking bool
-	err      string
+	open           bool
+	auth           bool // auth-state view: the stored credential, not key entry
+	provider       model.Provider
+	signedIn       bool   // auth view (OAuth): a stored login is present
+	source         string // auth view (key): where the stored key came from
+	input          []rune
+	checking       bool
+	err            string
+	accounts       []model.OAuthCredentials
+	activeClientID string
+	accountCursor  int
+	notice         bool
+	noticeClientID string
 }
 
 // keyCheckMsg carries the connection-check result for the key modal.
@@ -54,24 +59,21 @@ func (m *ui) openKeyModal(p model.Provider) {
 // closeKeyModal discards the overlay and returns to the provider dialog with
 // nothing changed: no stored key, no client swap.
 func (m *ui) closeKeyModal() {
+	if m.keyModal.provider.Auth == model.AuthOAuth {
+		m.cancelOAuthLogin()
+	}
 	m.keyModal = keyState{}
 	m.layoutWidth = 0
 }
 
 // openProviderAuth routes one provider row to its auth surface and never
 // switches anything: a configured key provider opens the auth-state view, an
-// unconfigured one the key-entry modal, and an OAuth provider the sign-in
-// state view (the switcher cannot sign in interactively).
+// unconfigured one the key-entry modal. ChatGPT opens account management, or
+// launches browser sign-in immediately when its active account is signed out.
 func (m *ui) openProviderAuth(p model.Provider) tea.Cmd {
 	m.layoutWidth = 0
 	if p.Auth == model.AuthOAuth {
-		_, signedIn, err := providers.StoredOAuth(m.stateDir, p.Name)
-		if err != nil {
-			m.entries = append(m.entries, entry{role: "Error", content: "Read stored credentials: " + err.Error()})
-			return nil
-		}
-		m.keyModal = keyState{open: true, auth: true, provider: p, signedIn: signedIn}
-		return nil
+		return m.openOAuthProviderAuth(p)
 	}
 	key, err := providers.StoredKey(m.stateDir, p.Name)
 	if err != nil {
@@ -100,13 +102,12 @@ func (m *ui) updateKeyModal(msg tea.KeyMsg) tea.Cmd {
 	if !m.keyModal.open {
 		return nil
 	}
+	if m.keyModal.provider.Auth == model.AuthOAuth {
+		return m.updateOAuthProviderAuth(msg)
+	}
 	if m.keyModal.auth {
 		switch msg.String() {
 		case "enter":
-			if m.keyModal.provider.Auth == model.AuthOAuth {
-				// Sign-in cannot happen here: the modal is for keys only.
-				return nil
-			}
 			// Replace: the stored key stays until a new one passes the check.
 			m.keyModal = keyState{open: true, provider: m.keyModal.provider}
 			m.status = "Replace provider key"
@@ -276,7 +277,7 @@ func (m *ui) providersDialogItems() (items []string, activeIndex int) {
 			} else {
 				// A read error counts as not signed in; the auth view
 				// surfaces it in full when the row is selected.
-				labelSuffix = " — not signed in (first-run setup or --device-login)"
+				labelSuffix = " — browser sign-in required"
 			}
 		} else {
 			key, err := providers.StoredKey(m.stateDir, p.Name)
@@ -359,6 +360,9 @@ func (m *ui) keyModalView() string {
 // and the footer. Enter never switches anything; Esc returns to the provider
 // dialog beneath (or the main view for the direct form).
 func (m *ui) providerAuthView() string {
+	if m.keyModal.provider.Auth == model.AuthOAuth {
+		return m.oauthProviderAuthView()
+	}
 	var base []string
 	if m.dialog.open {
 		base = strings.Split(m.dialogView(), "\n")
@@ -370,16 +374,8 @@ func (m *ui) providerAuthView() string {
 	title := "Auth for " + p.DisplayName
 	footer := "Esc back"
 	var body []string
-	if p.Auth == model.AuthOAuth {
-		if m.keyModal.signedIn {
-			body = append(body, "Signed in.")
-		} else {
-			body = append(body, "Not signed in: sign in during first-run setup or run likha --provider chatgpt --device-login.")
-		}
-	} else {
-		body = append(body, "✔ Connected — key "+m.keyModal.source+".")
-		footer = "Enter replace key  Esc back"
-	}
+	body = append(body, "✔ Connected — key "+m.keyModal.source+".")
+	footer = "Enter replace key  Esc back"
 
 	boxWidth := runewidth.StringWidth(title) + 4
 	for _, line := range body {
@@ -395,8 +391,7 @@ func (m *ui) providerAuthView() string {
 
 	content := []string{withBase(m.theme.Title, m.theme.Base).Render(fit(title, inner)), m.theme.Base.Render(fit("", inner))}
 	for _, line := range body {
-		// Long hints wrap instead of truncating: a clipped
-		// "likha --provider chatgpt --device-login" is useless.
+		// Long hints wrap instead of truncating.
 		for _, chunk := range wrap(line, inner) {
 			content = append(content, m.theme.Base.Render(fit(chunk, inner)))
 		}

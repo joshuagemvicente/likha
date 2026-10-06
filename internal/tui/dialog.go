@@ -69,6 +69,7 @@ func (m *ui) modelMatches(q string) []int {
 	for i, row := range m.dialogModelRows {
 		if q == "" ||
 			strings.Contains(strings.ToLower(row.model), q) ||
+			strings.Contains(strings.ToLower(row.displayName), q) ||
 			strings.Contains(strings.ToLower(row.provider.DisplayName), q) ||
 			strings.Contains(strings.ToLower(row.provider.Name), q) {
 			indices = append(indices, i)
@@ -180,6 +181,7 @@ func (m *ui) handleCommand(line string) tea.Cmd {
 	arg = strings.TrimSpace(arg)
 	switch name {
 	case "quit":
+		m.cancelOAuthLogin()
 		if m.cancel != nil {
 			if m.abandon != nil {
 				close(m.abandon)
@@ -605,9 +607,10 @@ func (m *ui) dialogView() string {
 		title = "q: \"" + m.dialog.query + "\"" + title
 	}
 	type visibleRow struct {
-		header string // non-empty: section header, non-selectable
-		label  string // model rows only
-		pos    int    // match-space position of the model row
+		header  string   // non-empty: section header, non-selectable
+		label   string   // model rows only
+		details []string // model rows: known context and price, right-aligned
+		pos     int      // match-space position of the model row
 	}
 	var visible []visibleRow
 	if isModels {
@@ -615,7 +618,7 @@ func (m *ui) dialogView() string {
 			if header, ok := m.modelHeaderAt(matches, pos); ok {
 				visible = append(visible, visibleRow{header: header})
 			}
-			visible = append(visible, visibleRow{label: m.modelLabel(orig), pos: pos})
+			visible = append(visible, visibleRow{label: m.modelLabel(orig), details: m.modelDetailParts(orig), pos: pos})
 		}
 	} else {
 		visible = make([]visibleRow, len(matches))
@@ -636,6 +639,13 @@ func (m *ui) dialogView() string {
 		}
 		if w := runewidth.StringWidth(text) + 12; w > boxWidth {
 			boxWidth = w
+		}
+		// A model row also fits its details: marker, label, a two-cell
+		// gap, the details, and the same right margin the label keeps.
+		if details := modelDetailText(row.details); details != "" {
+			if w := runewidth.StringWidth(row.label) + runewidth.StringWidth(details) + 8; w > boxWidth {
+				boxWidth = w
+			}
 		}
 	}
 	if w := runewidth.StringWidth(hint) + 2; w > boxWidth {
@@ -722,11 +732,7 @@ func (m *ui) dialogView() string {
 				content = append(content, withBase(m.theme.Title, m.theme.Base).Render(fit(row.header, inner)))
 				continue
 			}
-			if row.pos == m.dialog.cursor {
-				content = append(content, withBase(m.theme.Selected, m.theme.Base).Render(fit("> "+row.label, inner)))
-			} else {
-				content = append(content, m.theme.Base.Render(fit("  "+row.label, inner)))
-			}
+			content = append(content, m.modelDialogRow(row.label, row.details, row.pos == m.dialog.cursor, inner))
 		}
 	}
 	content = append(content, m.theme.Base.Render(fit("", inner)))
@@ -740,6 +746,41 @@ func (m *ui) dialogView() string {
 		content = append(content, withBase(m.theme.Help, m.theme.Base).Render(fit(hint, inner)))
 	}
 	return m.overlayDialogBox(base, content, boxWidth)
+}
+
+// modelDialogRow renders one /models row exactly inner cells wide: the
+// cursor marker and label on the left, the known details right-aligned.
+// Details give way from the front (context before price) until the label
+// keeps a readable width, so they never push the model name out of view
+// and the row never overflows.
+func (m *ui) modelDialogRow(label string, details []string, selected bool, inner int) string {
+	marker := "  "
+	if selected {
+		marker = "> "
+	}
+	need := min(12, runewidth.StringWidth(label))
+	right := modelDetailText(details)
+	for right != "" && inner-2-runewidth.StringWidth(right)-2 < need {
+		details = details[1:]
+		right = modelDetailText(details)
+	}
+	room := inner - 2
+	if right != "" {
+		room -= runewidth.StringWidth(right) + 2
+	}
+	left := fit(marker+fitText(label, max(0, room)), inner-runewidth.StringWidth(right))
+	if selected {
+		return withBase(m.theme.Selected, m.theme.Base).Render(left + right)
+	}
+	if right == "" {
+		return m.theme.Base.Render(left)
+	}
+	return m.theme.Base.Render(left) + withBase(m.theme.Muted, m.theme.Base).Render(right)
+}
+
+// modelDetailText joins a /models row's detail parts: "1M ctx · $4/$20".
+func modelDetailText(parts []string) string {
+	return strings.Join(parts, " · ")
 }
 
 // overlayDialogBox draws the bordered box of pre-fitted content rows centered

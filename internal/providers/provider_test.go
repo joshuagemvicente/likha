@@ -1,8 +1,10 @@
 package providers
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -33,12 +35,15 @@ func TestResolveProviderSelectsEndpointsAndKeys(t *testing.T) {
 }
 
 func TestResolveProviderStoredOAuth(t *testing.T) {
+	t.Setenv("LIKHA_ENDPOINT", "")
+	t.Setenv("LIKHA_API_KEY", "")
+	t.Setenv("LIKHA_CHATGPT_API_KEY", "")
 	stateDir := t.TempDir()
 	// Without a stored login, resolution names the remedy.
-	if _, err := ResolveProvider("chatgpt", "", "", false, stateDir); err == nil || !strings.Contains(err.Error(), "--device-login") {
+	if _, err := ResolveProvider("chatgpt", "", "", false, stateDir); !errors.Is(err, ErrOAuthLoginRequired) || !strings.Contains(err.Error(), "/providers") || strings.Contains(err.Error(), "--device-login") {
 		t.Fatalf("missing login error = %v", err)
 	}
-	want := model.OAuthCredentials{Refresh: "refresh-token", Access: "access-token", Expires: 12345, AccountID: "acc_123"}
+	want := oauthFixture(t, stateDir, "oaiapp_resolution")
 	if err := StoreOAuth(stateDir, "chatgpt", want); err != nil {
 		t.Fatal(err)
 	}
@@ -46,17 +51,41 @@ func TestResolveProviderStoredOAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stored login: %v", err)
 	}
-	if !res.OAuth || !res.Verified || res.Endpoint != "https://chatgpt.com/backend-api/codex" || res.Display != "ChatGPT (Plus/Pro)" || res.Key != "" {
+	if !res.OAuth || !res.Verified || res.Endpoint != model.ChatGPTResource || res.Display != "ChatGPT (Plus/Pro)" || res.Key != "" {
 		t.Fatalf("stored login resolution = %+v", res)
 	}
-	if res.Creds != want {
+	if !reflect.DeepEqual(res.Creds, want) {
 		t.Fatalf("credentials did not round-trip: %+v want %+v", res.Creds, want)
 	}
-	// A --endpoint override still wins for OAuth providers; NewOAuth
-	// validates it later.
-	res, err = ResolveProvider("chatgpt", "https://proxy.example.net/v1", "", false, stateDir)
-	if err != nil || !res.OAuth || res.Endpoint != "https://proxy.example.net/v1" {
-		t.Fatalf("endpoint override = %+v err=%v", res, err)
+	// Even a proxy must not receive the ChatGPT plan credential.
+	if _, err := ResolveProvider("chatgpt", "https://proxy.example.net/v1", "", false, stateDir); err == nil || !strings.Contains(err.Error(), "only https://api.openai.com/v1") {
+		t.Fatalf("endpoint override error = %v", err)
+	}
+}
+
+func TestResolveProviderOAuthRejectsKeysAndCustomEndpoints(t *testing.T) {
+	for _, tc := range []struct {
+		name, endpoint, key, env, value, remedy string
+	}{
+		{name: "flag key", key: "fixture-key", remedy: "not an API key"},
+		{name: "general env key", env: "LIKHA_API_KEY", value: "fixture-key", remedy: "not an API key"},
+		{name: "provider env key", env: "LIKHA_CHATGPT_API_KEY", value: "fixture-key", remedy: "not an API key"},
+		{name: "private endpoint", endpoint: "https://chatgpt.com/backend-api/codex", remedy: "only https://api.openai.com/v1"},
+		{name: "http endpoint", endpoint: "http://api.openai.com/v1", remedy: "only https://api.openai.com/v1"},
+		{name: "env endpoint", env: "LIKHA_ENDPOINT", value: "https://fixture.invalid/v1", remedy: "LIKHA_ENDPOINT"},
+		{name: "env cannot hide behind flag", endpoint: model.ChatGPTResource, env: "LIKHA_ENDPOINT", value: "https://fixture.invalid/v1", remedy: "LIKHA_ENDPOINT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LIKHA_ENDPOINT", "")
+			t.Setenv("LIKHA_API_KEY", "")
+			t.Setenv("LIKHA_CHATGPT_API_KEY", "")
+			if tc.env != "" {
+				t.Setenv(tc.env, tc.value)
+			}
+			if _, err := ResolveProvider("chatgpt", tc.endpoint, tc.key, false, t.TempDir()); err == nil || !strings.Contains(err.Error(), tc.remedy) {
+				t.Fatalf("unsafe OAuth configuration error = %v", err)
+			}
+		})
 	}
 }
 

@@ -47,6 +47,13 @@ type Usage struct {
 	UnknownRequests  int     `json:"unknown_requests"`
 	Cost             float64 `json:"cost"`
 	CostKnown        bool    `json:"cost_known"`
+	// Billing breakdown summed over reported requests (specs/model-metadata).
+	CacheReadTokens  int64 `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
+	ReasoningTokens  int64 `json:"reasoning_tokens,omitempty"`
+	// CostEstimated is true when any priced request was a catalog estimate
+	// rather than a provider-reported figure.
+	CostEstimated bool `json:"cost_estimated,omitempty"`
 }
 
 type ToolRecord struct {

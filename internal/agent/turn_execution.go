@@ -133,7 +133,7 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		}
 		tokens, known := model.EstimateInputTokens(client.Model(), request, definitions)
 		emit(TurnEvent{Kind: "context", ContextTokens: tokens, ContextKnown: known, ContextEstimated: true})
-		assistant, err := client.Stream(ctx, request, definitions, func(text string) {
+		assistant, usage, usageOK, err := client.StreamUsage(ctx, request, definitions, func(text string) {
 			emit(TurnEvent{Kind: "text", Text: text})
 		}, func(reasoning string) {
 			emit(TurnEvent{Kind: "reasoning", Text: reasoning})
@@ -142,8 +142,11 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 			fail(err)
 			return
 		}
-		if usage, ok := client.LastTokenUsage(); ok && usage.PromptSeen {
-			emit(TurnEvent{Kind: "context", ContextTokens: usage.Prompt, ContextKnown: true})
+		if usageOK {
+			if usage.PromptSeen {
+				emit(TurnEvent{Kind: "context", ContextTokens: usage.Prompt, ContextKnown: true})
+			}
+			emit(TurnEvent{Kind: "usage", Usage: &usage})
 		}
 		if err := validateToolCallIDs(assistant.ToolCalls); err != nil {
 			assistant.ToolCalls = nil

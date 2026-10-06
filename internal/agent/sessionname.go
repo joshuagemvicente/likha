@@ -16,8 +16,16 @@ const nameInstruction = `Generate a session name for the conversation above. 2 t
 // turn with ONE plain model call. The input history is never modified; on any
 // failure the caller keeps the derived title and shows nothing.
 func GenerateSessionName(ctx context.Context, client *model.Client, history []model.Message) (string, error) {
+	name, _, _, err := GenerateSessionNameUsage(ctx, client, history)
+	return name, err
+}
+
+// GenerateSessionNameUsage is GenerateSessionName plus the naming request's
+// own usage breakdown, so the caller can add it to session spend
+// (specs/model-metadata). Usage is returned whenever the request completed.
+func GenerateSessionNameUsage(ctx context.Context, client *model.Client, history []model.Message) (name string, usage model.RequestUsage, usageOK bool, err error) {
 	if client == nil {
-		return "", errors.New("no model client configured")
+		return "", usage, false, errors.New("no model client configured")
 	}
 	hasUser, hasAssistant := false, false
 	for _, msg := range history {
@@ -29,7 +37,7 @@ func GenerateSessionName(ctx context.Context, client *model.Client, history []mo
 		}
 	}
 	if !hasUser || !hasAssistant {
-		return "", errors.New("need a completed turn: at least one user and one assistant message")
+		return "", usage, false, errors.New("need a completed turn: at least one user and one assistant message")
 	}
 
 	// Copy the input so the caller's slice is never mutated; the appended
@@ -38,11 +46,12 @@ func GenerateSessionName(ctx context.Context, client *model.Client, history []mo
 	msgs = append(msgs, history...)
 	msgs = append(msgs, model.Message{Role: "user", Content: nameInstruction})
 
-	assistant, err := client.Stream(ctx, msgs, nil, nil, nil)
+	assistant, usage, usageOK, err := client.StreamUsage(ctx, msgs, nil, nil, nil)
 	if err != nil {
-		return "", err
+		return "", usage, usageOK, err
 	}
-	return sanitizeSessionName(assistant.Content)
+	name, err = sanitizeSessionName(assistant.Content)
+	return name, usage, usageOK, err
 }
 
 // sanitizeSessionName normalizes the model's raw output and rejects anything

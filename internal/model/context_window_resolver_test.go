@@ -27,14 +27,24 @@ func TestResolveContextWindowPrecedence(t *testing.T) {
 			wantOK:   true,
 		},
 		{
-			name:    "documented catalog fallback",
+			name:    "catalog fallback for the exact pair",
 			modelID: "gpt-4o",
 			want:    128000,
 			wantOK:  true,
 		},
 		{
-			name:    "unknown model stays unknown",
+			name:    "catalog input limit is the prompt budget",
 			modelID: "gpt-5.5",
+			want:    922000,
+			wantOK:  true,
+		},
+		{
+			name:    "unknown model stays unknown",
+			modelID: "gpt-9-future",
+		},
+		{
+			name:    "no prefix matching",
+			modelID: "gpt-4o-2099-01-01",
 		},
 		{
 			name:    "empty model ID stays unknown",
@@ -114,10 +124,26 @@ func TestResolveContextWindowIgnoresNonPositiveLimits(t *testing.T) {
 	}
 }
 
+// A custom endpoint (no canonical provider) never borrows a catalog row
+// from a predefined provider (specs/model-metadata: exact pair only).
 func TestResolveContextWindowWithEmptyOrWhitespaceProviderID(t *testing.T) {
 	for _, providerID := range []string{"", " \t "} {
-		if got, ok := ResolveContextWindow(providerID, "gpt-4o", 0, 0); !ok || got != 128000 {
-			t.Errorf("catalog resolution with provider ID %q = (%d, %v), want (128000, true)", providerID, got, ok)
+		if got, ok := ResolveContextWindow(providerID, "gpt-4o", 0, 0); ok {
+			t.Errorf("provider ID %q borrowed a catalog window %d", providerID, got)
+		}
+		if got, ok := ResolveContextWindow(providerID, "gpt-4o", 0, 32000); !ok || got != 32000 {
+			t.Errorf("provider metadata with provider ID %q = (%d, %v), want (32000, true)", providerID, got, ok)
+		}
+	}
+	// The same model on another provider resolves from that provider's row.
+	if got, ok := ResolveContextWindow(" claude ", " claude-opus-5-5 ", 0, 0); !ok || got != 1000000 {
+		t.Errorf("claude/claude-opus-5-5 = (%d, %v), want (1000000, true)", got, ok)
+	}
+	// Anthropic documents 200K for Sonnet 4.5 (models.dev says 1M; the
+	// override corrects it), so compaction triggers before the API's limit.
+	for _, id := range []string{"claude-sonnet-4-5", "claude-sonnet-4-5-20250929"} {
+		if got, ok := ResolveContextWindow("claude", id, 0, 0); !ok || got != 200000 {
+			t.Errorf("claude/%s = (%d, %v), want (200000, true)", id, got, ok)
 		}
 	}
 }

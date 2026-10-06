@@ -1,105 +1,121 @@
-// Session-spend pricing: per-million-token prices in US dollars for the
-// status bar's spend segment (spec tui-layout phase 1b, resolved decision 4).
-// Mirrors windows.go: exact IDs first, then family prefixes, every entry
-// naming its documentation basis. Models with no documented pricing report
-// ok=false so the caller hides spend instead of estimating; the ChatGPT
-// subscription row prices at exactly 0 (the caller renders $0.00).
+// Request pricing (specs/model-metadata): the cost of one model request in
+// US dollars, from the provider's reported cost when the response carries
+// one, or the bundled catalog's price
+// for the exact (provider, model) pair applied to the request's token
+// breakdown. Anything else is unknown: callers hide spend rather than
+// estimate, and no price is ever borrowed from another provider, a similar
+// model, or a family prefix.
 package model
 
-// pricingEntry is one documented pair of per-Mtok prices. prefix "" means
-// only the exact ID matches.
-type pricingEntry struct {
-	id         string  // exact model ID
-	prefix     string  // family prefix; "" = exact-ID-only entry
-	prompt     float64 // US dollars per million prompt tokens
-	completion float64 // US dollars per million completion tokens
+import (
+	"math"
+	"strings"
+
+	"likha/internal/model/catalog"
+)
+
+// RequestUsage is one model request's token breakdown as the provider
+// reported it. CacheRead and CacheWrite are subsets of Prompt; Reasoning is
+// a subset of Completion (usage parsing folds a provider's additive
+// reasoning count, such as xAI's, into Completion first). Cost is the
+// provider-charged amount in US dollars when CostSeen.
+type RequestUsage struct {
+	Prompt         int64
+	Completion     int64
+	PromptSeen     bool
+	CompletionSeen bool
+	CacheRead      int64
+	CacheWrite     int64
+	Reasoning      int64
+	Cost           float64
+	CostSeen       bool
 }
 
-// pricingTable is the curated price catalog, sourced like windows.go.
-var pricingTable = []pricingEntry{
-	// Exact IDs first.
-	{"gpt-4o-mini", "", 0.15, 0.60},       // OpenAI docs: platform.openai.com/docs/models pricing
-	{"gpt-4o", "", 2.50, 10.00},           // OpenAI docs: platform.openai.com/docs/models pricing
-	{"o3", "", 2.00, 8.00},                // OpenAI docs: platform.openai.com/docs/models pricing
-	{"o1", "", 15.00, 60.00},              // OpenAI docs: platform.openai.com/docs/models pricing
-	{"deepseek-chat", "", 0.27, 1.10},     // DeepSeek docs: api-docs.deepseek.com pricing
-	{"deepseek-reasoner", "", 0.27, 1.10}, // DeepSeek docs: api-docs.deepseek.com pricing
-	{"claude-opus-4-1", "", 15, 75},       // Anthropic docs: docs.anthropic.com model comparison pricing
-	{"claude-opus-4", "", 15, 75},         // Anthropic docs: docs.anthropic.com model comparison pricing
-	{"claude-sonnet-4-5", "", 3, 15},      // Anthropic docs: docs.anthropic.com model comparison pricing
-	{"claude-sonnet-4", "", 3, 15},        // Anthropic docs: docs.anthropic.com model comparison pricing
-	{"claude-3-7-sonnet", "", 3, 15},      // Anthropic docs: docs.anthropic.com model comparison pricing
-	{"claude-haiku-4-5", "", 0.80, 4.00},  // Anthropic docs: docs.anthropic.com model comparison pricing
-	// Family prefixes: any model whose ID starts with the prefix shares the
-	// family's documented price.
-	{prefix: "claude-opus", prompt: 15, completion: 75},          // Anthropic docs pricing
-	{prefix: "claude-sonnet", prompt: 3, completion: 15},         // Anthropic docs pricing
-	{prefix: "claude-haiku", prompt: 0.80, completion: 4.00},     // Anthropic docs pricing
-	{prefix: "claude-3-5-haiku", prompt: 0.80, completion: 4.00}, // Anthropic docs pricing
-	{prefix: "deepseek", prompt: 0.27, completion: 1.10},         // DeepSeek docs pricing
-	// Undocumented; conservative placeholder. These ride the vendors'
-	// published pay-per-token cards or routers, but no per-Mtok price is
-	// citable today — placeholder until the live-probe/documentation pass.
-	{prefix: "minimax", prompt: 0.30, completion: 1.20},
-	{prefix: "kimi", prompt: 0.30, completion: 1.20},
-	{prefix: "glm", prompt: 0.30, completion: 1.20},
+// CostSource says how a request's cost was obtained.
+type CostSource uint8
+
+const (
+	// CostUnknown: no reported cost, no applicable catalog price, or
+	// incomplete token counts. Callers must not show a number.
+	CostUnknown CostSource = iota
+	// CostReported: the provider stated the charge in the response (exact).
+	CostReported
+	// CostSubscription is reserved for compatibility with the earlier pricing
+	// API. A plan provider alone no longer establishes an exact zero charge.
+	CostSubscription
+	// CostEstimated: catalog price × reported tokens.
+	CostEstimated
+)
+
+// Known reports whether the source yields a cost at all.
+func (s CostSource) Known() bool { return s != CostUnknown }
+
+// Exact reports whether the cost is the provider's own figure rather than
+// Likha's estimate.
+func (s CostSource) Exact() bool { return s == CostReported || s == CostSubscription }
+
+// RequestCost prices one request for provider (Likha canonical name) and
+// modelID. See the package comment for the order of sources.
+func RequestCost(provider, modelID string, u RequestUsage) (float64, CostSource) {
+	if u.CostSeen && u.Cost >= 0 && !math.IsNaN(u.Cost) && !math.IsInf(u.Cost, 0) {
+		return u.Cost, CostReported
+	}
+	if IsSubscription(provider) {
+		// SIWC consumes a shared plan allowance; the user may separately opt
+		// into credits in ChatGPT Settings. Neither those settings nor a
+		// confirmed charge can be inferred from this provider identity.
+		return 0, CostUnknown
+	}
+	if !u.PromptSeen || !u.CompletionSeen {
+		return 0, CostUnknown
+	}
+	entry, ok := catalog.Lookup(provider, modelID)
+	if !ok || entry.Cost == nil {
+		return 0, CostUnknown
+	}
+	return estimate(*entry.Cost, u), CostEstimated
 }
 
-// subscriptionZeroIDs lists the ChatGPT-curated models that bill the user's
-// ChatGPT plan (provider.go, AuthOAuth) instead of tokens, so they price at
-// exactly 0 with ok=true: a known-known zero, not an unknown. Placeholder
-// subject to the live-probe pass like the rest of the fictional-catalog
-// rows.
-var subscriptionZeroIDs = []string{
-	"gpt-5.5",             // provider.go: ChatGPTModels
-	"gpt-5.4",             // provider.go: ChatGPTModels
-	"gpt-5.4-mini",        // provider.go: ChatGPTModels
-	"gpt-5.3-codex",       // provider.go: ChatGPTModels
-	"gpt-5.3-codex-spark", // provider.go: ChatGPTModels
-	"gpt-6-sol",           // provider.go: ChatGPTModels
-	"gpt-6-luna",          // provider.go: ChatGPTModels
-}
-
-// TurnCost prices one model turn in US dollars from the documented catalog.
-// ok=false means no documented pricing: callers must hide spend rather than
-// estimate. Subscription rows (the ChatGPT/Codex provider's models) price
-// at exactly 0: the caller renders $0.00, not a hidden segment. Negative
-// token counts are treated as 0.
-func TurnCost(modelName string, promptTokens, completionTokens int64) (float64, bool) {
-	name := catalogSlug(modelName)
-	if name == "" {
-		return 0, false
-	}
-	if promptTokens < 0 {
-		promptTokens = 0
-	}
-	if completionTokens < 0 {
-		completionTokens = 0
-	}
-	price := func(entry pricingEntry) (float64, bool) {
-		return float64(promptTokens)/1_000_000*entry.prompt +
-			float64(completionTokens)/1_000_000*entry.completion, true
-	}
-	for _, entry := range pricingTable {
-		if entry.prefix == "" && entry.id == name {
-			return price(entry)
+// estimate applies a price card to a token breakdown. Subsets are clamped
+// so a malformed report can never price more tokens than the totals, and a
+// missing optional rate prices its tokens at the base input or output rate.
+func estimate(card catalog.Cost, u RequestUsage) float64 {
+	prompt, completion := max(u.Prompt, 0), max(u.Completion, 0)
+	cacheRead := clamp(u.CacheRead, 0, prompt)
+	cacheWrite := clamp(u.CacheWrite, 0, prompt-cacheRead)
+	fresh := prompt - cacheRead - cacheWrite
+	reasoning := clamp(u.Reasoning, 0, completion)
+	r := card.RatesFor(prompt)
+	rate := func(optional *float64, base float64) float64 {
+		if optional != nil {
+			return *optional
 		}
+		return base
 	}
-	for _, entry := range pricingTable {
-		if entry.prefix != "" && hasCatalogPrefix(name, entry.prefix) {
-			return price(entry)
-		}
-	}
-	for _, id := range subscriptionZeroIDs {
-		if id == name {
-			return 0, true
-		}
-	}
-	return 0, false
+	dollars := float64(fresh)*r.Input +
+		float64(cacheRead)*rate(r.CacheRead, r.Input) +
+		float64(cacheWrite)*rate(r.CacheWrite, r.Input) +
+		float64(completion-reasoning)*r.Output +
+		float64(reasoning)*rate(r.Reasoning, r.Output)
+	return dollars / 1_000_000
 }
 
-// hasCatalogPrefix reports whether name starts with prefix, mirroring the
-// windows.go matching rule.
-func hasCatalogPrefix(name, prefix string) bool {
-	return len(name) >= len(prefix) && name[:len(prefix)] == prefix
+func clamp(v, lo, hi int64) int64 {
+	return max(lo, min(v, hi))
+}
+
+// ModelPrice returns the catalog's base input and output prices per million
+// tokens for display. ok is false when the pair has no price; subscription
+// providers report ok=false too (they have no per-token price).
+func ModelPrice(provider, modelID string) (input, output float64, ok bool) {
+	entry, found := catalog.Lookup(provider, modelID)
+	if !found || entry.Cost == nil || catalog.Billing(provider) == catalog.BillingSubscription {
+		return 0, 0, false
+	}
+	return entry.Cost.Input, entry.Cost.Output, true
+}
+
+// IsSubscription reports whether provider bills a plan instead of tokens.
+func IsSubscription(provider string) bool {
+	return catalog.Billing(strings.TrimSpace(provider)) == catalog.BillingSubscription
 }
