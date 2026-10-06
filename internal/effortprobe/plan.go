@@ -168,6 +168,13 @@ func NewPlan(p model.Provider, modelID string, live []string, opts Options) (Pla
 	return plan, nil
 }
 
+// CheckWire reports a --probe-wire value that cannot apply to provider, so
+// the CLI can refuse it as a usage error before resolving credentials.
+func CheckWire(provider, wire string) error {
+	_, _, err := planShapes(provider, wire)
+	return err
+}
+
 // planShapes picks the shapes to probe (spec decision 3).
 func planShapes(provider, wire string) ([]Shape, *Shape, error) {
 	documented, known := documentedShapes[provider]

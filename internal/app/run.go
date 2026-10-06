@@ -55,6 +55,15 @@ Options:
                     validate account-specific models, and store the login.
                     Defaults to --provider chatgpt; no TUI or repository needed.
   --device-login    Unsupported legacy flag. Use --provider chatgpt --login.
+  --probe-effort    Probe whether --provider honors reasoning effort for
+                    --model (or LIKHA_PROVIDER/LIKHA_MODEL), then exit. Sends
+                    a few real, billed requests after printing the plan and
+                    estimated cost; changes no setting. No TUI or repository.
+  --probe-wire W    With --probe-effort: probe the top (reasoning_effort),
+                    object (reasoning.effort) or both wire shapes.
+  --probe-levels L  With --probe-effort: comma-separated levels to probe
+                    instead of the model's published levels.
+  --yes             With --probe-effort: confirm the spend without a prompt.
   --debug-models    Log model IDs and context metadata to
                     model-metadata.log (also LIKHA_DEBUG_MODELS=1).
   --ascii           Draw transcript block glyphs and the composer box in plain
@@ -167,6 +176,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	showVersion := flags.Bool("version", false, "print the build version")
 	deviceLogin := flags.Bool("device-login", false, "unsupported legacy login; use --provider chatgpt --login")
 	login := flags.Bool("login", false, "automatically open the browser for ChatGPT authorization and store the login")
+	probeEffort := flags.Bool("probe-effort", false, "probe whether the provider honors reasoning effort for the model, then exit")
+	probeWire := flags.String("probe-wire", "", "with --probe-effort: top, object or both wire shapes")
+	probeLevels := flags.String("probe-levels", "", "with --probe-effort: comma-separated levels to probe")
+	assumeYes := flags.Bool("yes", false, "with --probe-effort: confirm the spend without a prompt")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -183,6 +196,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	if flags.NArg() > 1 {
 		fmt.Fprintln(stderr, "likha: expected at most one repository path")
+		return 2
+	}
+	if err := probeFlagError(flags, *probeEffort, *listSessions, *login, *resumeID); err != nil {
+		fmt.Fprintf(stderr, "likha: %v\n", err)
 		return 2
 	}
 	path := "."
@@ -214,6 +231,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		return browserLoginFlow(loginProvider, stateDir, stdout, stderr)
+	}
+	if *probeEffort {
+		return effortProbeFlow(probeConfig{
+			provider: *providerName, model: *name, endpoint: *endpoint, apiKey: *apiKey,
+			wire: *probeWire, levels: *probeLevels, yes: *assumeYes,
+		}, stdout, stderr)
 	}
 	root, err := resolveRoot(path)
 	if err != nil {
