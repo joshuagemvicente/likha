@@ -35,7 +35,7 @@ func WritePlan(w io.Writer, plan Plan, estimate CostEstimate) error {
 	p.line("  Requests: %d (1 Default, %s, %s %q)", len(requests),
 		plural(len(plan.Levels)*len(plan.Shapes), "level"), plural(len(plan.Shapes), "control"), ControlLevel)
 	p.line("  Estimated cost: %s", estimate.Text())
-	p.line("  Caps: at most %d requests; no new request after %s completion tokens (a request without reported usage counts %s); %d s per request; no retries",
+	p.line("  Caps: at most %d requests; no new request after %s completion tokens (a request that may have generated output without reporting usage counts %s; one answered with an HTTP error status counts 0); %d s per request; no retries",
 		plan.Caps.MaxRequests, formatCount(plan.Caps.TokenBudget), formatCount(plan.Caps.AssumedOutput), int64(plan.Caps.RequestTimeout.Seconds()))
 	p.line("  Likha's client re-sends a request once, as on a real turn, only after a rejection that generated nothing (a refused stream_options field, or a ChatGPT token refreshed after HTTP 401); the row records both attempts.")
 	p.line("  A single request's output is not capped by the probe; the budget stops new requests only.")

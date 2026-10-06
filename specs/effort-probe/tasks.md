@@ -227,11 +227,22 @@ reports the user produces. Where the result differs from the plan:
   status (400, 401, 429, 5xx…) counts 0 completion tokens, not 3,000: an
   error status generated no output. The assumed 3,000 applies to rows that
   may have generated without reporting it: an answer without usage, a
-  timeout, a dropped stream, or a lost connection.
+  timeout, a dropped stream, or a lost connection. Spec decision 8, the
+  acceptance criteria, FR-40, the plan's caps line and docs/providers.md
+  were amended to say so (review fix, 2026-10-07).
 - **T7, retries.** model-recovery (FR-36) has not landed, so there is no
-  `model.WithoutRetry` or `StreamError` to adopt. `Client.stream` makes one
-  attempt today (its `stream_options` fallback counts as one row), so
-  decision 10 holds; the probe must adopt both when FR-36 lands.
+  `model.WithoutRetry` or `StreamError` to adopt; the probe must adopt both
+  when FR-36 lands. The probe fork still runs the client's own once-only
+  re-send after a rejection that generated nothing (a refused
+  `stream_options` field, Codex's re-send after a refreshed token), as a
+  real turn does. Since the 2026-10-07 review fix each row records
+  `attempts` and `first_attempt_status`, the table prints the re-send, and
+  the plan's caps line, decision 10, point 11, FR-40 and the docs state the
+  exception.
+- **T7, first token.** Time to first token is read from the wire: the
+  recorder wraps each 2xx response body and marks the first SSE event that
+  carries text, reasoning or a tool call (`firsttoken.go`). The model's
+  text and reasoning callbacks missed a reply that is only a tool call.
 - **T3/T4, Claude native.** `EffortAnthropic` does not exist on this branch,
   so `claude` is probed on the OpenAI-compatible endpoint with
   `reasoning_effort` and the spec point 5 note. Probing `output_config:
@@ -239,10 +250,15 @@ reports the user produces. Where the result differs from the plan:
   allowed on `claude` until then, since the compat route is chat completions.
 - **T8, control and Default.** A control answered with 400/422 is
   `validated` only when Default succeeded; otherwise it is inconclusive,
-  since the model's own default may be what the provider refused (point 13
-  applied to the control). A level's 400/422 while Default was inconclusive
-  (for example a 429) is inconclusive too: `rejected` needs a successful
-  Default.
+  since the model's own default may be what the provider refused. A level's
+  400/422 while Default was inconclusive (for example a 429) is
+  inconclusive too: `rejected` needs a successful Default. Spec points 13
+  and 18 were amended to say so (review fix, 2026-10-07).
+- **T8, eligibility.** The plan keeps the model's full published list
+  (`Plan.Published`, saved as `published_levels` in the report). A shape is
+  eligible only when every published level was probed and accepted, so a
+  `--probe-levels` subset or a run on unpublished levels only is never
+  eligible (spec point 20, decision 13; review fix, 2026-10-07).
 - **T8, unpublished levels.** Their rows carry the note
   `unpublished level; never counts toward eligibility`.
 - **T10, output.** As each request ends, a one-line progress row goes to
@@ -257,7 +273,10 @@ reports the user produces. Where the result differs from the plan:
 - **T12/T13.** `effortprobe.CheckWire` lets the CLI refuse `--probe-wire` on
   ChatGPT before resolving credentials. `LIKHA_ENDPOINT` applies to a named
   provider in a probe (spec decision 16), although a normal run ignores it
-  for named providers. On ChatGPT the model must belong to the signed-in
+  for named providers. With any endpoint override the model-list GET is
+  skipped before consent and the catalog supplies the levels, so an ambient
+  `LIKHA_ENDPOINT` never receives the key before the plan shows the
+  override (decision 9 and point 4 amended, review fix 2026-10-07). On ChatGPT the model must belong to the signed-in
   account (`discoverOAuthModel`); a failure exits 2 before any model request.
 - **T14.** The end-to-end tests live in
   `tests/integration/effort_probe_test.go` instead of `cli_test.go`. `go

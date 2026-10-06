@@ -28,11 +28,14 @@ rules in [specs/README.md](../README.md).
 - [ ] Documented providers are probed with their documented shape; relays
       with both shapes; ChatGPT with Responses `reasoning: {effort}`; Claude
       on its native route with `output_config: {effort}`.
-- [ ] No row is retried, including by FR-36's automatic retries; 429, 5xx
-      and timeouts are inconclusive; 401/403 stops the run.
+- [ ] No row is retried, including by FR-36's automatic retries (the
+      client's own re-send after a rejection that generated nothing is
+      recorded as a second attempt); 429, 5xx and timeouts are
+      inconclusive; 401/403 stops the run.
 - [x] A run never exceeds 17 requests, starts no request after 40,000
-      completion tokens (a row without usage counts 3,000), and cancels any
-      request after 180 s.
+      completion tokens (a row that answered without usage counts 3,000,
+      one with an HTTP error status 0), and cancels any request after
+      180 s.
 
 ## Verdicts and output
 

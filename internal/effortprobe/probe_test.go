@@ -286,6 +286,10 @@ func TestRunRateLimitIsInconclusiveAndNotRetried(t *testing.T) {
 	if run.report.Summary.Shapes[0].Eligible {
 		t.Fatal("an inconclusive published level must block eligibility")
 	}
+	// An error status generated nothing, so it charges no budget (decision 8).
+	if row.BudgetTokens != 0 || row.BudgetEstimated {
+		t.Fatalf("a 429 row charged %d tokens (estimated %t)", row.BudgetTokens, row.BudgetEstimated)
+	}
 }
 
 func TestRunUnauthorizedStopsTheRun(t *testing.T) {
