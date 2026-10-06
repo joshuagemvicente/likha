@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -65,6 +66,7 @@ func executeCommand(ctx context.Context, root, command string, output io.Writer)
 	}
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = canonical
+	cmd.Env = CommandEnv(os.Environ())
 	// Isolate the shell and its descendants so cancelling does not leave a
 	// pipeline running after the approval's run has ended.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -100,6 +102,21 @@ func executeCommand(ctx context.Context, root, command string, output io.Writer)
 		return exit.ExitCode(), nil
 	}
 	return exitCode, fmt.Errorf("execute command: %w", err)
+}
+
+// CommandEnv returns env without Likha's provider credentials: commands the
+// model runs (tests, scripts, installs) never inherit LIKHA_API_KEY or any
+// LIKHA_<NAME>_API_KEY, whether or not the user reviewed them.
+func CommandEnv(env []string) []string {
+	kept := make([]string, 0, len(env))
+	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
+		if name == "LIKHA_API_KEY" || strings.HasPrefix(name, "LIKHA_") && strings.HasSuffix(name, "_API_KEY") {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept
 }
 
 type limitedOutput struct {

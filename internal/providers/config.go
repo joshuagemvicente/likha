@@ -38,6 +38,16 @@ type StoredProviderConfig struct {
 	Composer       *StoredComposerConfig       `json:"composer,omitempty"`
 	StatusLine     *StoredStatusLineConfig     `json:"status_line,omitempty"`
 	ContextWindows map[string]map[string]int64 `json:"context_windows,omitempty"`
+	// CommandTrust records, per canonical repository path, the verification
+	// checks the user trusted and their fingerprints at that time
+	// (specs/command-permissions). It is never read from a repository.
+	CommandTrust map[string]StoredCommandTrust `json:"command_trust,omitempty"`
+}
+
+// StoredCommandTrust maps a check key ("script:test", "go", "make") to the
+// fingerprint it had when the user trusted the repository.
+type StoredCommandTrust struct {
+	Checks map[string]string `json:"checks"`
 }
 
 // flagEnabled resolves an optional-segment pointer: nil (the key was absent

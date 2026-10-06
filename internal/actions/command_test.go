@@ -63,3 +63,19 @@ func TestRunCommandOutputIsBounded(t *testing.T) {
 		t.Fatalf("output bound/marker incorrect: bytes=%d, suffix=%q", len(result.Output), result.Output[len(result.Output)-len(truncatedOutput):])
 	}
 }
+
+func TestCommandEnvDropsProviderKeys(t *testing.T) {
+	t.Setenv("LIKHA_API_KEY", "secret-a")
+	t.Setenv("LIKHA_OPENAI_API_KEY", "secret-b")
+	t.Setenv("LIKHA_THEME", "nord")
+	result, err := RunCommand(context.Background(), t.TempDir(), "env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Output, "secret-a") || strings.Contains(result.Output, "secret-b") {
+		t.Fatalf("child environment kept provider keys:\n%s", result.Output)
+	}
+	if !strings.Contains(result.Output, "LIKHA_THEME=nord") {
+		t.Fatal("unrelated Likha settings were dropped")
+	}
+}
