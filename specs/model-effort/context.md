@@ -99,7 +99,7 @@ of one model and records accepted, rejected or ignored.
 | bedrock | `reasoning_effort` | pending-probe | no `/models`; catalog only |
 | chatgpt | `reasoning: {effort}` (Responses) | pending-probe | revise `BuildCodexRequest` contract |
 | opencode-zen, opencode-go, dialagram | unknown | pending-probe | relays; behavior undocumented |
-| claude | none | not supported | compat endpoint ignores effort; needs native client |
+| claude | `output_config: {effort}` (native Messages API, `EffortAnthropic`) | pending-probe | native client landed (claude-native); row enabled only by an FR-40 probe |
 
 ## Known gaps (not in this feature)
 
@@ -111,7 +111,9 @@ of one model and records accepted, rejected or ignored.
 - **Mistral chunk content.** `message.content` as a list of chunks fails
   Likha's string decoder.
 - **Native Claude client.** Needed for Claude effort, visible thinking and
-  prompt caching.
+  prompt caching. *(Landed locally 2026-10-06 as
+  [claude-native](../claude-native/spec.md); effort stays off until the
+  FR-40 probe.)*
 
 ## Specs and docs
 

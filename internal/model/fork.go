@@ -51,7 +51,7 @@ func (c *Client) Fork() (*Client, error) {
 	if _, err := parseEndpoint(child.base); err != nil {
 		return nil, errors.New("fork model client: inherited endpoint is invalid")
 	}
-	route := "/chat/completions"
+	route := wireFor(child.base).route()
 	if child.oauth != nil {
 		route = "/responses"
 	}

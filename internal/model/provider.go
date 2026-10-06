@@ -22,6 +22,9 @@ type Provider struct {
 	// Rows that share a BaseURL must share a Replay value, because clients
 	// resolve it from their base URL.
 	Replay ReplayWire
+	// Wire is the request protocol; the zero value is chat completions.
+	// Clients resolve it from their base URL, like Replay.
+	Wire ProviderWire
 }
 
 // AuthKind selects how Likha authenticates to a provider. The zero value is
@@ -53,7 +56,7 @@ var Providers = []Provider{
 	{Name: "together", DisplayName: "Together AI", BaseURL: "https://api.together.ai/v1", KeyEnv: "LIKHA_TOGETHER_API_KEY", Hosted: true},
 	{Name: "mistral", DisplayName: "Mistral AI", BaseURL: "https://api.mistral.ai/v1", KeyEnv: "LIKHA_MISTRAL_API_KEY", Hosted: true},
 	{Name: "cerebras", DisplayName: "Cerebras", BaseURL: "https://api.cerebras.ai/v1", KeyEnv: "LIKHA_CEREBRAS_API_KEY", Hosted: true},
-	{Name: "claude", DisplayName: "Anthropic Claude", BaseURL: "https://api.anthropic.com/v1", KeyEnv: "LIKHA_CLAUDE_API_KEY", DefaultModel: "claude-opus-5-5", Hosted: true, EffortNote: "Anthropic's OpenAI-compatible endpoint ignores effort"},
+	{Name: "claude", DisplayName: "Anthropic Claude", BaseURL: "https://api.anthropic.com/v1", KeyEnv: "LIKHA_CLAUDE_API_KEY", DefaultModel: "claude-opus-5-5", Hosted: true, Wire: WireAnthropic, Replay: ReplayAnthropicBlocks},
 	{Name: "deepseek", DisplayName: "DeepSeek", BaseURL: "https://api.deepseek.com/v1", KeyEnv: "LIKHA_DEEPSEEK_API_KEY", DefaultModel: "deepseek-flash", Hosted: true},
 	{Name: "gemini", DisplayName: "Google Gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", KeyEnv: "LIKHA_GEMINI_API_KEY", DefaultModel: "gemini-2.5-flash", Hosted: true},
 }

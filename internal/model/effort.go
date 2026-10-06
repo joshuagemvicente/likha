@@ -23,6 +23,9 @@ const (
 	// EffortObject sends "reasoning": {"effort": "<level>"}, the shape of
 	// OpenRouter's unified parameter and of the Responses API.
 	EffortObject
+	// EffortAnthropic sends "output_config": {"effort": "<level>"} on the
+	// native Claude client's Messages API requests.
+	EffortAnthropic
 )
 
 // reasoningParam is the body of an EffortObject field.
