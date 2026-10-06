@@ -35,7 +35,7 @@ func TestStreamContentUnmarshal(t *testing.T) {
 			[]contentPiece{thought(" done"), answer("The")}, true, ""},
 		{"references inside thinking are skipped",
 			`{"content":[{"type":"thinking","thinking":[{"type":"reference","reference_ids":[1]},{"type":"text","text":"why"},{"type":"tool_reference","tool":"x"},{"text":"untyped"},{"type":7,"text":"numeric type"}]}]}`,
-			[]contentPiece{thought("why")}, true, ""},
+			[]contentPiece{skippedAs("reference"), thought("why"), skippedAs("tool_reference"), skippedAs(""), skippedAs("")}, true, ""},
 		{"several thinking items in order",
 			`{"content":[{"type":"thinking","thinking":[{"type":"text","text":"a"},{"type":"text","text":"b"}]}]}`,
 			[]contentPiece{thought("a"), thought("b")}, true, ""},
@@ -242,12 +242,6 @@ func TestStreamChunkedContent(t *testing.T) {
 			wantEvents: nil,
 			want:       Message{Role: "assistant"},
 		},
-		{
-			name:       "thinking with only references is an empty answer",
-			events:     []string{`{"choices":[{"delta":{"content":[{"type":"thinking","thinking":[{"type":"reference","reference_ids":[1]}]}]}}]}`, `[DONE]`},
-			wantEvents: nil,
-			want:       Message{Role: "assistant"},
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -268,23 +262,50 @@ func TestStreamChunkedContent(t *testing.T) {
 	}
 }
 
+// Spec decision 3 counts both top-level chunks and items inside "thinking"
+// as content Likha cannot show; a reply made only of them is an error.
 func TestStreamOnlyUnshowableContentFails(t *testing.T) {
-	client := localClient(t, func(w http.ResponseWriter, _ *http.Request) {
-		sendEvents(w,
-			`{"choices":[{"delta":{"content":[{"type":"image_url","image_url":"x"}]}}]}`,
-			`{"choices":[{"delta":{"content":[{"type":"reference","reference_ids":[1]}]}}]}`,
-			`{"choices":[{"delta":{"content":""}}]}`,
-			`[DONE]`)
-	})
-	reply, events, err := recordStream(t, client, []Message{{Role: "user", Content: "q"}}, nil)
-	if !errors.Is(err, errUnshowableContent) {
-		t.Fatalf("error = %v, want errUnshowableContent", err)
+	cases := []struct {
+		name     string
+		events   []string
+		wantType string
+	}{
+		{
+			name: "top-level chunks",
+			events: []string{
+				`{"choices":[{"delta":{"content":[{"type":"image_url","image_url":"x"}]}}]}`,
+				`{"choices":[{"delta":{"content":[{"type":"reference","reference_ids":[1]}]}}]}`,
+				`{"choices":[{"delta":{"content":""}}]}`,
+				`[DONE]`,
+			},
+			wantType: `"image_url"`,
+		},
+		{
+			name: "items inside thinking",
+			events: []string{
+				`{"choices":[{"delta":{"content":[{"type":"thinking","thinking":[{"type":"reference","reference_ids":[1]},{"type":"tool_reference","tool":"x"}]}]}}]}`,
+				`[DONE]`,
+			},
+			wantType: `"reference"`,
+		},
 	}
-	if !strings.Contains(err.Error(), `"image_url"`) {
-		t.Errorf("error %q does not name the first skipped type", err)
-	}
-	if reply.Role != "" || len(events) != 0 {
-		t.Errorf("reply = %+v, events = %v; want no message and no output", reply, events)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := localClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				sendEvents(w, tc.events...)
+			})
+			client.setReplayWire(ReplayThinkingChunk) // no replay state may outlive the error
+			reply, events, err := recordStream(t, client, []Message{{Role: "user", Content: "q"}}, nil)
+			if !errors.Is(err, errUnshowableContent) {
+				t.Fatalf("error = %v, want errUnshowableContent", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantType) {
+				t.Errorf("error %q does not name the first skipped type %s", err, tc.wantType)
+			}
+			if reply.Role != "" || reply.Replay != nil || len(events) != 0 {
+				t.Errorf("reply = %+v, events = %v; want no message and no output", reply, events)
+			}
+		})
 	}
 }
 

@@ -28,7 +28,8 @@ const (
 	pieceAnswer contentPieceKind = iota
 	// pieceThinking is reasoning text from a "thinking" chunk.
 	pieceThinking
-	// pieceSkipped is a chunk Likha cannot show; its text is the chunk type.
+	// pieceSkipped is a chunk, or an item inside "thinking", that Likha
+	// cannot show; its text is that chunk's or item's type.
 	pieceSkipped
 )
 
@@ -119,7 +120,9 @@ func (c *streamContent) addChunk(chunk contentChunk) error {
 
 // addThinking appends one reasoning piece per "text" item of a thinking
 // chunk. Other items (references, tool references, unknown kinds) carry no
-// reasoning text and are skipped silently.
+// reasoning text; they become skipped pieces, so a reply made only of them
+// ends with the unshowable-content error (spec decision 3) instead of a
+// silent empty answer.
 func (c *streamContent) addThinking(raw json.RawMessage) error {
 	if isAbsent(raw) {
 		return nil
@@ -137,6 +140,7 @@ func (c *streamContent) addThinking(raw json.RawMessage) error {
 			return fmt.Errorf("thinking item %d: %w", i, err)
 		}
 		if kind, typed := chunkType(chunk.Type); !typed || kind != "text" {
+			c.pieces = append(c.pieces, contentPiece{kind: pieceSkipped, text: clipType(kind)})
 			continue
 		}
 		if err := c.addText(pieceThinking, chunk.Text); err != nil {
