@@ -1,6 +1,7 @@
 package effortprobe
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -40,6 +41,9 @@ type fakeProvider struct {
 	behave   behavior
 	server   *httptest.Server
 	wantAuth string // the Authorization header every POST must carry
+	// refuseStreamOptions answers 400 to any body carrying stream_options,
+	// as some OpenAI-compatible providers do; Likha's client then re-sends.
+	refuseStreamOptions bool
 
 	mu    sync.Mutex
 	posts []string // effort field of each POST: "reasoning_effort=high", "reasoning.effort=low" or "none"
@@ -105,6 +109,11 @@ func (f *fakeProvider) serve(w http.ResponseWriter, r *http.Request) {
 	f.posts = append(f.posts, label)
 	f.rests = append(f.rests, withoutEffort(f.t, raw))
 	f.mu.Unlock()
+	if f.refuseStreamOptions && bytes.Contains(raw, []byte(`"stream_options"`)) {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":{"message":"Unsupported parameter: stream_options"}}`)
+		return
+	}
 	answer := f.behave(effort, carried)
 	switch {
 	case answer.stall:

@@ -128,6 +128,13 @@ Each was an open choice; the recommended option was taken.
     403 stops the run. The automatic retries of FR-36 are turned off for the
     probe's requests. Reason: a retried row would hide flaky behavior the
     report should show, and would spend more than the plan stated.
+    One exception keeps the probe on real request code (decision 2): Likha's
+    client re-sends a request once, exactly as on a real turn, after a
+    rejection that generated nothing, namely a provider refusing the
+    optional `stream_options` field, or a ChatGPT token refreshed after
+    HTTP 401. Such a row makes two HTTP attempts, spends nothing extra, and
+    records both (point 11); the plan's caps line says so. The 17-request
+    cap counts planned requests.
 11. **The verdict heuristic is stated, not hidden.** See points 12–19. The
     report and the table both say that `ignored-suspected` is a heuristic
     from one sample per level.
@@ -229,7 +236,9 @@ Each was an open choice; the recommended option was taken.
 
 11. For each request: the level and shape; the exact effort fragment that was
     sent, as seen in the outgoing body (for example
-    `"reasoning_effort":"high"`, or `none` at Default); the HTTP status; the
+    `"reasoning_effort":"high"`, or `none` at Default); the HTTP status, the
+    number of attempts, and the first attempt's status when decision 10's
+    re-send happened; the
     error text, cleaned of credentials and cut to 1 KiB; prompt, completion
     and reasoning tokens as the provider reported them (each marked
     `not reported` when the usage omits it); the reported or estimated cost;

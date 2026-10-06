@@ -41,21 +41,28 @@ type Row struct {
 	Published bool        `json:"published"`
 	// Sent is the effort fragment as seen in the outgoing body, "none" when
 	// the body carried no effort field, or "" when nothing was sent.
-	Sent             string   `json:"sent"`
-	Outcome          Outcome  `json:"outcome"`
-	HTTPStatus       int      `json:"http_status,omitempty"`
-	Error            string   `json:"error,omitempty"`
-	PromptTokens     *int64   `json:"prompt_tokens"`
-	CompletionTokens *int64   `json:"completion_tokens"`
-	ReasoningTokens  *int64   `json:"reasoning_tokens"`
-	CostUSD          *float64 `json:"cost_usd"`
-	CostSource       string   `json:"cost_source"`
-	HeadersMS        *int64   `json:"time_to_headers_ms"`
-	FirstTokenMS     *int64   `json:"time_to_first_token_ms"`
-	TotalMS          *int64   `json:"total_ms"`
-	ToolCalled       bool     `json:"tool_called"`
-	ToolAnswer       *int64   `json:"tool_answer"`
-	AnswerCorrect    bool     `json:"answer_correct"`
+	Sent       string  `json:"sent"`
+	Outcome    Outcome `json:"outcome"`
+	HTTPStatus int     `json:"http_status,omitempty"`
+	// Attempts counts the POSTs the row made. Likha's client re-sends a
+	// request once, as on a real turn, only after a rejection that
+	// generated nothing (a refused stream_options field, or a ChatGPT token
+	// refreshed after HTTP 401); FirstAttemptStatus is then the first
+	// attempt's status, and HTTPStatus the last one's.
+	Attempts           int      `json:"attempts"`
+	FirstAttemptStatus int      `json:"first_attempt_status,omitempty"`
+	Error              string   `json:"error,omitempty"`
+	PromptTokens       *int64   `json:"prompt_tokens"`
+	CompletionTokens   *int64   `json:"completion_tokens"`
+	ReasoningTokens    *int64   `json:"reasoning_tokens"`
+	CostUSD            *float64 `json:"cost_usd"`
+	CostSource         string   `json:"cost_source"`
+	HeadersMS          *int64   `json:"time_to_headers_ms"`
+	FirstTokenMS       *int64   `json:"time_to_first_token_ms"`
+	TotalMS            *int64   `json:"total_ms"`
+	ToolCalled         bool     `json:"tool_called"`
+	ToolAnswer         *int64   `json:"tool_answer"`
+	AnswerCorrect      bool     `json:"answer_correct"`
 	// BudgetTokens is what the row counted toward the completion-token
 	// budget; BudgetEstimated marks the assumed count of a row without usage.
 	BudgetTokens    int64    `json:"budget_tokens"`
@@ -93,8 +100,9 @@ type Reporter interface {
 }
 
 // Run sends the plan's requests one at a time through client and returns
-// the report with verdicts. It never retries a row (decision 10) and never
-// changes client: every request goes through its own observed fork with the
+// the report with verdicts. It never retries a row (decision 10; the
+// client's own re-send after a no-output rejection is recorded, not
+// hidden) and never changes client: every request goes through its own observed fork with the
 // effort forced on that fork only. An error means nothing could be run.
 func Run(ctx context.Context, client *model.Client, plan Plan, out Reporter) (Report, error) {
 	if client == nil {
@@ -189,7 +197,10 @@ func (r runner) send(ctx context.Context, index int, req Request) Row {
 	reply, usage, usageOK, err := fork.StreamUsage(reqCtx, probeMessages(), probeTools(), nil, nil)
 	total := rec.since()
 	obs := rec.snapshot()
-	row.Sent, row.HTTPStatus = obs.fragment, obs.status
+	row.Sent, row.HTTPStatus, row.Attempts = obs.fragment, obs.status, obs.attempts
+	if obs.attempts > 1 {
+		row.FirstAttemptStatus = obs.firstStatus
+	}
 	row.TotalMS = millis(total)
 	if obs.attempts > 0 && obs.status != 0 {
 		row.HeadersMS = millis(obs.headers)
@@ -278,7 +289,7 @@ func int64Ptr(v int64) *int64 { return &v }
 func millis(d time.Duration) *int64 { return int64Ptr(d.Milliseconds()) }
 
 // recorder observes one row's HTTP attempts through ForkWithTransport. It
-// keeps the last attempt's status, its header latency, the effort fragment
+// counts the attempts and keeps the first and last attempt's status, its header latency, the effort fragment
 // of the outgoing body and the time to the first streamed output. It never reads request headers, which
 // carry the credential, and reads the body only through GetBody so the
 // forwarded request keeps its own.
@@ -288,11 +299,12 @@ type recorder struct {
 }
 
 type observation struct {
-	began    time.Time
-	attempts int
-	status   int
-	headers  time.Duration
-	fragment string
+	began       time.Time
+	attempts    int
+	firstStatus int // the first attempt's status, kept when the client re-sends
+	status      int
+	headers     time.Duration
+	fragment    string
 
 	firstToken     time.Duration
 	firstTokenSeen bool
@@ -351,6 +363,9 @@ func (t *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			resp.Body = &tokenWatch{ReadCloser: resp.Body, mark: t.rec.markFirstToken}
 		}
+	}
+	if t.rec.obs.attempts == 1 {
+		t.rec.obs.firstStatus = t.rec.obs.status
 	}
 	return resp, err
 }

@@ -173,6 +173,11 @@ func TestRunHonoringProviderIsEligible(t *testing.T) {
 	if !strings.Contains(run.table, "Eligible to enable reasoning_effort for openai: yes (endpoint override: not evidence for openai)") {
 		t.Fatalf("table lacks the eligibility line:\n%s", run.table)
 	}
+	for _, row := range run.report.Rows {
+		if row.Attempts != 1 || row.FirstAttemptStatus != 0 {
+			t.Fatalf("row %d: attempts %d, first status %d; want one attempt", row.Index, row.Attempts, row.FirstAttemptStatus)
+		}
+	}
 	first := run.report.Rows[1]
 	if !first.ToolCalled || !first.AnswerCorrect || first.ReasoningTokens == nil || *first.ReasoningTokens != 0 {
 		t.Fatalf("row = %+v", first)
@@ -563,5 +568,37 @@ func TestRunToolCallOnlyReplyRecordsFirstToken(t *testing.T) {
 				t.Fatalf("no row was answered:\n%s", run.table)
 			}
 		})
+	}
+}
+
+// Likha's client re-sends once, without stream_options, to a provider that
+// refuses that field, as on a real turn. The rejected attempt generated
+// nothing; the row records it rather than hiding it (decision 10).
+func TestRunRecordsTheClientsStreamOptionsResend(t *testing.T) {
+	fake := newFakeProvider(t, honors)
+	fake.refuseStreamOptions = true
+	p, _ := model.LookupProvider("openai")
+	plan, err := NewPlan(p, probeModel, nil, Options{Endpoint: fake.endpoint(), Secrets: []string{testKey}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := model.New(fake.endpoint(), probeModel, testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := runPlan(t, client, plan, fake)
+	if got, want := len(run.posts), 2*len(plan.Requests()); got != want {
+		t.Fatalf("POSTs = %d, want %d (each request plus the client's one re-send)", got, want)
+	}
+	for _, row := range run.report.Rows {
+		if row.Attempts != 2 || row.FirstAttemptStatus != http.StatusBadRequest {
+			t.Fatalf("row %d: attempts %d, first status %d; want 2 after HTTP 400", row.Index, row.Attempts, row.FirstAttemptStatus)
+		}
+	}
+	if verdicts := verdicts(run.report.Rows); verdicts[0] != VerdictBaseline || verdicts[len(verdicts)-1] != VerdictValidated {
+		t.Fatalf("verdicts = %v", verdicts)
+	}
+	if !strings.Contains(run.table, "re-sent once by Likha's client after HTTP 400") {
+		t.Fatalf("table hides the first attempt:\n%s", run.table)
 	}
 }

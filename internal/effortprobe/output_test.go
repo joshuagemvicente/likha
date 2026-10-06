@@ -91,6 +91,7 @@ func TestWritePlanNamesEverythingBeforeConsent(t *testing.T) {
 		"assumes up to 3,000 output tokens per request at $30.00/M",
 		"at most 17 requests; no new request after 40,000 completion tokens",
 		"180 s per request",
+		"re-sends a request once, as on a real turn, only after a rejection that generated nothing",
 		"A single request's output is not capped by the probe; the budget stops new requests only.",
 	} {
 		if !strings.Contains(out.String(), want) {
