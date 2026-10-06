@@ -364,7 +364,7 @@ func TestRequestContentEncodesLikeAString(t *testing.T) {
 		Role    string `json:"role"`
 		Content string `json:"content"`
 	}
-	for _, text := range []string{"", "plain", "<b>&\"q\"", "line\nbreak\ttab", "  ", "ünïcødé 日本 🙂", "\x01\x7f", "bad \xff utf8"} {
+	for _, text := range []string{"", "plain", "<b>&\"q\"", "line\nbreak\ttab", "  ", "ünïcødé 日本 🙂", "\x01\x7f", "bad \xff utf8", "a\u2028b\u2029c"} {
 		want, err := json.Marshal(before{Role: "assistant", Content: text})
 		if err != nil {
 			t.Fatal(err)
