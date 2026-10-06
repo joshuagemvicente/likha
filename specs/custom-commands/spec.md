@@ -48,6 +48,11 @@ different spec contradicting v1-spec.md.
   unaffected: any edit or shell command the model then proposes goes through
   the normal FR-06/FR-08 review; a custom command never pre-approves,
   pre-authorizes, or skips any review.
+  *Amended 2026-10-04 by [command-permissions](../command-permissions/spec.md):*
+  "the normal FR-08 review" now means FR-08 as amended, so read-only
+  commands, trusted checks, and session-allowed commands run without a
+  prompt exactly as they would from a typed prompt. A custom command cannot
+  create a session grant or repository trust, and cannot change any tier.
 - A command name that collides with a reserved command is **refused** with a
   visible error (at load and when it would be listed); it is never silently
   shadowed by a user file or vice versa.

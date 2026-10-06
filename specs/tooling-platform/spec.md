@@ -138,6 +138,12 @@ work more complete and legible. Feature specs own their detailed contracts.
   Deletion, rename, fuzzy patches, and binary edits are deferred.
 - **Shell:** retain `run_command` with the current exact-command review and
   explicit unsandboxed warning. Do not add blanket command approval.
+  *Amended 2026-10-04 by [command-permissions](../command-permissions/spec.md):*
+  the review and warning stay for every prompted command, and there is still
+  no blanket approval. Read-only commands, verification checks in a
+  user-trusted repository (while fingerprints match), and exact commands
+  allowed for the session now run without a review, labelled auto-approved;
+  destructive and outward-facing commands always ask or are refused.
 - **Ask the user:** add an `ask_user` interaction for a concise question and
   optional choices. A pending question is cancellable; its answer returns as a
   tool result exactly once.

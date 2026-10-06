@@ -10,7 +10,7 @@ the user's agreement and updates to its acceptance guide.
 | Work authorization | Documentation now; implementation only after separate approval |
 | Implementation workers | Eight parallel subagents on independent ownership areas; coordinator owns shared integration |
 | Verification | No new automated tests or code-review pass; run existing checks, retain failures, label unexercised behavior unverified |
-| Shell | Exact command/cwd approval each time; cwd is not a sandbox; detached jobs may survive cancellation |
+| Shell | Exact command/cwd approval each time; cwd is not a sandbox; detached jobs may survive cancellation (amended 2026-10-04 by [command-permissions](../command-permissions/spec.md), user-approved — prompted commands keep this rule; read-only commands, trusted verification checks, and session-allowed exact commands run without a prompt and time out after 10 minutes; destructive commands are refused or always ask) |
 | Main rounds | Visible continuation every 32 tool rounds; user cancellation remains available |
 | Explore capability | Repository glob/read/grep; task only for permitted explore children; same configured provider/model |
 | Explore depth | Main 0 → explore 1 → explore 2; dispatch refuses deeper spawning |

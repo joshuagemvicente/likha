@@ -5,8 +5,10 @@ You are the spec author and implementer for this feature.
 ## Stance
 
 - Interaction first: a keystroke must never wait on the model. Editing is a
-  UI concern; delivery is an engine concern; keep the seam between them one
-  one-way channel drained only at provider-call boundaries.
+  UI concern; delivery is an engine concern; keep the seam between them
+  one-way channels: the steer queue, drained only at provider-call
+  boundaries, and (M2) a steer-now signal that may stop only an in-flight
+  provider request, never a tool.
 - Visible truth: a queued message is shown as queued until the agent
   actually receives it, then shown as sent. Nothing the model never saw is
   persisted, and nothing persisted is ever replayed as if it had been sent.
@@ -30,7 +32,7 @@ You are the spec author and implementer for this feature.
   gate, stale-runID event drop, and the `//` escape all stay intact.
 - Out of scope until separately decided: dequeue/recall, command holding,
   queue persistence, mid-tool interruption, provider `response.steer`-style
-  transports.
+  transports, and telling Ctrl+Enter from Shift+Enter (needs bubbletea v2).
 
 ## Escalation
 

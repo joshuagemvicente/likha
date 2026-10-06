@@ -24,5 +24,19 @@ Observable outcomes; unchecked until seen in the real TUI. Status mirrors
 - [ ] A queued-but-undelivered message never appears in the stored session
       or after resume.
 - [ ] `go test ./...` and `go test -race ./...` pass from the project root.
-- [ ] (M2) `Ctrl+Q` delivers queued messages without ending the run; a
-      force while a tool executes defers to the boundary.
+- [ ] (M2) During a streaming response, Ctrl+Enter with a draft stops the
+      response and the run continues with the message; no new turn and no
+      extra turn footer.
+- [ ] (M2) The partial answer stays on screen, followed by `Response
+      interrupted to deliver your message.`, then `You:`, then a fresh
+      answer; the model does not repeat what it had already said.
+- [ ] (M2) Ctrl+Enter while a command or other tool runs shows `Queued:`
+      and `Steer waits for the running tool`, and the tool finishes
+      normally.
+- [ ] (M2) Shift+Enter steers during a run; Alt+Return inserts a newline in
+      a running draft; while idle, Ctrl+Enter and Shift+Enter insert a
+      newline.
+- [ ] (M2) Ctrl+Enter on an empty draft sends the queue now; it does
+      nothing with an empty queue, a pending approval, or an open popup.
+- [ ] (M2) Esc right after a steer cancels the run as usual.
+- [ ] (M2) Ghostty live probe recorded in tasks.md.

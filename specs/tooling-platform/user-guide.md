@@ -127,17 +127,18 @@ invalid files produce named errors; reduce an over-cap catalog to advertise it.
 
 ## Phase 3: optional web setup
 
-Use the private Likha state directory: `~/.config/likha/` on Linux or
-`~/Library/Application Support/likha/` on macOS. Protect the directory and secret
-files using the same private-state rules as provider credentials.
+Use the private Likha state directory: `~/.config/likha/` on macOS and
+Linux. Protect the directory and secret files using the same private-state
+rules as provider credentials.
 
-In `tools.json`, enable only the web tools you want. `web.search.backend`
-selects exactly one search backend: `brave`, `tavily`, `exa`, or `duckduckgo`
-(phase 5). With `enabled: true` and no backend, search uses the keyless
-`duckduckgo` default, so no key is needed unless you choose a keyed backend; a
-keyed backend without its key stays unavailable and never falls back to
-DuckDuckGo. Any other value or a malformed `tools.json` is a visible config
-error that disables both `web_search` and `web_fetch`. Pick one:
+Both web tools are on by default; set them under `web` in `config.json`.
+Turn one off with `"enabled": false`. `web.search.backend` selects exactly one
+search backend: `brave`, `tavily`, `exa`, or `duckduckgo` (the keyless
+default), so no key is needed unless you choose a keyed backend; a keyed
+backend without its key stays unavailable and never falls back to
+DuckDuckGo. Any other value or a malformed `web` section is a visible config
+error that disables both `web_search` and `web_fetch`. A `tools.json` from an
+earlier release is folded into `config.json` at launch. For example:
 
 ```json
 {"web":{"search":{"enabled":true,"backend":"brave"},"fetch":{"enabled":true}}}

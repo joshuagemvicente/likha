@@ -189,6 +189,16 @@ Approvals are first-class cards in the transcript, not modal interruptions:
 - The web adds **no** auto-approve path, no "always allow", and no
   remembered approval across sessions. The existing warning that approved
   commands run unsandboxed applies verbatim.
+  *Amended 2026-10-04 by [command-permissions](../command-permissions/spec.md):*
+  the TUI now has command tiers, **Allow for session** grants, and
+  per-repository **Trust repo checks**. This web decision stands unless and
+  until this spec says otherwise.
+  *Noted 2026-10-05 by [approve-always](../approve-always/spec.md)
+  (implemented (local)):* the TUI's **Approve always** session grants for edits,
+  command prefixes, and MCP servers do not apply here; the web's "no
+  always allow" decision stands. Open: the classifier lives in the shared
+  agent runtime, so a web build must state whether refusals, read-only
+  commands, and trusted checks behave the same in the browser.
 
 ### 5.5 Model, provider, and status
 

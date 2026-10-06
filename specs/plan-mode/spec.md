@@ -68,6 +68,12 @@ another product's mode is an OS read-only sandbox.
    changes tool dispatch at turn boundaries, not mid-run, and prompt editing
    remains usable for steering while running, but reserved commands remain
    inactive under FR-21).
+   *Amended 2026-10-04 by [command-permissions](../command-permissions/spec.md):*
+   on exit, commands follow FR-08 as amended rather than all proposing:
+   read-only commands, trusted verification checks, and session-allowed
+   exact commands run without a prompt. Entering plan mode is unchanged: it
+   still refuses every command before classification or approval, and no
+   grant or repository trust bypasses it.
 
 8. Sessions started in one mode can still be resumed in any other session
    (FR-10); plan mode is a live TUI state, not part of the conversation

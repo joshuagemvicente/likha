@@ -143,6 +143,24 @@ Edit · internal/tui/tui.go
 - **Nerd fonts:** the review marker behavior (`reviewMark`) is unchanged.
 - **No approval-semantics change:** what may be approved, the per-proposal
   approval scope, stale-edit checks, and command warnings are untouched.
+  *Amended 2026-10-04 by [command-permissions](../command-permissions/spec.md):*
+  that feature changes command approval semantics, not this one. Command
+  reviews may show a third button between Approve and Decline: **Allow for
+  session** (ask-tier commands) or **Trust repo checks** (verification checks
+  in an untrusted repository or with a changed fingerprint). Always-ask
+  reviews keep two buttons and add a `Why this asks:` line; edit and MCP
+  reviews keep two buttons. Below 50 columns the labels shorten to
+  `[Approve] [Session] [Decline]` or `[Approve] [Trust] [Decline]`. Focus
+  moves across all visible buttons with `←/→` and `Tab`/`Shift+Tab`; the
+  third button shares Approve's read-to-end gate; the two command warnings
+  stay.
+  *Amended 2026-10-05 by [approve-always](../approve-always/spec.md)
+  (implemented (local)):* the third button on edit, MCP, and Ask-tier command reviews is
+  labelled **Approve always** (`[Always]` when the wide row does not fit
+  with three columns spare: below 53 columns); **Trust repo checks** keeps
+  its label and its 56-column breakpoint. Always-ask commands,
+  warning-carrying edits, and `/init` proposals keep two buttons. Approve
+  always shares Approve's read-to-end gate.
 
 ## Functional changes (to apply in v1-spec.md at implementation start)
 
@@ -155,6 +173,10 @@ Edit · internal/tui/tui.go
   (FR-04). No letter-key approval shortcuts exist."
 - FR-06/FR-07/FR-08/FR-09 and the approval scope are unchanged; FR-14's
   mouse-capture rule is unchanged (keyboard-focused buttons, no clicks).
+  *Amended 2026-10-04 by [command-permissions](../command-permissions/spec.md):*
+  FR-08 and the approval scope were later amended by that feature, which
+  adds the third command-review button described above; FR-22's two-button
+  description remains accurate for edit, MCP, and always-ask reviews.
 
 ## Open decisions (recommended defaults; confirm or override)
 

@@ -74,6 +74,11 @@ choice. Report observed provider behavior rather than promising perfect routing.
 Repository tools refuse it; the harness explains the real root. Deliberate
 external inspection requires the normal explicit shell approval. No automatic
 command classifier or read-only shell allowlist ships here.
+*Amended 2026-10-04 by [command-permissions](../command-permissions/spec.md):*
+a command classifier and a read-only shell tier now ship in that separate
+feature. External inspection is unaffected: a path outside the repository
+root (an absolute path elsewhere, `~`, `$HOME`, or an escaping `..`) makes a
+command always ask, so it still needs explicit approval every time.
 
 ## Acceptance guide
 

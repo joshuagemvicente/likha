@@ -41,6 +41,37 @@ behavior in [spec.md](spec.md) is the whole contract.
   219-221: unknown-command refusal), `resumeSession` (246-263, untouched;
   resumed snapshots can no longer contain `Queued`).
 
+## M2 code paths (steer now, re-specified 2026-10-05)
+
+Line numbers drift; anchor on the names.
+
+- `internal/agent/turn_execution.go` — `RunTurnWithOptions` round loop:
+  `applySteer`, the top-of-round `drainSteer`, the `client.StreamUsage`
+  call (gains a per-round context and the steer-now watcher), the error
+  path (`fail` vs steer-`continue`), and the no-tool-call drain.
+- `internal/agent/tool_registry.go` — `RunOptions` (gains `SteerNow`).
+- `internal/agent/agent.go` — `TurnEvent` (gains the `stream_interrupted`
+  kind; `Usage` is reused).
+- `internal/model/client.go` — `StreamUsage`/`stream` and the
+  chat-completions consumer's ctx checks; `Message.Reasoning` is never
+  sent back to a provider, which is why partial reasoning never enters
+  history.
+- `internal/model/codex.go` — `streamCodex`, `consumeCodexStreamDetailed`
+  (the OAuth/Codex transport needs its own cancellation check).
+- `internal/tui/tui.go` — `ui` fields (`steer`, `queue`; gains
+  `steerNow`), `startTurnDisplay` (creates the channels), the Return-family
+  key arm (`case "ctrl+j", "alt+enter", "ctrl+enter", "shift+enter"`), the
+  Enter working branch (text rules to share), `enqueue`, the `text` and
+  `steer` event cases, `finishRun` (removes an empty streaming entry on
+  error today; the M2 case mirrors it).
+- `internal/tui/tool_wiring.go` — `toolRunOptions` (passes `SteerNow`).
+- `internal/tui/composer.go`, `internal/tui/status_line.go` — working
+  placeholder, hints, and the `Steering…` state.
+- `internal/tui/ask_view.go` — its own Return-family newline arm; stays
+  unchanged (the ask view owns the keyboard).
+- `internal/session/session.go` — `Entry` is role/content only, so the
+  interruption note is its own entry.
+
 ## Tests to extend
 
 - `internal/tui/tui_m2_keys_test.go:91-113` — `TestComposerInertWhileWorking`
@@ -63,8 +94,9 @@ behavior in [spec.md](spec.md) is the whole contract.
 - [v1-spec.md](../v1-spec.md) — FR-17 is amended and FR-21 added (text in
   spec.md § Functional changes); FR-04/FR-09 are unchanged.
 - [tool-rendering-terminal-keys/](../tool-rendering-terminal-keys/spec.md) —
-  the composer chord table (Ctrl+Return is newline by user decision, which
-  rules out OMP's followUp chord; the M2 probe discipline comes from here).
+  the composer chord table and its probe table (Ctrl+Return, Shift+Return,
+  and Ctrl+J all arrive as `ctrl+j`). Amended 2026-10-05: during a run that
+  family means steer now (M2); the probe discipline comes from here.
 - [slash-commands/](../slash-commands/spec.md) — the "commands are inert
   during a run" rule changes from *Enter ignored* to *visible refusal*; its
   spec table and [repo-init/checklist.md](../repo-init/checklist.md) wording

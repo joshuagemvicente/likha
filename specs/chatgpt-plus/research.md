@@ -1,91 +1,219 @@
-# ChatGPT Plus (Codex backend) OAuth 2 — OpenCode/OMP research for Likha
+# Official Sign in with ChatGPT: migration evidence
 
-Researched 2026-09-29. Primary sources: `sst/opencode` `dev` branch (byte-identical at `anomalyco/opencode`), OMP harness docs (`omp://`), and the Likha repo in cwd. No code edits made.
+**Reviewed:** 2026-10-05. **Migration status:** in progress. Sources below are
+official OpenAI documentation read on that date; the SIWC Terms page is dated
+2026-09-29. This review used public documentation only, with no credential reads,
+live sign-in, entitlement checks, or live inference.
 
-## 1. OAuth 2 flow for ChatGPT Plus (Codex backend) in OpenCode
+This page supersedes the 2026-09-29 research about third-party Codex integrations.
+The current implementation contract is [spec.md](spec.md) and FR-02 in
+[v1-spec.md](../v1-spec.md), not another harness's development-branch code.
 
-All flow constants below come from **`packages/opencode/src/plugin/openai/codex.ts`** (sst/opencode `dev`; fetched via `https://raw.githubusercontent.com/sst/opencode/dev/packages/opencode/src/plugin/openai/codex.ts`, identical at `https://raw.githubusercontent.com/anomalyco/opencode/dev/...`). The plugin registers auth methods on provider id `"openai"` with labels `"ChatGPT Pro/Plus (browser)"`, `"ChatGPT Pro/Plus (headless)"`, and `"Manually enter API Key"`.
+## Primary sources
 
-### Constants (top of `codex.ts`)
+| Official source | Evidence used | Date checked |
+| --- | --- | --- |
+| [OSS/local overview](https://developers.openai.com/siwc/token-sharing-open-source.md) | Optional plan usage, user/workspace-bound client registration, host identity, public Responses flow, free/local OSS category. | 2026-10-05 |
+| [Registration and sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in.md) | Dynamic public-client registration, exact authorize/token endpoints, loopback rules, PKCE/state/nonce, ID-token verification, plan scopes, protected storage. | 2026-10-05 |
+| [Accounts and sessions](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions.md) | Separate account/workspace registrations, active labels, returning hints, serialized refresh, revocation, local credential security, shared allowance. | 2026-10-05 |
+| [Models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference.md) | Authenticated `models[]` envelope, display/slug/visibility, public `/v1/responses`, stateless streaming, completed-only success. | 2026-10-05 |
+| [Preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations.md) | Required HTTP request shape, unsupported fields/tools, function namespaces, input and conversation-state limits. | 2026-10-05 |
+| [Token reference](https://developers.openai.com/siwc/token-sharing-open-source/token-reference.md) | Returned token fields, granted scope, expiry and rotating refresh, opaque access-token metadata. | 2026-10-05 |
+| [Errors and recovery](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery.md) | Identity-only authorization, explicit consent recovery, admission/error shapes, scope/eligibility/quota/refresh handling. | 2026-10-05 |
+| [UI/UX guidelines](https://developers.openai.com/siwc/ui-ux-guidelines.md) | Continue with ChatGPT, first-use confirmation, visible plan use, Manage usage, limit recovery and branding. | 2026-10-05 |
+| [Sign in with ChatGPT Terms](https://openai.com/policies/sign-in-with-chatgpt-terms/) | Application identity, user-controlled runtime/storage, no app charge for SIWC, express background consent, no account/allowance pooling or limit bypass, privacy/branding obligations. Published 2026-09-29. | 2026-10-05 |
 
-| Constant | Value |
-|---|---|
-| `CLIENT_ID` | `app_EMoamEEZ73f0CkXaXp7hrann` |
-| `ISSUER` | `https://auth.openai.com` |
-| `CODEX_API_ENDPOINT` | `https://chatgpt.com/backend-api/codex/responses` |
-| `OAUTH_PORT` | `1455` (redirect URI `http://localhost:1455/auth/callback`) |
-| `ALLOWED_MODELS` | `gpt-5.5`, `gpt-5.3-codex-spark`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-6-sol`, `gpt-6-luna` |
-| `DISALLOWED_MODELS` | `gpt-5.5-pro` (also `gpt-5.6` rejected in the filter) |
+## 1. Scope, category, allowance, and terms
 
-### Browser flow (authorization code + PKCE)
+The overview documents direct SIWC for open-source and locally hosted apps.
+Likha is a free, locally run OSS tool, so this is its integration path. Paid or
+remotely managed services require separate engagement with OpenAI. This is a
+documented category match, not a promise that a particular account/workspace is
+eligible or that OpenAI has approved this implementation.
 
-- **PKCE** (`generatePKCE`): verifier = 43 random chars from `A-Za-z0-9-._~`; challenge = base64url(SHA-256(verifier)); method `S256`.
-- **Authorize URL** (`buildAuthorizeUrl`): `GET {ISSUER}/oauth/authorize` with params `response_type=code`, `client_id`, `redirect_uri=http://localhost:1455/auth/callback`, `scope=openid profile email offline_access`, `code_challenge`, `code_challenge_method=S256`, `id_token_add_organizations=true`, `codex_cli_simplified_flow=true`, `state`, `originator=opencode`. `state` is base64url of 32 random bytes.
-- **Local callback server** (`startOAuthServer`): `http.createServer` on port 1455; routes `/auth/callback` (validates `state` against the pending request — CSRF check; handles `error`/`error_description`; 400 on missing code; replies a branded success/error HTML page via `OauthCallbackPage`), `/cancel` (rejects "Login cancelled"), else 404. A 5-minute timeout rejects a pending flow (`waitForOAuthCallback`); the server is closed after completion (`stopOAuthServer`).
-- **Token exchange** (`exchangeCodeForTokens`): `POST {ISSUER}/oauth/token`, `Content-Type: application/x-www-form-urlencoded`, body: `grant_type=authorization_code`, `code`, `redirect_uri`, `client_id`, `code_verifier`. Response `TokenResponse`: `{ id_token, access_token, refresh_token, expires_in? }`. Expiry stored as `Date.now() + (expires_in ?? 3600) * 1000`.
-- **Claims** (`IdTokenClaims`, `parseJwtClaims`, `extractAccountIdFromClaims`): JWT part[1] base64url-decoded; account id resolved in order: `claims.chatgpt_account_id` → `claims["https://api.openai.com/auth"].chatgpt_account_id` → `claims.organizations[0].id`. `extractAccountId` prefers `id_token` claims, then `access_token`. Other claims: `email`, `chatgpt_compute_residency` (top-level or under `https://api.openai.com/auth`); `"no_constraint"` residency is ignored.
-- **Success result** persisted by opencode's auth layer: `{ type: "oauth", refresh, access, expires, accountId }`.
+Identity scopes do not grant inference. Plan usage requires
+`chatgpt.tokens.use.direct`, resource permission, user consent, and eligible
+account/workspace access. SIWC does not expose existing ChatGPT conversations or
+account context. Requests use the connected app's allowance for the authenticated
+user, not a general-purpose relay for other tools or users.
 
-### Headless device flow ("ChatGPT Pro/Plus (headless)")
+The shared allowance has limits; models and policies can differ by account.
+Plus users share a five-hour total across apps using their ChatGPT plan; the
+accounts/sessions page says this five-hour limit does not apply to Pro users.
+That is not a promise of unlimited Pro usage or a guaranteed seven-day window.
+App-specific limits can also apply. Users manage allowance and explicit credit
+opt-in at [ChatGPT Usage](https://chatgpt.com/settings/usage). No fixed cost or
+zero-cost guarantee follows from the provider name. Likha must leave usage/cost
+unknown unless OpenAI reports them and must not silently switch to a separately
+billed API key when plan use is denied or exhausted.
 
-- Initiate: `POST {ISSUER}/api/accounts/deviceauth/usercode` with JSON body `{ client_id: CLIENT_ID }` and header `User-Agent: opencode/<InstallationVersion>`. Response: `{ device_auth_id, user_code, interval }` (interval parsed as seconds, min 1, ×1000 ms).
-- User visits `{ISSUER}/codex/device` and enters `user_code`.
-- Poll: `POST {ISSUER}/api/accounts/deviceauth/token` with `{ device_auth_id, user_code }`. On `200`: response `{ authorization_code, code_verifier }` — then exchange at `POST {ISSUER}/oauth/token` (form-encoded) with `grant_type=authorization_code`, `code=<authorization_code>`, `redirect_uri={ISSUER}/deviceauth/callback`, `client_id`, `code_verifier` (server-supplied verifier — no local PKCE pair in this flow). `403`/`404` → keep polling after `interval + OAUTH_POLLING_SAFETY_MARGIN_MS` (3000 ms); any other status → `{ type: "failed" }`.
+The SIWC Terms require the app's own identity and reasonable security/privacy
+controls. Persistent tokens must stay local and under the user's control.
+Requests must arise from that user's activity or expressly authorized automation;
+obtain express consent before background use. No account rotation, splitting,
+pooling, resale, or other limit bypass is permitted. Free SIWC use cannot require
+paying Likha or upgrading an app tier. Likha implements the documented protocol
+in Go without copying DevKit software or another application's credentials;
+this choice does not waive OpenAI's terms, license conditions, branding rules,
+or maintainers' privacy responsibilities.
 
-### Token storage
+## 2. Client registration and host identity
 
-`packages/opencode/src/auth/index.ts`: single JSON file at `path.join(Global.Path.data, "auth.json")` — `Global.Path.data` = `path.join(xdgData, "opencode")` per `packages/core/src/global.ts`, i.e. **`~/.local/share/opencode/auth.json`**, written with **mode 0600**. Shape: `{ "<providerID>": <Info> }` where `Info` is a discriminated union:
-- `oauth`: `{ type: "oauth", refresh: string, access: string, expires: NonNegativeInt (epoch ms), accountId?: string, enterpriseUrl?: string }`
-- `api`: `{ type: "api", key: string, metadata?: Record<string,string> }`
-- `wellknown`: `{ type: "wellknown", key, token }`
+A client registration binds to the authenticated user and selected workspace.
+A host identifies where the local tool runs. Host restarts and sign-out do not
+create new hosts or registrations. Save the host ID before the first sign-in.
+The overview accepts a JWK thumbprint URI, a `urn:uuid:<UUIDv4>` value, or
+`did:key`; the identifier must be opaque rather than an email or user ID.
 
-Also exports `OAUTH_DUMMY_KEY = "opencode-oauth-dummy-key"` — the placeholder "apiKey" the plugin returns so OpenAI SDK-style call paths still see an apiKey value while the custom fetch does real OAuth. `process.env.OPENCODE_AUTH_CONTENT` can override the whole store (used by tests/containers).
+For a first registration, use `client_id=dynamic_agent_client`,
+`agent_name_hint=Likha`, and the persisted `ext_agent_host_id`. Save the callback's
+issued client ID and use it for token exchange and returning sign-in.
+`dynamic_agent_client` is an entrypoint, not a durable issued client ID.
 
-### Refresh flow
+Keep separate registrations keyed by issued client ID and verified ID-token
+`sub`, even when email labels match. Email and `sub` alone are not workspace IDs.
+Show distinct stable labels and the active choice. For returning authorization,
+omit `agent_name_hint`, reuse issued client ID and host ID, and associate retained
+ID-token/email hints only with that selected registration. A pending sign-in
+cannot overwrite a working account before its identity is verified.
 
-`refreshAccessToken` in `codex.ts`: `POST {issuer}/oauth/token`, form-encoded `grant_type=refresh_token`, `refresh_token`, `client_id`. In the auth `loader`'s custom `fetch`, if `currentAuth.access` is empty or `expires < Date.now()`, a single-flight `refreshPromise` refreshes and re-persists via `input.client.auth.set({ path: { id: "openai" }, body: {type:"oauth", refresh, access, expires, accountId} })`, falling back to the previously stored `accountId` if the new tokens carry none.
+## 3. Supported browser and token protocol
 
-### API base URL and request shaping (the custom `fetch` in the auth loader)
+| Concern | Official requirement |
+| --- | --- |
+| Authorization endpoint | `https://auth.openai.com/api/accounts/authorize` |
+| Token endpoint | `https://auth.openai.com/api/accounts/oauth/token` |
+| Public resource | `https://api.openai.com/v1` |
+| Identity scopes | `openid profile email` |
+| Plan/renewal scopes | `offline_access resource.invoke chatgpt.tokens.use.direct` |
+| Callback | HTTP `127.0.0.1` loopback, listener started before browser launch. Across reconnects only the port may vary; scheme/host/path stay unchanged. The exact per-attempt URI must match authorization and exchange. `localhost` is not a substitute. |
+| Proof/binding | Fresh random state, nonce, and PKCE verifier per attempt; S256 challenge. Validate state even on `access_denied`. |
+| New callback | Require code, matching state, and issued client ID; missing issued ID leaves registration incomplete. |
+| Returning callback | It may omit client ID; preserve the pending registration's exact ID and reject a different one. |
+| Code exchange | Form-encoded `authorization_code`, issued client ID, code, verifier, exact callback URI, and resource. No client secret or partner API key. |
+| ID token | Verify signature against OpenAI's published JWKS; check issuer, audience against issued ID, expiry, and nonce. Use verified `sub`. Decoding claims is insufficient. |
+| Inference permission | Use token response's granted scopes. A valid ID token alone cannot enable plan inference. |
+| Storage | Protected per-registration record with identity, tokens, scopes, expiry and saved timing; owner-only `0600` file, atomic writes, no commits/logs. Likha also requires a private `0700` state directory. |
 
-- Strips any caller-supplied `Authorization` header, then sets `authorization: Bearer <access>`.
-- Sets `ChatGPT-Account-Id: <accountId>` when an account id is known (extracted from claims at login/refresh).
-- **URL rewrite**: any request whose path includes `/v1/responses` **or `/chat/completions`** is rewritten to `CODEX_API_ENDPOINT` = `https://chatgpt.com/backend-api/codex/responses` — i.e. the Codex backend speaks the **OpenAI Responses API**, and opencode maps its chat-completions-style calls onto it. Non-matching paths pass through unchanged.
-- When rewriting, sets `x-openai-internal-codex-residency: <residency>` if the access-token claims carry a compute residency (other than `no_constraint`).
-- Optional WebSocket transport via `OpenAIWebSocketPool` (same plugin dir, `ws-pool.ts`).
+Likha's browser-first UX and ephemeral callback port are product decisions within
+this official flow. First-run and unconnected `/providers` selection launch the
+browser without another keypress. Only a launcher error reveals the manual URL.
+The callback page must acknowledge receipt, not claim success before exchange,
+signature/claims verification, and permission checks finish.
 
-### Additional request headers (`chat.headers` hook in `CodexAuthPlugin`)
+The new CLI method is `likha --provider chatgpt --login`. The earlier
+`--device-login` method is unsupported/deprecated; docs and help must direct
+users to the browser flow. Nothing in these sources authorizes reuse of the
+old Codex device endpoints as an SIWC alternative.
 
-For `providerID === "openai"`: `originator: opencode`, `User-Agent: opencode/<version> (<platform> <release>; <arch>)`, and **`session-id: <opencode sessionID>`** (per-conversation). A temporary header marks title-generation requests for HTTP fallback when websockets are installed. `chat.params` clears `maxOutputTokens` ("match codex cli").
+## 4. Refresh and disconnection
 
-### Model filtering (oauth-mode `models()` hook)
+The token response includes access/refresh/ID tokens, token type, expiry,
+space-separated granted scope, and `earliest_refresh_at`. The reference lists
+one-hour access tokens and 30-day refresh tokens; each successful refresh returns
+a replacement refresh token with a new lifetime. Use returned timing rather than
+guessing from token contents.
 
-Only when `ctx.auth.type === "oauth"`: drops models with `options.reasoningMode === "pro"`; keeps `ALLOWED_MODELS` ids; rejects `gpt-5.5-pro` and `gpt-5.6`; otherwise regex `^gpt-(\d+)(?:\.(\d+))?` must yield major > 5 or (major = 5 and minor > 4) — i.e. newer gpt-5.4+ variants pass. Costs are zeroed (`input/output/cache` 0 — subscription, not pay-per-token), and `gpt-5.5`/`gpt-5.6` get limits `{ context: 400_000, input: 272_000, output: 128_000 }`.
+Refresh with `grant_type=refresh_token`, the associated issued client ID, saved
+refresh token, and resource. Omit scope to retain the grant. Serialize refreshes
+for the same session across processes and replace access, refresh, scopes, and
+expiry together. A goroutine-only single-flight does not address two processes
+sharing a rotating token store.
 
-## 2. Same flow in OMP (this harness)
+On sign-out, stop requests and attempt revocation at the `revocation_endpoint`
+from `https://auth.openai.com/.well-known/openid-configuration`. POST the refresh
+token with `token_type_hint=refresh_token` and issued client ID. Empty HTTP 200
+is success, including an already-invalid token. Retry network/5xx failures with
+bounded backoff while the token is available. If remote revocation cannot be
+confirmed, clear local access/refresh/ID tokens and warn that the user may need
+to disconnect the app in ChatGPT Settings. Keep the registration mapping and
+host ID for reconnect.
 
-OMP models ChatGPT/Codex as its own provider **`openai-codex`** (transport API `openai-codex-responses`). Sources: `omp://provider-quirks.md` ("OpenAI Codex" section), `omp://providers.md`, `omp://auth-broker-gateway.md`, `omp://models.md`, `omp://environment-variables.md`.
+Terminal refresh errors include `invalid_grant`, `invalid_refresh_token`,
+`token_expired`, `refresh_token_expired`, `refresh_token_invalidated`, and
+`refresh_token_reused`. Clear unusable tokens and reauthorize with the saved
+issued client ID. `invalid_client` points to client configuration, not a generic
+user-password problem. Temporary network/infrastructure failures alone do not
+justify deleting credentials. OpenAI does not currently push disconnect
+notifications to the app.
 
-- **OAuth login flows**: declared in `packages/catalog/src/compat/rules/auth/openai-codex.kdl` (`login "oauth-code"`, engine `packages/ai/src/registry/engine/oauth-code.ts`) and `openai-codex-device.kdl`; hooks in `packages/ai/src/registry/oauth/openai-codex.ts`. Browser flow uses **PKCE S256** (`createOpenAICodexAuthorizationUrl`) with fixed local port **1455** (`http://localhost:1455/auth/callback`), client ID **`app_EMoamEEZ73f0CkXaXp7hrann`**, and the simplified CLI flow flags. Headless device flow (`loginOpenAICodexDevice`) uses `https://auth.openai.com/api/accounts/deviceauth/usercode` and polls `deviceauth/token` — endpoint-for-endpoint the same flow opencode implements.
-- **Refresh & claims**: `refreshOpenAICodexToken` posts `grant_type: refresh_token` to `https://auth.openai.com/oauth/token`; `getTokenProfile` extracts `chatgpt_account_id` and `email` from JWT claims namespaces `https://api.openai.com/auth` and `https://api.openai.com/profile`.
-- **Requests**: target `https://chatgpt.com/backend-api/codex/responses` (or `providers.openai-codex.baseUrl` override) over SSE or WebSocket (`OpenAI-Beta: responses_websockets=2026-02-06`). Headers include `ChatGPT-Account-Id` (`getCodexAccountId`), `session_id`/`session-id`, `x-codex-installation-id`, `x-codex-window-id`, `x-codex-turn-metadata` (JSON with `turn_id`, `installation_id`, `parent_turn_id`, `request_kind`), `x-codex-parent-thread-id`, `x-openai-subagent`. Residency claim `chatgpt_data_residency` (fallback `chatgpt_compute_residency`) → `x-openai-internal-codex-residency` header; enterprise workspaces otherwise 401 with `Workspace is not authorized in this region.`
-- **Storage**: OAuth credentials live in the local SQLite auth store **`~/.omp/agent/agent.db`** (or `PI_CODING_AGENT_DIR` relocation), or in the auth-broker SQLite vault when `OMP_AUTH_BROKER_URL` is set (broker callback port map includes `openai-codex:1455`). Env fallback: `OPENAI_CODEX_OAUTH_TOKEN`. Resolution ladder (`omp://providers.md`): runtime `--api-key` → `models.yml` config key → **stored OAuth credential (multiple accounts ranked and rotated; each ChatGPT org/workspace counts as its own account)** → login-sourced API key → provider env var → other stored key.
-- **Rate-limit/plan nuances**: 5-hour primary window and 7-day secondary window (usage via `GET /wham/usage` on canonical `chatgpt.com` origins; response headers `x-codex-primary-used-percent`, `x-codex-primary-window-minutes`, `x-codex-primary-reset-at`, `x-codex-secondary-*`); Spark meter (`-spark` model suffix, e.g. `gpt-5.3-codex-spark`) is isolated into its own `spark` scope so exhausting it doesn't block normal chat (`codexRankingStrategy`, `packages/ai/src/usage/openai-codex.ts`); saved rate-limit reset credits via `GET/POST /wham/rate-limit-reset-credits[/consume]`. Up to 5 retries on transient errors, 429 backoff within a 5-minute budget. Codex backend returns HTTP 400 `Unsupported parameter` for sampling params (`temperature`, `top_p`, …) — stripped by `transformRequestBody`.
-- **Models**: default model `gpt-5.5` (descriptor in `packages/catalog/src/provider-models/descriptors.ts`); dynamic discovery `fetchCodexModels` (`packages/catalog/src/discovery/codex.ts`) queries `/codex/models` or `/models` on the backend with `v2StreamingEnabled: true`, parsing `reasoning_presets`. Variants: `codex`, `codex-max`, `codex-mini`, `codex-spark`. Web-search default chain uses `openai-codex/gpt-6-luna`, `gpt-5.6-luna`, `gpt-5.6`, `gpt-5.5`. (Consistent with opencode's `ALLOWED_MODELS`.) [INFERENCE] models.dev metadata was not directly consulted; the model-ID lists above are from the two codebases.
+## 5. Public models and Responses
 
-## 3. Likha provider integration points (cwd)
+Fetch `GET https://api.openai.com/v1/models` with the selected OAuth bearer token.
+SIWC returns `models[]`: display entries with `visibility == "list"`, preserve
+server ordering, show `display_name`, and use `slug` for requests. Reload on
+account switches. This is not the API-key `data[].id` envelope; a bundled catalog
+or hard-coded list cannot prove account eligibility.
 
-- **Provider registry** — `internal/model/provider.go`: `Provider{Name, DisplayName, BaseURL, KeyEnv, DefaultModel, Hosted, SessionHeader}`; `Providers` table (openai, openrouter, bedrock, dialagram, opencode-zen, opencode-go); `LookupProvider` case-insensitive. `SessionHeader` already exists for `x-opencode-session` (opencode-zen/go rows) — the seam where `ChatGPT-Account-Id` or `session-id` semantics would slot in. Adding a provider "is a table row"; a non-OpenAI-compatible protocol is a new client surface (v1 excludes it) — relevant because the Codex backend is a **Responses** API, not chat completions.
-- **Credential resolution** — `internal/app/provider.go` `resolveProvider()`: ladder = `--api-key` flag (incl. `LIKHA_API_KEY`) → `p.KeyEnv` env → `storedKey(stateDir)` → error; persists via `storeKey` when `persistKey`. An OAuth provider needs a richer credential than a static string here (refresh/access/expires/accountId), so this function and `keyfile.go` are the primary touch points.
-- **Credential storage** — `internal/app/keyfile.go`: `<stateDir>/providers.json`, `map[string]string`, mode 0600, one key per provider; never in the repo or session DB. OAuth tokens would need either a second file or a schema change to that map.
-- **Config storage** — `internal/app/config.go`: `<stateDir>/config.json` `{provider, model, theme}` (first-run setup result), 0600.
-- **Model client** — `internal/model/client.go`: `New(endpoint, model, apiKey)` enforces HTTPS for hosted endpoints (plain HTTP only loopback `/v1`), no redirects; `Stream()` POSTs `<base>/chat/completions` (SSE) with headers `Authorization: Bearer <apiKey>`, `User-Agent: likha/dev` (overwritten by build tag), `Accept: text/event-stream`, plus `c.sessionHeader: c.sessionID` when set (`SetSessionHeader`/`SetSession`). `Check()` does a read-only model-list fetch. **Gaps for OAuth**: no token refresh, no extra header injection beyond the session header, no URL rewrite, and only the chat-completions wire format — the Codex backend at `https://chatgpt.com/backend-api/codex/responses` speaks Responses (opencode/OMP both rewire chat/completions-style calls onto it, per `codex.ts` `fetch` rewrite and OMP's `openai-codex-responses` transport).
-- **Wiring** — `internal/app/run.go:224-278`: `resolveProvider` → `resolveModel` → `model.New` → `client.SetSessionHeader(selected.SessionHeader); client.SetSession(snapshot.ID)`. First-run setup in `internal/app/tui.go:316-337` builds the client the same way from the setup form.
-- **Test patterns** — `internal/app/run_test.go`: table tests over every `model.Providers` row asserting `endpoint/verified/display/key`; key-resolution ladder tests (flag vs env vs stored vs persist) against `t.TempDir()`. `internal/model/client_test.go`: `httptest` servers asserting method/paths/headers (e.g. lines 288-292 assert the `x-opencode-session` header reaches the server), SSE fixtures via `sendEvents`. `internal/app/agent_test.go`/`tui_test.go` spin httptest SSE servers through `model.New(server.URL+"/v1", ...)`. An OAuth-credentialed provider would be tested the same way: httptest token endpoint + loopback callback, asserting refresh-before-expiry and header injection.
+Send `POST https://api.openai.com/v1/responses` with that bearer token,
+`store: false`, `stream: true`, and `input` as an array carrying needed history.
+Use `instructions` or developer messages rather than explicit system message
+items. Over HTTP, omit `previous_response_id` and persistent `conversation`.
+Function/custom tools need supported namespaces or `additional_tools` input
+items. Likha keeps its own agent, local tools, approval flow, and cancellation.
 
-### Where an OAuth-credentialed provider would slot in (synthesis)
+The preview rejects `background`, `conversation`, `max_output_tokens`,
+`max_tool_calls`, `metadata`, `moderation`, `multi_agent`, `prompt`,
+`prompt_cache_retention`, `safety_identifier`, `temperature`, `top_logprobs`,
+`top_p`, `truncation`, and `user`. Hosted MCP/connectors, file search, image
+generation, Code Interpreter, native computer use, Responses `tool_search`, and
+top-level `programmatic_tool_calling` are not supported by this route. Local
+function tools do not grant those hosted capabilities. Text/images/files depend
+on the selected model; audio/video, Files upload, and transcription are outside
+this flow. Likha's separately planned attachment UI is not implemented by this
+migration.
 
-1. New `Provider` row (e.g. `chatgpt-codex`) with `Hosted: true` but no static `KeyEnv`; `BaseURL` pointing at a Codex/Responses-compatible endpoint — or a new client surface per the v1-spec rule, since the Codex backend is Responses-wire, which Likha's `client.go` does not speak.
-2. Auth acquisition: port-1455 loopback HTTP server + PKCE S256 + `codex_cli_simplified_flow=true` authorize at `https://auth.openai.com/oauth/authorize`; device flow as the headless alternative; token exchange at `/oauth/token`.
-3. Storage: extend `providers.json` (or a sibling `auth.json`) with `{type:"oauth", refresh, access, expires, accountId}` at 0600.
-4. Client changes: refresh on 401/expiry, send `ChatGPT-Account-Id`, honor compute-residency, per-conversation `session-id` header (Likha already has the session-header seam), and either implement the Responses wire format or route through a gateway that translates chat-completions to Responses.
-5. Rate-limit nuance to surface in UI: 5h/7d windows, Spark meter separation, zero token cost (subscription).
+Read through `response.completed` before accepting success. `response.failed`
+can report a usage-limit failure after deltas begin. `response.incomplete`,
+explicit error, interruption, and EOF without completion are distinct failures,
+not successful partial responses or authority to dispatch partially received tools.
+
+## 6. Error, usage, and UI contract
+
+Preserve status, response shape, exact code/parameter when present, and request
+ID. Direct admission can return `{"detail":"..."}` rather than an API `error`
+object; its diagnostic text is not a stable code. The official recovery page
+distinguishes scope/identity rejection (401), policy/region refusal (403), and
+temporary routing unavailability (503).
+
+| Structured code | Documented recovery |
+| --- | --- |
+| `subscription_sharing_user_not_eligible` | Explain account/workspace/policy restriction; do not repeat requests or loop through OAuth. |
+| `subscription_sharing_usage_limit_exceeded` | Pause plan requests and open ChatGPT Usage. An app-specific limit may apply; do not infer a reset time or an empty whole plan. |
+| `subscription_sharing_usage_unavailable`, `subscription_sharing_user_unavailable` | Preserve credentials; retry temporarily unavailable service with bounded backoff. |
+| `subscription_sharing_unsupported_capability` | Inspect `error.param` and fix/remove unsupported inputs/tools/overrides; do not resend the same invalid request. |
+| `subscription_sharing_route_not_supported` | Correct method/endpoint; another client's routes do not authorize this one. |
+| `subscription_sharing_invalid_user` | Diagnose credential context and retain request ID; reconnect after confirmed revocation or terminal refresh failure. |
+| `chatpass_v2_scope_not_authorized`, `chatpass_v2_invalid_authorization_context` | Correct client/grant configuration; do not retry or change billing. |
+
+For identity-only login, mark plan use disabled and offer explicit enable-plan
+consent or user-selected separate API-key configuration. `prompt=consent` is the
+documented existing mechanism for explicit enablement; use `force_reconsent=true`
+only after OpenAI confirms deployment for the integration. Ordinary returning
+sign-in must not force reconsent. This OAuth parameter is unrelated to the
+unsupported Responses request-body `prompt` field.
+
+UI guidance calls for **Continue with ChatGPT**, a once-only **You're using your
+ChatGPT plan** confirmation, visible **Using ChatGPT plan**, and **Manage usage**
+linking to [ChatGPT Usage](https://chatgpt.com/settings/usage). A limit notice
+makes Manage usage primary. Likha has no own credit product to upsell and must
+not imply OpenAI sponsorship. A terminal-appropriate presentation and its
+interactive verification remain implementation work.
+
+## Superseded history and verification boundary
+
+The 2026-09-29 notes examined a development-branch OpenCode Codex plugin and OMP
+material. They led to a copied public Codex client ID, fixed `localhost:1455`,
+private backend/device endpoints, decoded-only account claims, curated models,
+Codex rate headers, and zero-cost assumptions. Those are obsolete for this
+feature and must not be used as current requirements or migration proof.
+Development-branch observations do not establish OpenCode V2 internals; this
+document makes no claim about V2's SIWC implementation.
+
+Old credentials cannot be repurposed without official registration and fresh
+sign-in. Prior local Codex fixture tests establish only the behavior they tested.
+They do not establish working SIWC OAuth for a Plus/Pro account, live model
+availability, public-route tool compatibility, or released-binary usability.
+The parent will record integrated automated outcomes; a real account/browser
+probe needs explicit user approval and a published-release walkthrough remains
+open.

@@ -71,6 +71,16 @@ harness prompt and `AGENTS.md` loader remain that spec's scope.
 - No auto-approval or allowlist of shell commands: command approval is not
   sandboxing (v1-spec §8), and parsing shell text for "read-only" is
   fragile. The fix is steering the model, not lowering the gate.
+  *Amended 2026-10-04 by [command-permissions](../command-permissions/spec.md):*
+  the user reversed this non-goal on 2026-10-04 because prompting for every
+  routine check (`npm test`, `git status`) made the agent tiresome. The
+  fragility argument is answered, not dismissed: the tiers that run without
+  a prompt accept only a single trivially simple command (no chains, pipes,
+  substitutions, redirects, globs, assignments, or wrappers), and everything
+  else prompts. Danger detection scans the whole string with quoting ignored,
+  so ambiguity always lands on a prompt. Command approval is still not
+  sandboxing. This feature's own scope (steering and auto-continue) is
+  unchanged.
 - No compaction auto-trigger at the checkpoint; `/compact` stays manual.
 - No user-editable or project instructions file; that is agent-harness
   scope (AGENTS.md loader).

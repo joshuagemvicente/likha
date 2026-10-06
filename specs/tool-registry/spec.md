@@ -12,6 +12,12 @@ current built-ins and stdio MCP tools without weakening their permissions.
 Executable plugins, user tool registration, and saved shell allow-rules are
 outside this phase. [Shared decisions](../tooling-platform/decisions.md) apply.
 
+> **Amended 2026-10-04 by [command-permissions](../command-permissions/spec.md):**
+> Likha now has compiled-in shell tiers (refuse, always ask, ask,
+> verification, read-only), in-memory session grants for one exact command,
+> and per-repository trust of verification checks stored in private
+> `config.json`. User-authored saved shell allow-rules remain out of scope.
+
 ## Catalog behavior
 
 `/tools` opens a keyboard-accessible catalog when no run is active. Each entry
@@ -43,6 +49,13 @@ an unknown MCP effect is conservative, not an inferred read permission.
    approval, shell through exact-command approval, MCP through server TOFU,
    and web through its separate consent policy. Scope a grant to the displayed
    operation; instruction or agent text cannot expand it.
+   *Amended 2026-10-04 by [command-permissions](../command-permissions/spec.md):*
+   shell is classified before exact-command approval. Refused commands return
+   a refused result; read-only commands, trusted verification checks, and
+   exact commands the user allowed for the session run without a review and
+   are labelled auto-approved. Session grants and repository trust are the
+   only shell grants beyond the displayed operation; instruction or agent
+   text still cannot create or expand either.
 4. Dispatch with cancellation, then return the result exactly once against
    the original tool-call ID. Invalid/refused/failed calls have results too.
 

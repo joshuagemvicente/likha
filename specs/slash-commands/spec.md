@@ -31,6 +31,7 @@ the model.
 | `/model <n-or-id>` | Switch the **live client** to that model (a number from the last `/models` listing, or an exact model ID) for subsequent turns. The `/model` form keeps the stored configuration untouched; applying a model **inside the dialog** (Enter) additionally stores provider+model in `config.json` (decided 2026-09-29 with the dialog integration, superseding the earlier live-only rule). |
 | `/quit` | Identical to Ctrl+D: drains pending state, never replays pending approvals, restores the terminal. |
 | `/skills` | **Placeholder** — Likha has no skills system in any spec. Excluded from scope until a skills feature exists; reserving the name without implementing it is not useful. |
+| `/init [guidance]` | *Added 2026-10-05 by [repo-init](../repo-init/spec.md):* start one restricted agent turn that surveys the repository and proposes the root `AGENTS.md` through the normal edit review. Refused while no provider is configured, plan mode is on, a run is active, or a review is pending. |
 | `/help` | Print the command list in the conversation view. |
 | Unknown `/word` | Visible error in the conversation view; **never sent to the model**, and the draft text is restored so nothing is lost. |
 | `//word` | Escape: the leading slash is stripped and `/word` is sent to the model as a normal prompt. |

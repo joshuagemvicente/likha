@@ -6,18 +6,26 @@ Optional main-agent tools; explore remains offline/repository-read-only.
 
 ## Configuration and availability
 
-Support one explicitly configured search backend at a time: Brave, Tavily,
-Exa, or DuckDuckGo. Keep direct fetch separate. Read nonsecret enablement from
-private `<stateDir>/tools.json`:
+Support one configured search backend at a time: Brave, Tavily, Exa, or
+DuckDuckGo. Keep direct fetch separate. Read nonsecret settings from the
+top-level `web` key of private `<stateDir>/config.json`, beside the provider,
+model, and theme:
 
 ```json
 {"web":{"search":{"enabled":true,"backend":"brave"},"fetch":{"enabled":true}}}
 ```
 
-`backend` accepts exactly `"brave"`, `"tavily"`, `"exa"`, or `"duckduckgo"`.
-When `search.enabled` is true and `backend` is omitted or empty, the backend is
-`duckduckgo` (keyless default, revised 2026-10-04 by user approval); keyed
-backends are opt-in by naming them. Any other value disables both web tools
+Every field is optional. Search and fetch are **on by default**: a missing
+file, `web` key, section, or `enabled` field means enabled, and only an
+explicit `"enabled": false` turns a tool off (revised 2026-10-05 by user
+approval). `backend` accepts exactly `"brave"`, `"tavily"`, `"exa"`, or
+`"duckduckgo"`; omitted or empty means `duckduckgo` (keyless default, revised
+2026-10-04 by user approval); keyed backends are opt-in by naming them.
+Saving any other `config.json` preference preserves the `web` key verbatim.
+While `config.json` has no `web` key, a legacy `<stateDir>/tools.json` of the
+same shape is read; launch folds a valid one into `config.json` (explicit
+values, including `false`, kept) and removes it, and leaves a malformed one in
+place so its error stays visible. Any other value disables both web tools
 with a visible error. A named keyed backend without its key stays unavailable;
 it never falls back to DuckDuckGo. Exactly
 one backend is configured and used at a time; there is no fallback to another
@@ -44,8 +52,10 @@ private 0700 directory. Do not read repo `.env`, reuse model credentials,
 include keys in prompts/history/errors, or accept an arbitrary endpoint/proxy
 override in this milestone.
 
-Unconfigured/disabled/unavailable tools stay absent from model definitions,
-with a reason in `/tools` and setup/help. Invalid config disables affected web
+Disabled/unavailable tools stay absent from model definitions, with a reason
+in `/tools` and setup/help. On-by-default does not weaken consent: the first
+search per backend and first fetch per origin still ask in every
+conversation. Invalid config disables affected web
 tools with a visible error; repository work still operates. Apply changes at
 run boundaries and invalidate relevant in-memory web grants.
 
@@ -65,12 +75,28 @@ shape below; every backend's wire behavior is unverified until a live probe:
 - Exa: `POST https://api.exa.ai/search` with `x-api-1` header authentication
   and JSON body `{"query","numResults"}`; results are read from
   `results[].title/url` plus optional `text`/`snippet` fields.
-- DuckDuckGo: keyless `GET https://html.duckduckgo.com/html/?q=`. This is an
-  unofficial HTML endpoint, not a documented public API: its markup may change
-  without notice, automated use may be blocked or rate-limited at any time,
-  and its use sits in a gray zone of DuckDuckGo's terms. Disclose this
-  fragility in setup/help and consent copy; it is never offered as a silent
-  fallback for a keyed provider.
+- DuckDuckGo: keyless `POST https://html.duckduckgo.com/html/` with
+  `Content-Type: application/x-www-form-urlencoded`, form body `q=<query>&b=`,
+  the honest `User-Agent: likha-web-search`, and `Referer:
+  https://html.duckduckgo.com/` — the same submission the page's own search
+  form makes. This is an unofficial HTML endpoint, not a documented public
+  API: its markup may change without notice and automated use may be blocked
+  at any time. DuckDuckGo publishes no API for full web results (its Instant
+  Answer API is "not for full search results"), its Acceptable Use Policy
+  forbids interfering with "the integrity or performance of the services",
+  and its URL-parameter help says parameters are "intended for individual
+  use" and must not strip branding or advertising; send no ad- or
+  branding-stripping parameters. Disclose this fragility in setup/help and
+  consent copy; it is never offered as a silent fallback for a keyed
+  provider. Parse each `div.result` container: skip `result--ad`, take the
+  first `a.result__a` as title/URL and `.result__snippet` as snippet, unwrap
+  `/l/?uddg=` links, and drop any target on `duckduckgo.com` (ad `y.js`
+  clicks). HTTP 202 or a challenge page (`anomaly-modal`, `challenge-form`)
+  is a named "blocked" error that tells the model not to retry now; the
+  `result--no-result` page is a success with zero hits; any other page with
+  no organic results is a named markup-changed error. Serialize DuckDuckGo
+  requests per process, at least one second apart, inside the 30 second cap.
+  Evidence and live probes: [research.md](research.md).
 
 Reject search redirects without forwarding authentication or reissuing the
 query. Do not silently retry another vendor; expose timeout/rate-limit/auth
@@ -187,3 +213,21 @@ enum value plus adapter. The no-fallback rule, fetch contract, address policy,
 conversation-scoped grants, explore offline rule, plan-mode consent, and the
 hidden-extraction-provider prohibition are unchanged. Original title:
 "Feature: explicit Brave search and public HTTPS fetch."
+
+Revision note, 2026-10-05: DuckDuckGo request and parsing contract revised by
+user approval after [research.md](research.md). The adapter now POSTs the
+page's search form instead of `GET ?q=` (POST returned results 4/4 in live
+probes; GET with a browser User-Agent was challenged 2/2), skips sponsored
+results, classifies HTTP 202/challenge pages as blocked with no-retry
+guidance, returns DuckDuckGo's no-results page as an empty success, and
+spaces requests one second apart. The user also approved fixture-based
+parser tests for this adapter (`internal/webtools/testdata/duckduckgo`),
+an exception to the milestone's no-new-tests rule.
+
+Revision note, 2026-10-05 (second): web tools are on by default and their
+settings moved from `tools.json` into the `web` key of `config.json`, by user
+approval after comparing other agent terminals
+([config-and-web-defaults.md](../tooling-landscape/config-and-web-defaults.md)):
+Claude Code and OpenCode V2 ship search on with a first-use prompt, and every
+compared agent with a web switch keeps it in its main settings file. Consent,
+the no-fallback rule, and key handling are unchanged.

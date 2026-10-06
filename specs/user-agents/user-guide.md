@@ -8,8 +8,8 @@ build status.
 ## Phase 4: your own agent profiles
 
 Profiles live under the same private Likha state directory as skills and web
-configuration (`~/.config/likha/` on Linux, `~/Library/Application Support/likha/`
-on macOS): one directory per profile at `<stateDir>/agents/<name>/`, containing
+configuration (`~/.config/likha/` on macOS and
+Linux): one directory per profile at `<stateDir>/agents/<name>/`, containing
 one `AGENT.md`. A profile is named prompt/model/tool data. Defining one runs
 nothing and grants nothing. Only the global state directory is scanned — no
 repository file can define or shadow an agent identity.

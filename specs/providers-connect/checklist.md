@@ -5,6 +5,7 @@
       stays in the dialog.
 - [ ] Configured row shows an auth-state view naming the key source;
       replacing re-checks; failure keeps the old key.
-- [ ] chatgpt row is state-only; not signed in points at setup/--device-login.
+- [ ] Unconfigured chatgpt opens browser sign-in automatically; saved
+      registrations expose the SIWC account manager.
 - [ ] /providers <n-or-name> [key] opens auth and never switches.
 - [ ] /models cross-provider switching unchanged; `go test ./...` green.

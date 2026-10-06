@@ -2,6 +2,8 @@
 
 **Status:** in progress
 
+Presentation and setup UX are refined by [onboarding-redesign](../onboarding-redesign/spec.md) (2026-10-04); the decisions below still bind.
+
 ## Context
 
 Likha is a BYOK agent harness: it hosts no models and talks directly to the

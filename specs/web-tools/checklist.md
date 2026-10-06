@@ -1,6 +1,6 @@
 # Checklist: web tools
 
-- [ ] Search/fetch enablement is explicit; absent backends explain availability.
+- [ ] Search/fetch are on by default and only an explicit `enabled: false` in `config.json` disables them; unavailable backends explain why.
 - [ ] Keys remain private and separate from model/fetch requests.
 - [ ] Brave ordinary results identify query/provider/URLs without hidden answers.
 - [ ] Public HTTPS policy validates actual connections, redirects, TLS, and proxies.

@@ -30,10 +30,13 @@ already move the session across providers, specs/all-models).
      key `LIKHA_<PROVIDER>_API_KEY` when both contexts resolve), and
      `Enter again to replace` / `Esc back`. A second Enter re-opens the
      key modal to replace the key (re-checked before storing).
-   - `chatgpt` → auth-state view: signed in / not signed in; a not-signed-in
-     row points at first-run setup or `likha --provider chatgpt --device-login`
-     (the switcher still cannot sign in interactively — the modal is for
-     keys only). No swap.
+    - `chatgpt` without a saved registration → automatically open the system
+      browser for Sign in with ChatGPT. With saved registrations, show the
+      account manager with active markers, reconnect, add, select, and sign-out
+      actions. Merely opening the surface never swaps the live provider. An
+      explicit account change on the active ChatGPT provider replaces that
+      account only after validation; signing out stops its requests. See
+      [chatgpt-plus](../chatgpt-plus/spec.md) for the current SIWC contract.
 3. The direct form `$ /providers <n-or-name> [key]` re-points at auth:
    with an argument it starts the auth surface for that provider; with a
    trailing key argument it stores that key after the check (flag-style
@@ -52,13 +55,13 @@ already move the session across providers, specs/all-models).
   visible (today's rule).
 - Env-var-sourced providers show their source; when neither state-dir
   nor env carries a key the row is "not configured" as today.
-- Schema/persistence unchanged (`providers.json`, `config.json`).
+- API-key persistence remains unchanged. ChatGPT registration and token storage
+  follows the protected account-specific SIWC contract in `chatgpt-plus`.
 
 ## Non-goals
 
 - No provider-activation from this dialog (removed, not discouraged).
-- No `omc`-style command-auth or browser OAuth for the key providers
-  (chatgpt keeps its device-login flow).
+- No `omc`-style command-auth or browser OAuth for the key providers.
 - No new commands, no rename away from `/providers`; no
   stored-config/session-table schema changes.
 
@@ -72,8 +75,8 @@ already move the session across providers, specs/all-models).
 - [ ] Configured API-key row → auth-state view naming the key source;
       second Enter replaces the key after a passing check; a failed
       check keeps the old key and shows the error.
-- [ ] `chatgpt` row → auth-state view only; not signed in points at
-      setup/`--device-login`.
+- [ ] An unconfigured `chatgpt` row automatically opens browser sign-in;
+      saved registrations expose the account manager, not a device-code hint.
 - [ ] `/providers <n-or-name> [key]` opens auth for that provider (and
       stores a given key after check) without switching.
 - [ ] `/models` cross-provider switching and the first-run setup flow

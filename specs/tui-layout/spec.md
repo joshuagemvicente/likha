@@ -98,10 +98,14 @@ clips; identity never retires entirely):
 6. **Session spend** — new segment: cumulative dollars for the session,
    `$0.42` (cents precision under $1). Sources in priority order:
    provider-reported cost when the response carries it, else a curated
-   local price table keyed by model slug (per-Mtok input/output, sourced
-   like `windows.go`), else the segment hides. The chatgpt (subscription)
-   row renders `$0.00` — subscription, not pay-per-token; NEVER fabricated
-   for unknown models. (Resolved: reported + curated table. Open follow-up
+   local price table keyed by model slug *(superseded by
+   [model-metadata](../model-metadata/spec.md), user-approved 2026-10-04:
+   the bundled catalog keyed by provider and model)* (per-Mtok input/output, sourced
+    like `windows.go`), else the segment hides. ChatGPT plan allowance does
+    not imply a known zero-dollar charge: after the SIWC migration, show a
+    monetary cost only when reported, because account-side credits may be
+    separately enabled. See `chatgpt-plus` and `model-metadata` (2026-10-05).
+    NEVER fabricate charges for unknown models. (Resolved: reported + curated table. Open follow-up
    only if the table proves costly to maintain; the raw token counts stay
    in `tokensSegment`.)
 7. Everything existing that is not listed (MCP summary, minutes, version,

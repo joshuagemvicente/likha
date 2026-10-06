@@ -1,8 +1,9 @@
 # Feature: Steering prompts (type, queue, and interrupt while a run is active)
 
-**Status:** implemented (local) — M1 automated suite green; real-TUI
-walkthrough outstanding. M2 (`Ctrl+Q` send-now) is not implemented; its
-terminal probe is the gate.
+**Status:** M1 implemented (local) — automated suite green; real-TUI
+walkthrough outstanding. M2 (`Ctrl+Enter` steer now) implemented (local) —
+re-specified 2026-10-05; automated suite green (agent, model, tui, race);
+the live Ghostty probe and real-TUI walkthrough are outstanding.
 
 ## Context
 
@@ -70,13 +71,20 @@ fetched 2026-10-02):
   not copied: Ctrl+Return is already Likha's newline chord (user-confirmed
   2026-09-30, `specs/tool-rendering-terminal-keys/`), and OMP's
   Ctrl+Q/Ctrl+Enter followUp chord is therefore unavailable for queueing.
+  *Amended 2026-10-05 (user-confirmed):* Enter still queues, but during a
+  run the Return-modifier family (Ctrl+Return, Shift+Return, Ctrl+J) now
+  means *steer now* (M2), matching Claude Code's `Ctrl+Enter` send-now.
+  The newline meaning stays everywhere else, and Alt+Return keeps it
+  inside a running draft.
 - Delivery at provider-call boundaries inside the same run = OpenCode's safe
   boundary plus Claude Code's "as soon as those tool calls finish". Turn
   end diverges (amended 2026-10-03): Likha holds the queue for an explicit
   Enter instead of Claude Code's auto-flush.
 - No provider-wire steering (`response.steer`-style): Likha's client has one
   request/response `Stream` call per round (`internal/model/client.go:344`);
-  a queued message attaches to the next request.
+  a queued message attaches to the next request. M2's steer now stops the
+  in-flight request and attaches the message to a fresh one; it is still
+  not a wire-level steer.
 
 ## User-visible behavior
 
@@ -125,20 +133,96 @@ fetched 2026-10-02):
    `m.history` and not written to the session until it is delivered; resume
    never replays an undelivered message and never restores a queue.
 
-### M2 — send now (`Ctrl+Q`)
+### M2 — steer now (`Ctrl+Enter`)
 
-A queued message can be delivered without waiting for the current model
-response to finish: `Ctrl+Q` aborts only the response currently streaming
-(the aborted partial response disappears from the transcript exactly as a
-cancelled stream does today), then delivers the queue at once and continues
-the same run with its settled tool history. If a tool call is executing, the
-flush is deferred to the next safe point — a steering message must never
-kill a running approved command. The binding ships after the Ghostty
-(primary) / Windows Terminal (backlog) probe confirms the chord is
-delivered; if a host swallows it, `Alt+Q` is the fallback, recorded in
-tasks.md per the `tool-rendering-terminal-keys` probe discipline.
-With M1 holding the queue on cancel, M2 is the only way to deliver without
-waiting for a boundary; it remains deferred on its open probe.
+*Re-specified 2026-10-05 (user-confirmed); supersedes the 2026-10-02
+`Ctrl+Q` send-now design, which was never implemented. Two changes: the
+chord is Ctrl+Enter, and the interrupted response's visible text is kept
+instead of removed.*
+
+Enter keeps queueing exactly as M1 describes. Ctrl+Enter delivers without
+waiting for the model to finish the response it is producing — the case M1
+cannot help with: one long thinking or answering stream with no tool
+boundary coming, heading somewhere the user does not want.
+
+1. **The chord.** While a run is active, the Return-modifier family —
+   Ctrl+Enter, Shift+Enter, and Ctrl+J — means *steer now*. On bubbletea
+   v1.3.10 all three arrive as the same LF byte, reported `ctrl+j` (probe
+   table in
+   [tool-rendering-terminal-keys/tasks.md](../tool-rendering-terminal-keys/tasks.md)),
+   so Likha cannot tell them apart: Shift+Enter steers too while a run is
+   active. Alt+Return stays the newline key inside a running draft when the
+   terminal sends it as one chord (ESC and Return together, reported
+   `alt+enter`). The split arrival — a separate Esc, then Return — does not
+   work during a run: Esc cancels a run immediately and never waits for a
+   following key (M1, FR-04). While
+   no run is active, the family inserts a newline exactly as today. While a
+   completion popup (`@` or `/`) is open, the chord does nothing, as the
+   newline chord does today.
+2. **Steer with a draft.** With a non-empty draft, Ctrl+Enter takes the
+   draft under Enter's text rules: typed newlines flatten to spaces, a
+   leading `/` is refused with the draft kept and nothing steered, `//word`
+   steers the literal `word`, and the text joins prompt history. The draft
+   joins the end of the queue, and the whole queue — earlier queued
+   messages first, in typed order — is delivered now.
+3. **Steer with an empty draft.** If messages are queued, Ctrl+Enter
+   delivers them now. If nothing is queued, it does nothing: no newline, no
+   interruption.
+4. **What "now" means, by run phase.**
+   - *A model request is in flight* — waiting for the first token,
+     thinking, or streaming text or tool-call arguments: Likha stops that
+     one request, delivers the queue, and sends a fresh request in the same
+     run. The run continues with every settled tool result and decided
+     approval. No new turn starts, no turn footer is written, and session
+     auto-naming is unaffected.
+   - *A tool is executing* — a command, an edit being applied, an explore
+     task, or an open question: nothing is interrupted. The message
+     behaves exactly like an Enter-queued one: it shows as `Queued:` and is
+     delivered when the current tool calls settle (M1 item 4). The status
+     reads `Steer waits for the running tool`. A steer never cancels a
+     running tool or an approved command.
+   - *An approval is pending:* the composer is inert (M1 item 1), so the
+     chord does nothing.
+   - *A response has finished and its tool calls are about to run:* there
+     is no request to stop. The tool calls run, and ask for approval, as
+     usual; the message is delivered at the next boundary.
+   - *`/compact` is running:* the summarize call is never stopped. The
+     chord queues like Enter, and the message is held when compaction
+     finishes (M1 item 6).
+5. **The interrupted response.**
+   - Visible text the model had already streamed stays in the transcript
+     and stays in conversation history as the assistant's message, so the
+     model sees what it had said and does not repeat it. A muted note
+     follows it: `Response interrupted to deliver your message.`
+   - Reasoning the model had streamed stays visible in its reasoning block,
+     which closes, and never enters history (reasoning is never sent back
+     to a provider, as today).
+   - Tool calls the model had begun streaming are dropped. They never ran,
+     never reach approval, and appear nowhere as executed or unexecuted
+     calls.
+   - If no visible text had streamed yet (nothing, or reasoning only), no
+     assistant message is added; the note still appears, and the steer
+     follows the last settled message.
+6. **The steered message.** Each delivered message flips its `Queued:` row
+   to `You:` at the moment it is appended to history, after the interrupted
+   text. The model's next output opens a fresh assistant bubble. The status
+   reads `Steering…` from the key press until the fresh request starts
+   producing output.
+7. **Repeated presses.** Pressing Ctrl+Enter again while a stop is already
+   under way adds that draft to the same delivery. One request is stopped,
+   never two.
+8. **Cancellation wins.** Esc or Ctrl+C during or after a steer cancels the
+   run exactly as M1 and FR-04 describe. A steer never revives a cancelled
+   run, and a steer pressed while the run is cancelling is queued and held
+   (M1 item 6).
+9. **Usage and spend.** The provider bills the stopped request for what it
+   produced. If the provider reported usage before the stop, Likha counts
+   it. If it did not, Likha marks session spend as approximate (`~`)
+   instead of leaving the request out silently, and invents no number.
+10. **Persistence and resume.** Once delivered, the interrupted text, the
+    note, and the steered message are ordinary conversation content and
+    persist like any other message. Nothing undelivered persists (M1
+    item 8), and resume never replays a steer.
 
 ### Non-goals
 
@@ -148,7 +232,13 @@ waiting for a boundary; it remains deferred on its open probe.
   mode); commands are refused, not held.
 - No dequeue/recall chord in M1 (OMP's `app.message.dequeue`); noted as a
   possible follow-up.
-- No provider-specific mid-response steering; no approval-flow changes.
+- No provider-specific mid-response steering (no wire-level
+  `response.steer`); M2 stops and re-sends instead. No approval-flow
+  changes.
+- No way to tell Ctrl+Enter from Shift+Enter on bubbletea v1.3.10. Splitting
+  them needs a keyboard-protocol-capable input layer (bubbletea v2), which
+  would be its own feature.
+- No steer-now for explore or profile child agents.
 
 ## Interactions and edge cases
 
@@ -193,23 +283,49 @@ waiting for a boundary; it remains deferred on its open probe.
   further actions in the run it stopped and never consumes the queue; a
   later Enter starts a *new* turn.
 
+M1's changes above are applied in v1-spec.md. M2 adds (applied to v1-spec.md
+2026-10-05, marked planned there until implemented):
+
+- **FR-21 amended (M2).** Append: "While a model request is in flight,
+  Ctrl+Enter (and Shift+Enter or Ctrl+J, which terminals deliver as the same
+  key) steers now: Likha stops that request, delivers the draft and any
+  queued prompts in order, and continues the same run with a fresh request.
+  Visible text the model had streamed stays in the conversation and its
+  history, marked interrupted; partial reasoning and partially streamed tool
+  calls are discarded. While a tool is executing, a steer waits for the tool
+  calls to settle and never cancels them. Alt+Return inserts a newline in a
+  running draft."
+- **FR-17 amended (M2).** After "Enter queues the draft as a steering prompt
+  (FR-21) instead of sending it", add: "During a run, Ctrl+Enter steers now
+  (FR-21) and Alt+Return inserts a newline."
+
 ## Resolved decisions (user-confirmed, 2026-10-02)
 
 1. **Cancel/error with a queue (amended 2026-10-03):** remaining messages
    are held — nothing auto-starts; Enter sends the whole batch and a bare
    Esc clears it (M1 item 6). Supersedes the 2026-10-02 auto-flush choice.
-2. **Send now:** implemented in M2 as `Ctrl+Q`.
+2. **Send now:** ~~implemented in M2 as `Ctrl+Q`~~ — superseded
+   2026-10-05: M2 is *steer now* on `Ctrl+Enter` (with Shift+Enter and
+   Ctrl+J, which share its byte). Enter keeps queueing.
 3. **Commands during a run:** refused with a visible message and the draft
    kept; nothing is held or dispatched.
 4. **Queued rows:** in-conversation `Queued:` rows, muted on the user band,
    flipping to `You:` on delivery.
+5. **Interrupted response (2026-10-05):** keep the visible partial text in
+   history with an interruption note; drop partial reasoning and partial
+   tool calls.
+6. **Steer while a tool runs (2026-10-05):** wait for the tool calls to
+   settle; never cancel a running tool.
 
 ## Open probe (implementation-time)
 
-- `Ctrl+Q` delivery on Ghostty (primary) and Windows Terminal (documented
-  target backlog) — XON/flow-control swallowing. Bind `Alt+Q` instead only
-  if the probe fails; record the probe in tasks.md like the composer-key
-  probes in `specs/tool-rendering-terminal-keys/`.
+- Live Ghostty pass (primary target), run by the user: during a streaming
+  response, Ctrl+Enter and Shift+Enter each steer, and Alt+Return inserts a
+  newline in the running draft; while idle, all three insert a newline.
+  The pty probe already shows the LF byte reaching Update as `ctrl+j`; the
+  live pass confirms the terminal sends it. Record the result in tasks.md.
+- Windows Terminal stays backlog: it is documented to swallow Ctrl+Enter.
+  Shift+Enter is the expected working chord there, unverified.
 
 ## Acceptance criteria
 
@@ -237,7 +353,24 @@ waiting for a boundary; it remains deferred on its open probe.
       from a resumed session.
 - [ ] The status line names the queued count while a run is active and
       while a held batch waits.
-- [ ] (M2) `Ctrl+Q` delivers queued messages without ending the run and
-      without killing a running tool; the aborted partial response is gone
-      from the transcript; the Ghostty probe is recorded.
+- [ ] (M2) During a streaming response, Ctrl+Enter with a draft stops
+      that request and the next provider request in the same run carries
+      any earlier queued messages and then the draft, in order; no new turn
+      starts and no turn footer is written.
+- [ ] (M2) The interrupted response's visible text stays in the transcript
+      and in history, followed by the interruption note; partial reasoning
+      is not in history; partially streamed tool calls never run, never
+      reach approval, and are absent from history.
+- [ ] (M2) Ctrl+Enter while a tool executes cancels nothing: the message
+      shows `Queued:` and is delivered when the tool calls settle.
+- [ ] (M2) Ctrl+Enter on an empty draft delivers the queue now, and does
+      nothing when the queue is empty; it does nothing while an approval is
+      pending or a completion popup is open; during `/compact` it queues
+      and holds.
+- [ ] (M2) While a run is active, Alt+Return inserts a newline in the
+      draft; while idle, Ctrl+Enter, Shift+Enter, and Ctrl+J insert a
+      newline as before.
+- [ ] (M2) Esc during or after a steer cancels the run; a stopped request
+      with no reported usage marks spend approximate.
+- [ ] (M2) The live Ghostty probe is recorded in tasks.md.
 - [ ] `go test ./...` and `go test -race ./...` pass from the project root.

@@ -18,8 +18,8 @@ observable in the real TUI.
 - [ ] A failed provider contributes no rows but is named in a muted note
       when other rows list; total failure shows the dialog error; Esc
       applies nothing.
-- [ ] Unconfigured providers are absent; `chatgpt` contributes its curated
-      list when signed in; no configured provider keeps today's refusal
+- [ ] Unconfigured providers are absent; `chatgpt` contributes its authenticated
+      account-specific list when signed in; no configured provider keeps today's refusal
       with zero network traffic.
 - [ ] A failed cross-provider activation closes the dialog with a visible
       error and leaves the previous provider/model live.

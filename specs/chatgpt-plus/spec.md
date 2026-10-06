@@ -1,138 +1,135 @@
-# Feature: ChatGPT Plus/Pro login (OAuth 2) provider
+# Feature: Sign in with ChatGPT (Plus/Pro)
 
-**Status:** implemented (local) — live probe with a real ChatGPT Plus account
-outstanding. See [research.md](research.md) for the researched flows and
-[tasks.md](tasks.md) for the implementation record.
+**Status:** in progress (2026-10-05). This official Sign in with ChatGPT
+(SIWC) migration supersedes the earlier Codex integration. Automated migration
+checks, a user-approved live account/browser walkthrough, and published-release
+verification are separate gates; no live sign-in success is claimed.
 
-## Context
+Refines [FR-02](../v1-spec.md). Protocol and implementation details belong in
+[tasks.md](tasks.md), [context.md](context.md), and [research.md](research.md).
 
-ChatGPT Plus/Pro subscribers can use their subscription models (no API key,
-no per-token billing) through OAuth 2 against OpenAI's Codex backend. Two
-agent harnesses do this today and agree on every flow constant:
+## Purpose and eligibility
 
-- **OpenCode** (`sst/opencode` `dev`, `packages/opencode/src/plugin/openai/codex.ts`):
-  provider `openai`, auth methods "ChatGPT Pro/Plus (browser)" (loopback
-  authorization-code + PKCE) and "ChatGPT Pro/Plus (headless)" (device flow).
-- **OMP**: its own `openai-codex` provider with the same endpoints, client ID,
-  and port.
+Likha offers **Sign in with ChatGPT** alongside, not instead of, its API-key
+providers. An eligible ChatGPT Plus/Pro user can explicitly share their plan's
+available allowance with this free, locally run, open-source coding agent.
+Signing in for identity alone does not authorize model use: the user must grant
+plan access and have an eligible entitlement.
 
-Likha's predefined provider list (`internal/model/provider.go`) is no longer
-BYOK-only: every key-based row carries a `KeyEnv` and the client sends one
-static Bearer key, while the `chatgpt` row carries a new `Auth: AuthOAuth`
-kind whose credential is an `OAuthCredentials` token set (`access`,
-`refresh`, `expires`, `accountId`) that refreshes automatically, and whose
-backend speaks the **OpenAI Responses** wire format, not chat completions.
-Both differences cut across existing v1 rules, which is why this was a spec
-feature and not "another table row"; v1-spec.md is amended accordingly
-(§2, §3, FR-02, §5, §7).
+Shared allowance is limited and shared with other supported uses of the plan.
+It is not unlimited or free inference, and a plan does not guarantee access to
+every model. Extra credits remain an explicit user opt-in. Likha never silently
+switches to API-key billing, another account, or another provider when allowance
+is exhausted or access is refused. The OpenAI API-key provider remains a
+separately billed bring-your-own-key option.
 
-## Facts established by research (full detail in research.md)
+## Browser-first sign-in
 
-| Fact | Value | Source |
-| --- | --- | --- |
-| Issuer / authorize | `https://auth.openai.com/oauth/authorize` | opencode `codex.ts`; OMP `oauth-code.ts` engine |
-| Client ID (public PKCE client, shared by both harnesses) | `app_EMoamEEZ73f0CkXaXp7hrann` | same |
-| Redirect | `http://localhost:1455/auth/callback`, fixed port 1455 | same |
-| PKCE | S256, 43-char verifier, `state` CSRF check | opencode `generatePKCE` |
-| Scopes | `openid profile email offline_access` | same |
-| Extra authorize flags | `codex_cli_simplified_flow=true`, `originator=<tool>` | same |
-| Token exchange / refresh | `POST {issuer}/oauth/token`, form-encoded; `expires_in` default 3600 s | same |
-| Account ID claim | `chatgpt_account_id` (top-level, or under `https://api.openai.com/auth`, or `organizations[0].id`) | opencode `extractAccountIdFromClaims`; OMP `getTokenProfile` |
-| Headless device flow | `POST {issuer}/api/accounts/deviceauth/usercode` → user enters code at `{issuer}/codex/device` → poll `deviceauth/token` → exchange with server-supplied verifier | both |
-| API endpoint | `https://chatgpt.com/backend-api/codex/responses` (Responses API) | both |
-| Request headers | `authorization: Bearer <access>`, `ChatGPT-Account-Id: <accountId>`, per-conversation `session-id`, `originator`, `User-Agent: <tool>/<version>`; optional `x-openai-internal-codex-residency` from token claims | opencode `chat.headers`; OMP `provider-quirks.md` |
-| Sampling params | backend returns HTTP 400 `Unsupported parameter` for `temperature`/`top_p` | OMP quirks doc |
-| Rate limits | 5-hour primary + 7-day secondary windows; Spark-suffixed models meter separately; zero per-token cost | OMP quirks doc |
-| Token storage (prior art) | opencode: `~/.local/share/opencode/auth.json` mode 0600, `{type:"oauth", refresh, access, expires, accountId}` | opencode `auth/index.ts` |
+1. Selecting ChatGPT during first-run setup automatically opens the system
+   browser to OpenAI's sign-in and consent screen. No API key, device code, pasted
+   authorization code, or extra keypress to launch the browser is requested.
+2. Selecting an unconnected ChatGPT row in `/providers` starts the same flow
+   immediately. A connected row offers account management instead.
+3. The user chooses an account/workspace and authorizes plan sharing in OpenAI's
+   browser interface. Likha shows a waiting state and lets the user cancel.
+4. If the browser launcher fails, Likha shows a manual authorization URL for the
+   same flow and clear instructions. A URL is not an extra routine setup step,
+   and it does not introduce a device-code or paste-code fallback.
+5. A browser callback acknowledges receipt while Likha verifies the authorization;
+   receiving a callback is not yet reported as successful sign-in. Only validated
+   identity, plan permission, and eligible access advance setup to model choice.
+6. Eligible models are fetched automatically for the selected account/workspace.
+   The picker shows their reported names and uses their model identifiers when
+   sending requests. A single eligible model auto-selects. Failed discovery or an
+   empty eligible list produces a recoverable error, not a fabricated model list.
 
-## Resolved decisions (defaults chosen during implementation)
+The browser-only CLI entry point is:
 
-The former "Open decisions" are resolved by the implemented defaults, each
-following the spec's stated preference:
+```sh
+likha --provider chatgpt --login
+```
 
-1. **Client ID reuse — resolved: reuse OpenAI's public Codex CLI client**
-   (`ChatGPTClientID = app_EMoamEEZ73f0CkXaXp7hrann`). The provider-constant
-   comment in `internal/model/provider.go` documents the reuse, and
-   README's "Sign in with ChatGPT (Plus/Pro)" section states the login uses
-   OpenAI's public Codex CLI client, not a Likha-issued one. No own client ID
-   was sought.
-2. **Terms-of-service risk — resolved: document, not accept silently.**
-   README's "Privacy and terms" note and the provider-constant comment state
-   that using a ChatGPT subscription through a third-party harness is
-   subject to OpenAI's consumer terms; the login surfaces never claim a
-   Likha-issued client.
-3. **Wire format — resolved: native Responses request/stream mapping** in a
-   new `internal/model/codex.go` surface (`BuildCodexRequest`,
-   `ConsumeCodexStream`), reached from `Client.Stream` whenever the client
-   is OAuth-backed (`streamCodex`). Chat-completions transport of Responses
-   payloads was never built and is never assumed; there is no fallback
-   path.
-4. **Storage schema — resolved: `providers.json` schema v2** typed entries
-   (`{"type": "api"|"oauth", ...}`) in `internal/app/keyfile.go`, one file
-   at 0600. Files written by older versions hold a plain map of API keys
-   and are migrated in memory on read; a sibling `auth.json` was not added.
-5. **Port 1455 — resolved: fixed loopback port** (`ChatGPTCallbackPort`),
-   matching prior art. A bind failure surfaces as a clear error naming the
-   port (`listen on 1455: …` from `BrowserLogin`), so a concurrent login in
-   another harness is visible to the user.
-6. **Model list — resolved: curated static list** (`ChatGPTModels`:
-   `gpt-5.5` default, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`,
-   `gpt-6-sol`, `gpt-6-luna`), because the backend's model-list route is not
-   OpenAI-shaped. Setup offers this list and never fetches models from the
-   backend; the OAuth connection check validates the login without a model
-   list.
-7. **Headless escape hatch — resolved: the `--device-login` CLI flag**, not
-   an environment variable. No `LIKHA_CHATGPT_REFRESH_TOKEN`-style env var
-   exists; `likha --provider chatgpt --device-login` runs the device flow
-   headlessly and stores the login.
+It uses the same consent and local callback flow without entering the TUI.
+`--device-login` is deprecated and unsupported: it explains that the user must
+use `--login` and the browser method, and never starts the old device flow.
+A reachable browser callback on the machine running Likha is required; this
+feature does not promise a remote/headless device-code login.
 
-## Implementation notes (what was built)
+## Saved accounts and sign-out
 
-| File | Role |
-| --- | --- |
-| `internal/model/provider.go` | `chatgpt` row (`Auth: AuthOAuth`, no `KeyEnv`, `SessionHeader: "session-id"`), `AuthKind`, ChatGPT constants (issuer, client ID, callback port 1455, originator), `OAuthCredentials`, curated `ChatGPTModels`. |
-| `internal/model/oauth.go` | PKCE browser login (`BrowserLogin`, loopback callback on 1455, state check, bind-failure error) and device flow (`DeviceLogin`), token exchange/refresh, account-ID extraction from token claims. |
-| `internal/model/codex.go` | Responses wire: `BuildCodexRequest` (never emits sampling params) and `ConsumeCodexStream` SSE parsing for text, reasoning, and structured tool calls. |
-| `internal/model/client.go` | `NewOAuth` builds the `/responses` client; `oauthSession` refreshes stale tokens single-flight and persists fresh sets via `SetOAuthSaver`; one forced-refresh retry on HTTP 401; `Usage()` summarizes the backend's `x-codex-primary-*` rate-window headers. |
-| `internal/app/keyfile.go` | `providers.json` schema v2: typed `api`/`oauth` entries, 0600, in-memory migration of the legacy plain-key map on read. |
-| `internal/app/provider.go` | `resolveProvider` returns a `resolvedProvider` with an OAuth branch: a stored login is required, `--api-key`/env keys do not apply, and the error names `--device-login`. |
-| `internal/app/run.go` | `--device-login` CLI flow (no TUI or repository needed, prints URL/code, 10-minute bound). |
-| `internal/app/tui.go` | `setupLogin` stage ("Press Enter to open the browser", 5-minute wait) replacing key entry for the ChatGPT row; stores the login and wires the refresh saver. |
+- `/providers` supports adding an account, reconnecting, selecting a saved
+  account/workspace, and signing out. The active choice is labelled visibly.
+- Different workspaces remain distinct even when they show the same email
+  address. Email is a display label, not an account identity or a deduplication
+  key. Account selection is explicit; Likha does not rotate accounts to evade
+  usage limits.
+- This installation's host identity and each issued account/workspace
+  registration survive restarts and sign-out. Reconnecting can reuse that
+  registration; signing out does not create a new host identity.
+- Access and refresh tokens stay in protected private local state, never in the
+  repository, conversation history, or logs. Refreshes rotate and save
+  credentials safely, including when requests or Likha instances overlap.
+- Signing out attempts remote revocation and then clears the selected login's
+  local tokens, even if revocation fails. A failed revocation produces a warning
+  explaining that the user may also need to disconnect Likha in ChatGPT settings.
+  Host and registration metadata are retained, not authenticated access.
+- Credentials from the old Codex integration require fresh official sign-in and
+  registration. They are not silently reused as SIWC credentials. Existing API
+  keys, repository sessions, and unrelated configuration remain intact.
 
-## Acceptance criteria
+## Model use and recovery
 
-Checked items are verified locally by the automated suite (setup flow,
-refresh/retry, storage); the live-probe item requires a real ChatGPT Plus
-account and stays open.
+- ChatGPT model discovery and generation use OpenAI's documented public API,
+  not a private ChatGPT/Codex backend. Likha uses its own agent loop; it does not
+  launch Codex, impersonate another client, or outsource tool approvals.
+- Each request carries the conversation context required for that turn without
+  relying on provider-stored conversation state. Text, reasoning, and structured
+  tool calls remain compatible with Likha's transcript and tools.
+- A response is successful only when the provider reports completed success.
+  Failed, incomplete, malformed, cancelled, or prematurely closed streams are
+  not completed turns and never authorize tools from partial output.
+- Expired access refreshes automatically. Denied consent, missing plan scope,
+  ineligible entitlement, revoked access, quota exhaustion, network failures,
+  and unsupported requests produce clear recovery guidance without closing the
+  TUI or losing the conversation.
+- Limit notices are not success and are not permission to bypass plan limits.
+  Quota information is distinct from input-context usage. Usage and cost stay
+  unknown unless the provider reports them; selecting ChatGPT alone does not
+  establish an exact `$0.00` cost. Optional credits follow the user's explicit
+  opt-in in ChatGPT settings.
+- Cancellation, repository boundaries, tool approvals, child-agent budgets, and
+  existing first-use network consent remain unchanged. Sign-in does not authorize
+  unattended/background work or any new external service; any background model
+  use must stay within the authorization and official usage terms.
 
-- [ ] **Verified locally:** the setup flow's OAuth stage (browser-login
-      stage keyed off `AuthOAuth`, model stage fed by `ChatGPTModels`,
-      credential stored on finish) is exercised by the TUI tests with a
-      stubbed login; no API key is ever asked for the `chatgpt` row.
-- [ ] **Verified locally:** an expired access token refreshes transparently;
-      concurrent streams share one in-flight refresh; a mid-flight 401
-      forces one refresh and retries exactly once; refresh failure reports
-      "chatgpt login expired; sign in again" and keeps the session usable
-      (all against `httptest` fixtures in `client_test.go`).
-- [ ] **Verified locally:** credentials persist in the private state
-      directory at 0600 (factory asserted in the providers.json tests) and
-      never appear in the repository or session DB.
-- [ ] **Verified locally:** no sampling parameters are sent (the Codex
-      request builder omits `temperature`/`top_p`); tool calls map correctly
-      to the Responses format (request/stream tests in `codex_test.go`).
-- [ ] **Live probe outstanding:** a ChatGPT Plus subscriber completes
-      first-run setup end to end and a full session (streamed text + one
-      structured tool call + cancellation) runs against the live Codex
-      backend — the probe gate from predefined-providers applies before the
-      row is called accepted.
-- [ ] **Live probe outstanding:** rate-window display is confirmed against
-      the real backend's `x-codex-primary-*` headers (the footer wiring is
-      tested locally with fixtures).
-- [ ] Docs state which backend receives content, the login flow, the
-      headless alternative, the storage schema, and the terms note
-      (README "Sign in with ChatGPT (Plus/Pro)" and `--help`).
+## User-facing guidance
 
-## Integration steps (as built)
+The README and provider guide explain browser-first setup, CLI login, account
+management, legacy reconnection, allowance and separate API billing, private
+local credentials, sign-out limitations, eligibility, and verification status.
+Sign-in labels and disclosures follow OpenAI's SIWC UI usage guidelines without
+implying endorsement or affiliation.
 
-The implementation followed the planned order; see [tasks.md](tasks.md) for
-the ordered record and verification per step.
+The action that starts sign-in reads **Continue with ChatGPT**. After the first
+successful plan authorization, Likha confirms **You're using your ChatGPT plan**
+once and lets the user continue. During plan use, **Using ChatGPT plan** and a
+**Manage usage** link to [ChatGPT settings](https://chatgpt.com/settings/usage)
+remain discoverable near the model selector or composer. A limit notice makes
+that settings link the primary recovery action; Likha offers no app credits of
+its own.
+
+## Acceptance
+
+- First-run ChatGPT selection and unconnected `/providers` selection open the
+  browser once without an extra launch action; launcher failure alone reveals
+  the manual URL.
+- Invalid, cancelled, identity-only, or ineligible sign-in never activates the
+  provider. Validated consent leads automatically to account-specific models.
+- Saved workspace choices, active labels, reconnect, refresh, and sign-out obey
+  the account and credential contract above, including across restarts.
+- Public-API responses stream text and structured tool calls through Likha's
+  approval-gated loop; cancellation prevents later actions and only completed
+  responses count as success.
+- Automated checks distinguish fixtures from real OpenAI interactions. A live
+  probe requires an eligible account, browser access, and explicit user approval;
+  `verified (release)` additionally requires the published-binary walkthrough.

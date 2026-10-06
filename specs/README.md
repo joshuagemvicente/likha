@@ -58,18 +58,20 @@ was authorized during the specification interview.
 | Agent harness prompt (system prompt + root instructions) | [agent-harness/](agent-harness/spec.md) | planned — Phase 1; root AGENTS.md, 32-KiB cap, real repo identity |
 | @ file/folder references (mention paths in prompts) | [file-references/](file-references/spec.md) | implemented (local) |
 | curl installer for released binaries | [curl-install/](curl-install/spec.md) | implemented (local) — no release published |
-| ChatGPT Plus/Pro login (OAuth 2) provider | [chatgpt-plus/](chatgpt-plus/spec.md) | implemented (local) — live probe outstanding |
+| Sign in with ChatGPT (Plus/Pro) | [chatgpt-plus/](chatgpt-plus/spec.md) | in progress — official SIWC/browser-first migration; live account/browser probe outstanding |
 | Prompt line editor, native selection, image attachments | [prompt-editor/](prompt-editor/spec.md) | planned |
 | Conversation compaction (/compact) | [conversation-compaction/](conversation-compaction/spec.md) | implemented (local) |
 | Thinking control (/think) | [thinking-control/](thinking-control/spec.md) | draft |
-| Repo context file (/init → AGENTS.md) | [repo-init/](repo-init/spec.md) | draft |
+| Repo context file (/init → AGENTS.md; one read-only survey turn, root AGENTS.md edit only, reviewed diff, 32 KiB warning) | [repo-init/](repo-init/spec.md) | implemented (local) — automated suite green; real-terminal walkthrough pending |
 | Plan mode (/plan read-only) | [plan-mode/](plan-mode/spec.md) | planned — Phase 3; all edit/shell/MCP blocked |
 | Custom slash command templates | [custom-commands/](custom-commands/spec.md) | planned — deferred; distinct from Markdown skills |
 | Text transforms (/transform, Wispr-Flow style) | [text-transforms/](text-transforms/spec.md) | draft |
+| Model metadata catalog (bundled models.dev-derived prices and context windows, provider-scoped, cached/reasoning token accounting, per-request spend) | [model-metadata/](model-metadata/spec.md) | in progress (local, uncommitted) |
 | TUI layout (status bar enrichment, header declutter, scrollbar fix, role backgrounds) | [tui-layout/](tui-layout/spec.md) | implemented (local) — phases 1–3 done (phase 1: header declutter + mini logo, status-bar enrichment incl. git/env/spend/ctx, auto session names, folder/branch default-on; phase 2: content-width breakpoints + per-path no-overflow invariant tests; phase 3: role backgrounds via adaptive-themes); real-terminal walkthroughs pending |
 | Model context tracker (measured usage + estimates) | [context-tracker/](context-tracker/spec.md) | in progress — implementation and automated tests complete; real-terminal walkthrough pending |
 | Muted tool rendering + terminal-native composer keys | [tool-rendering-terminal-keys/](tool-rendering-terminal-keys/spec.md) | in progress — M1 (muted tools) and M2 (composer keys) implemented (local); Ctrl+Delete chord unbindable on bubbletea v1.3.10, carried by Alt+D |
 | Transcript redesign (glyph blocks, user band, single-item tools, markdown, live tasks) | [transcript-redesign/](transcript-redesign/spec.md) | implemented (local) — S1–S3 committed/pending walkthroughs |
+| Onboarding redesign (first-run setup layout, filtering, env keys, setup bug fixes) | [onboarding-redesign/](onboarding-redesign/spec.md) | implemented (local, uncommitted) — walkthrough pending |
 | Repository structure refactor (phased package split) | [structure-refactor/](structure-refactor/spec.md) | implemented (local) — Phase 1 + Phase 1.5 landed 2026-10-01; Phase 2 parked |
 | Agent tool loop (read-only search steering + round-cap auto-continue; first slice of agent-harness) | [agent-loop/](agent-loop/spec.md) | planned |
 | Tool and agent platform (three-phase coordination) | [tooling-platform/](tooling-platform/README.md) | planned — scope approved; documentation only; user agents/code intelligence/memory deferred |
@@ -79,13 +81,16 @@ was authorized during the specification interview.
 | Expandable tool output and private artifacts | [tool-output/](tool-output/spec.md) | planned — Phase 1 |
 | Awaited nested explore agents | [explore-agents/](explore-agents/spec.md) | planned — Phase 2; depth 2, four executing children, shared budgets |
 | Agent tree, transcripts, and branch cancellation | [agent-inspection/](agent-inspection/spec.md) | planned — Phase 2 |
-| Model questions with preserved steering state | [ask-user/](ask-user/spec.md) | planned — Phase 3 |
+| Model questions with preserved steering state | [ask-user/](ask-user/spec.md) | implemented (local) — single question and questionnaire, automated suite green; interactive walkthrough pending |
+| Install command (interview, plan, then install) | [install-command/](install-command/spec.md) | implemented (local) — automated suite green; live probe pending |
 | Persisted bounded plan/todo checklist | [plan-todo/](plan-todo/spec.md) | planned — Phase 3; separate from /plan mode |
 | Strict global Markdown skills | [markdown-skills/](markdown-skills/spec.md) | planned — Phase 3; passive instructions only |
 | Brave search and direct public HTTPS fetch | [web-tools/](web-tools/spec.md) | planned — Phase 3; optional, scoped consent |
 | User-authored agent profiles and built-in review role | [user-agents/](user-agents/spec.md) | planned — Phase 4; scope approved 2026-10-04; project-local profiles and write-capable children deferred |
-| Steering prompts (type, queue, and interrupt while a run is active) | [steering-prompts/](steering-prompts/spec.md) | implemented (local) — M1 automated suite green, real-TUI walkthrough outstanding; M2 pending probe |
+| Steering prompts (type, queue, and interrupt while a run is active) | [steering-prompts/](steering-prompts/spec.md) | M1 implemented (local) — automated suite green, real-TUI walkthrough outstanding; M2 (`Ctrl+Enter` steer now) implemented (local) — automated suite green, live Ghostty probe outstanding |
 | Approve/Decline buttons for permission reviews | [permission-ui/](permission-ui/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
+| Command permissions (refuse / always ask / ask / verification / read-only tiers, repo trust, session grants) | [command-permissions/](command-permissions/spec.md) | implemented (local) — automated suite green; real-terminal walkthrough pending |
+| Approve always (session grants for edits, command prefixes, and MCP servers) | [approve-always/](approve-always/spec.md) | implemented (local) — automated suite green, real-TUI walkthrough outstanding |
 | Adaptive themes (live preview + full-surface color) | [adaptive-themes/](adaptive-themes/spec.md) | implemented (local) — M1 preview, M2 adaptive helpers, M3 bands landed 2026-10-01; live Ghostty/terminal walkthrough outstanding |
 | All-provider models in `/models` | [all-models/](all-models/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
 | Fast `/models` open (cache + progressive render) | [models-perf/](models-perf/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
@@ -93,3 +98,5 @@ was authorized during the specification interview.
 | Providers as connection manager (auth only, no activation) | [providers-connect/](providers-connect/spec.md) | implemented (local) — automated suite green; real-TUI walkthrough outstanding |
 | Web UI served from a local server (`likha --serve`) | [web-ui/](web-ui/spec.md) | draft — awaiting review; research record in [web-ui/research.md](web-ui/research.md) |
 | Working indicator (ephemeral activity row with subtle motion) | [working-indicator/](working-indicator/spec.md) | in progress — feature tests pass; unrelated full-suite session/prompt-history failures and real-terminal walkthrough pending |
+| Model-running status beneath the prompt input | [status-working-indicator/](status-working-indicator/spec.md) | implemented (local) — full test suite and targeted race checks pass; live-terminal feel-check pending |
+| Model request recovery (automatic retry, stall timeout, `/retry`) | [model-recovery/](model-recovery/spec.md) | planned — decisions recorded 2026-10-05 (FR-36); no implementation |

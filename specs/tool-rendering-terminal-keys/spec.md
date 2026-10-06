@@ -122,6 +122,14 @@ a native terminal does.
 | Shift+Return (where the terminal emits it) | insert a newline (alias) |
 | Return (bare) | unchanged: submits the prompt |
 
+*Amended 2026-10-05 by [steering-prompts](../steering-prompts/spec.md) M2
+(implemented (local); live probe outstanding):* while a run is active, Ctrl+Return,
+Shift+Return, and Ctrl+J — one LF byte (`ctrl+j`) on bubbletea v1.3.10, per
+the probe table — mean *steer now* instead of newline, and Alt+Return is
+the newline key in a running draft only in its single-chord arrival
+(`alt+enter`); a separate Esc cancels the run instead. While idle, the table
+above holds unchanged.
+
 Esc-prefix Return encodes `Alt+Return` as ESC then Return on terminals that
 cannot send the chord as one press; terminals that do send it as one event
 (iTerm2, Ghostty) also land on the same action via the chord match, so both

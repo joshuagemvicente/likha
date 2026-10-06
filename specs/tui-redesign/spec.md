@@ -167,7 +167,10 @@ cancel`) — mode hints never lose their slot.
    last response — `prompt_tokens`/`completion_tokens`, with `input`/`output`
    aliases accepted — is captured per run, and a static, documentation-backed
    context-window catalog (`internal/model/windows.go`) supplies window sizes
-   for publicly documented model IDs. The status line renders `ctx <n>%`
+   for publicly documented model IDs *(superseded by
+   [model-metadata](../model-metadata/spec.md), user-approved 2026-10-04:
+   the bundled catalog keyed by provider and model; spend is now priced
+   per request)*. The status line renders `ctx <n>%`
    (warning role past 80%), `tokens <sum>`, and `minutes <N>m` under their
    `status_line` toggles; `ctx —` stays when usage is unmeasured or the
    window is unknown. The cost segment stays hidden: there is no pricing

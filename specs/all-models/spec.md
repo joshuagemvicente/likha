@@ -59,8 +59,9 @@ the dialog error path instead of offering the curated `ChatGPTModels`.
    the error, as today.
 6. Providers without a stored key or sign-in are absent from the list —
    `/providers` stays the configure path and `/models` never asks for a key.
-   The `chatgpt` row contributes its curated list when signed in and behaves
-   like any other row.
+   The `chatgpt` row fetches the active account's eligible models through
+   authenticated public SIWC model discovery when signed in. It never falls
+   back to a curated entitlement list (see `chatgpt-plus`).
 7. `/models` with no configured provider at all keeps today's refusal ("No
    provider configured; complete first-run setup first.") with zero network
    traffic.
@@ -102,8 +103,8 @@ the dialog error path instead of offering the curated `ChatGPTModels`.
 - [ ] A failed provider contributes no rows but is named in a muted note
       when other rows list; total failure shows the dialog error; Esc
       applies nothing.
-- [ ] Unconfigured providers are absent; `chatgpt` contributes its curated
-      list when signed in; no configured provider keeps today's refusal
+- [ ] Unconfigured providers are absent; `chatgpt` contributes its authenticated
+      account-specific list when signed in; no configured provider keeps today's refusal
       with zero network traffic.
 - [ ] A failed cross-provider activation closes the dialog with a visible
       error and leaves the previous provider/model live.

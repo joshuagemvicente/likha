@@ -70,6 +70,9 @@ this base) decided in a follow-up — not a silent fork.
 Likha's existing Claude metadata needs no changes: `windows.go`,
 `pricing.go`, and `naming.go` already carry documented entries and `claude-`
 prefix fallbacks for context window (200K), pricing, and display names.
+*(Superseded for windows and pricing by
+[model-metadata](../model-metadata/spec.md), user-approved 2026-10-04: Claude
+rows come from the bundled catalog; current models are 1M context.)*
 
 ## User-visible behavior
 
