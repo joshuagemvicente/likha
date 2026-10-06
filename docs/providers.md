@@ -104,7 +104,7 @@ Some providers want their own reasoning state back on later requests and reject 
 | `openrouter` | nothing yet: `reasoning_details` replay is built but stays off until its probe passes | pending-probe |
 | every other provider | nothing; requests are unchanged | — |
 
-If a provider rejects a request whose earlier turns lack this state or carry it, the error adds a hint: `/compact` continues from a summary without it.
+If a provider rejects a request whose earlier turns lack this state or carry it, the error adds a hint: `/compact` continues from a summary without it. The summarize request (and automatic session naming) sends no reasoning state, so it is not rejected for it.
 
 ## First-run setup (no flags needed)
 

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -384,39 +385,96 @@ func TestChildAndParentNeverShareReplay(t *testing.T) {
 	}
 }
 
-// /compact sends matching replay state like any request (spec decision 8)
-// and replaces history with a summary that carries none, even when the
-// summary response itself came with reasoning.
-func TestCompactionSendsReplayAndKeepsNone(t *testing.T) {
-	const earlier = "earlier reasoning"
-	var mu sync.Mutex
-	var summarize replayRequest
-	client := providerServer(t, "deepseek", func(_ int, request replayRequest, w http.ResponseWriter, _ *http.Request) {
-		mu.Lock()
-		summarize = request
-		mu.Unlock()
-		sendFrame(w, replayDelta{reasoning: "summary reasoning"}.reasoningFrame())
-		sendFrame(w, `{"choices":[{"delta":{"content":"the summary"}}]}`)
-		sendFrame(w, `[DONE]`)
-	})
-	text := earlier
-	history := []model.Message{
-		{Role: "user", Content: "go"},
-		{Role: "assistant", Content: "answer", Replay: &model.ReasoningReplay{Source: client.ReplaySource(), ReasoningContent: &text}},
+// Compaction and session naming are tool-less background requests and send
+// no replay state (spec decision 8 as amended): a provider that rejected the
+// session's replay state cannot reject the summary meant to recover from it,
+// so their 400 is a plain provider error without the /compact hint. The
+// compacted history keeps no replay state either.
+func TestBackgroundRequestsSendNoReplay(t *testing.T) {
+	requests := []struct {
+		name string
+		run  func(client *model.Client, history []model.Message) error
+	}{
+		{"compaction", func(client *model.Client, history []model.Message) error {
+			replacement, _, _, _, err := CompactHistoryUsage(context.Background(), client, history, "", nil)
+			for _, m := range replacement {
+				if m.Replay != nil {
+					t.Errorf("compacted history carries replay state: %+v", m)
+				}
+			}
+			return err
+		}},
+		{"session naming", func(client *model.Client, history []model.Message) error {
+			_, _, _, err := GenerateSessionNameUsage(context.Background(), client, history)
+			return err
+		}},
 	}
-	replacement, _, _, _, err := CompactHistoryUsage(context.Background(), client, history, "", nil)
-	if err != nil {
-		t.Fatalf("CompactHistoryUsage: %v", err)
-	}
-	for _, m := range replacement {
-		if m.Replay != nil {
-			t.Fatalf("compacted history carries replay state: %+v", m)
+	for _, provider := range []string{"deepseek", "gemini"} {
+		for _, request := range requests {
+			t.Run(provider+" "+request.name, func(t *testing.T) {
+				var mu sync.Mutex
+				var bodies []string
+				reject := false
+				client := providerServer(t, provider, func(_ int, r replayRequest, w http.ResponseWriter, _ *http.Request) {
+					mu.Lock()
+					bodies = append(bodies, r.raw)
+					rejectNow := reject
+					mu.Unlock()
+					if rejectNow {
+						http.Error(w, `{"error":{"message":"invalid request"}}`, http.StatusBadRequest)
+						return
+					}
+					sendFrame(w, `{"choices":[{"delta":{"content":"Fix the parser"}}]}`)
+					sendFrame(w, `[DONE]`)
+				})
+				history := ownReplayHistory(t, client, provider)
+				if err := request.run(client, history); err != nil {
+					t.Fatalf("%s: %v", request.name, err)
+				}
+				mu.Lock()
+				reject = true
+				mu.Unlock()
+				err := request.run(client, history)
+				var rejected *model.ReplayRejectedError
+				if err == nil || errors.As(err, &rejected) {
+					t.Fatalf("400 error = %v, want a plain provider error", err)
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				for _, body := range bodies {
+					for _, field := range []string{"reasoning_content", "extra_content", "thought_signature"} {
+						if strings.Contains(body, field) {
+							t.Fatalf("%s request sends %s: %s", request.name, field, body)
+						}
+					}
+				}
+			})
 		}
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if got := summarize.Messages[1].ReasoningContent; got == nil || *got != earlier {
-		t.Fatalf("summarize request reasoning_content = %v, want the earlier turn's", got)
+}
+
+// ownReplayHistory is one finished tool turn that client issued, carrying
+// the provider's own replay state: reasoning text on DeepSeek, a thought
+// signature on Gemini.
+func ownReplayHistory(t *testing.T, client *model.Client, provider string) []model.Message {
+	t.Helper()
+	var reasoning *string
+	signature := ""
+	if provider == "deepseek" {
+		text := "earlier reasoning"
+		reasoning = &text
+	} else {
+		signature = "sig"
+	}
+	replay, err := model.NewReasoningReplay(client.ReplaySource(), reasoning, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []model.Message{
+		{Role: "user", Content: "go"},
+		{Role: "assistant", Replay: replay, ToolCalls: []model.ToolCall{{ID: "c1", Name: "read", Arguments: `{"path":"a.go"}`, ThoughtSignature: signature}}},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+		{Role: "assistant", Content: "answer", Replay: replay},
 	}
 }
 

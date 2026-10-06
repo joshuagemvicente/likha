@@ -41,7 +41,8 @@ spec. Decisions live in [spec.md](spec.md); sources in
     compatibility Claude) share a base but not a route.
 - `internal/model/fork.go`: `Fork` copies endpoint, model, key, session and
   effort fields; `ForkForTask` wraps `Fork`. Both must copy `replayWire`.
-  `WithoutEffort` (compaction, naming) is a fork too.
+  `WithoutEffort` (compaction, naming) is a fork too; `WithoutReplay`
+  forks with `ReplayNone` for the same background requests.
 - `internal/model/context_estimate.go`: `EstimateInputTokens` excludes
   `Reasoning` "because it is not sent back". Replay text is sent, so T16
   counts it. Callers: `agent/turn_execution.go`, `tui/tui.go`.
@@ -62,12 +63,15 @@ spec. Decisions live in [spec.md](spec.md); sources in
     calls).
 - `internal/agent/compaction.go`: the replacement is a fresh `developer`
   message, so replay is dropped by construction. The summarize request sends
-  the full history, with tools nil, through `WithoutEffort()` (a fork or
-  `c` itself, so the replay wire is inherited). DeepSeek ignores
-  `reasoning_content` without tools, and the appended user message starts a
-  new Gemini turn, so `/compact` succeeds even when earlier turns lack
-  state. That is why the error hint names it.
-- `internal/agent/sessionname.go`: the same shape as compaction.
+  the full history, with tools nil, through `backgroundClient`:
+  `WithoutEffort()` then `WithoutReplay()` (a fork with `ReplayNone`), so it
+  carries no replay state (decision 8 as amended 2026-10-07). DeepSeek
+  ignores `reasoning_content` without tools, and the appended user message
+  starts a new Gemini turn, so `/compact` succeeds whether earlier turns
+  lack state or carry state the provider rejected. That is why the error
+  hint names it. A 400 on the summarize request is a plain provider error.
+- `internal/agent/sessionname.go`: the same shape as compaction, through
+  the same `backgroundClient`.
 - `internal/agent/explore_loop.go`, `profile_runner.go`: children start from
   their brief, not the parent's history, and append their fork's
   `assistant`. They clip `Content` and `Reasoning` to 64 KiB for display;

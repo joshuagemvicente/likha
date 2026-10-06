@@ -163,6 +163,25 @@ func (c *Client) ReplaySource() ReplaySource {
 	return ReplaySource{Endpoint: c.url, Model: c.model}
 }
 
+// WithoutReplay returns a client that captures and sends no replay state, for
+// tool-less background requests (compaction, session naming). Their bodies
+// match a provider without replay: DeepSeek needs reasoning_content only
+// when tools are sent, and the request's closing user prompt starts a new
+// Gemini turn, which Google does not validate. Sending state there would
+// only let the provider reject the very request meant to recover from a
+// rejection (spec decision 8). A client without replay is returned as is.
+func (c *Client) WithoutReplay() (*Client, error) {
+	if c == nil || c.replayWire == ReplayNone {
+		return c, nil
+	}
+	child, err := c.Fork()
+	if err != nil {
+		return nil, fmt.Errorf("client without replay: %w", err)
+	}
+	child.replayWire = ReplayNone
+	return child, nil
+}
+
 // replayFor returns the replay state of m that this client may send, or nil.
 // State goes only to its issuer: the same endpoint, and for model-bound
 // forms the same model. A client whose provider records no replay sends

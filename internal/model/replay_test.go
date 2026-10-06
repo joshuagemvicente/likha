@@ -311,6 +311,29 @@ func TestForkCopiesReplayWire(t *testing.T) {
 	}
 }
 
+// Background requests fork a client without replay; the parent keeps its
+// wire, and a client that has none is reused.
+func TestWithoutReplay(t *testing.T) {
+	parent, err := New("https://api.deepseek.com/v1", "deepseek-flash", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	background, err := parent.WithoutReplay()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if background == parent || background.replayWire != ReplayNone {
+		t.Fatalf("WithoutReplay() = same %v, wire %d; want a fork with ReplayNone", background == parent, background.replayWire)
+	}
+	if parent.replayWire != ReplayReasoningContent {
+		t.Fatalf("parent wire = %d, want unchanged", parent.replayWire)
+	}
+	again, err := background.WithoutReplay()
+	if err != nil || again != background {
+		t.Fatalf("WithoutReplay() on a client without replay = %p, %v; want the same client", again, err)
+	}
+}
+
 // replayHistory holds every replay form, issued both by the test client and by
 // other issuers, so a body test covers matching and mismatched sources.
 func replayHistory(t *testing.T, own ReplaySource) []Message {

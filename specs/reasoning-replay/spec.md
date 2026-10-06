@@ -111,11 +111,16 @@ Out of scope:
    every later request repeats the same history and fails the same way, and
    a summary is the way out. Absence of OpenRouter or Anthropic state never
    causes a 400, so it never triggers the hint.
-8. **Background requests use the same send rule.** Compaction and session
-   naming send matching state like any other chat-completions request.
-   Reason: one rule means fewer cases to test. DeepSeek ignores the field
-   when no tools are sent, and the summary request ends with a new user
-   message, which starts a new Gemini turn. claude-native defines its own
+8. **Background requests send no replay state** (amended 2026-10-07).
+   Compaction and session naming are tool-less and end with a new user
+   message, so neither provider needs the state there: DeepSeek ignores
+   `reasoning_content` when no tools are sent, and the closing user message
+   starts a new Gemini turn, which Google does not validate. Reason: the
+   original rule (send matching state like any other request) let `/compact`
+   carry every own Gemini signature the provider had just rejected, so the
+   way out of a rejection failed the same way and the session was stuck.
+   Without replay state, a 400 on these requests is a plain provider error
+   with no `/compact` hint (rule 12). claude-native defines its own
    tool-less shape (its decision 6).
 9. **Every completed response on an enabled provider is marked with its
    issuer, even when it carried no state.** Reason: it tells "this model

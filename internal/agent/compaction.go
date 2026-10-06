@@ -45,8 +45,7 @@ func CompactHistoryUsage(ctx context.Context, client *model.Client, history []mo
 	summarizeMsgs = append(summarizeMsgs, history...)
 	summarizeMsgs = append(summarizeMsgs, model.Message{Role: "user", Content: instruction})
 
-	// Compaction always uses the provider's default effort (specs/model-effort).
-	background, err := client.WithoutEffort()
+	background, err := backgroundClient(client)
 	if err != nil {
 		return nil, "", usage, false, err
 	}
@@ -63,4 +62,17 @@ func CompactHistoryUsage(ctx context.Context, client *model.Client, history []mo
 		Content: compactPrefix + summary,
 	}}
 	return replacement, summary, usage, usageOK, nil
+}
+
+// backgroundClient returns the client for a tool-less background request
+// (compaction, session naming): the provider's default effort
+// (specs/model-effort) and no replay state (specs/reasoning-replay decision
+// 8), so a summary can still be made after the provider rejected the
+// session's replay state.
+func backgroundClient(client *model.Client) (*model.Client, error) {
+	plain, err := client.WithoutEffort()
+	if err != nil {
+		return nil, err
+	}
+	return plain.WithoutReplay()
 }
