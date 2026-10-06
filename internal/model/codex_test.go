@@ -74,7 +74,7 @@ func TestBuildCodexRequestFullConversation(t *testing.T) {
 		Description: "match repository paths by pattern",
 		Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`),
 	}}
-	payload, err := BuildCodexRequest("gpt-6.1-sol", messages, tools)
+	payload, err := BuildCodexRequest("gpt-6.1-sol", "", messages, tools)
 	if err != nil {
 		t.Fatalf("BuildCodexRequest: %v", err)
 	}
@@ -149,11 +149,11 @@ func TestBuildCodexRequestAssistantTextAndCallOrder(t *testing.T) {
 			{ID: "c2", Name: "b", Arguments: `{"b":2}`},
 		}},
 	}
-	payload, err := BuildCodexRequest("m", messages, nil)
+	payload, err := BuildCodexRequest("m", "", messages, nil)
 	if err != nil {
 		t.Fatalf("BuildCodexRequest: %v", err)
 	}
-	payload2, err := BuildCodexRequest("m", []Message{{Role: "user", Content: "hi"}}, nil)
+	payload2, err := BuildCodexRequest("m", "", []Message{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("BuildCodexRequest: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestBuildCodexRequestAssistantTextAndCallOrder(t *testing.T) {
 
 func TestBuildCodexRequestOmissions(t *testing.T) {
 	// No system: instructions omitted entirely. No tools: explicit empty array.
-	payload, err := BuildCodexRequest("m", []Message{{Role: "user", Content: "hi"}}, nil)
+	payload, err := BuildCodexRequest("m", "", []Message{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("BuildCodexRequest: %v", err)
 	}
@@ -221,11 +221,11 @@ func TestBuildCodexRequestValidation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := BuildCodexRequest("m", tc.messages, tc.tools)
+			_, err := BuildCodexRequest("m", "", tc.messages, tc.tools)
 			codexWantError(t, err, tc.want)
 		})
 	}
-	if _, err := BuildCodexRequest("m", nil, []ToolDefinition{{Name: "x", Parameters: json.RawMessage(`{}`)}}); err != nil {
+	if _, err := BuildCodexRequest("m", "", nil, []ToolDefinition{{Name: "x", Parameters: json.RawMessage(`{}`)}}); err != nil {
 		t.Errorf("empty parameters object {} must be valid: %v", err)
 	}
 }
@@ -235,7 +235,7 @@ func TestBuildCodexRequestJSONReversible(t *testing.T) {
 		{Role: "user", Content: "first\nmulti-line"},
 	}
 	tools := []ToolDefinition{{Name: "echo", Parameters: json.RawMessage(`{"type":"object"}`)}}
-	payload, err := BuildCodexRequest("model-x", messages, tools)
+	payload, err := BuildCodexRequest("model-x", "", messages, tools)
 	if err != nil {
 		t.Fatalf("BuildCodexRequest: %v", err)
 	}

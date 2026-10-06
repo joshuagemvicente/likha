@@ -36,6 +36,8 @@ func (c *Client) Fork() (*Client, error) {
 		sessionHeader: c.sessionHeader,
 		sessionID:     c.sessionID,
 		oauth:         c.oauth,
+		effortWire:    c.effortWire,
+		effort:        c.effort,
 	}
 	c.mu.Unlock()
 

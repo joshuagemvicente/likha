@@ -366,9 +366,12 @@ func (m *ui) statusIdentity(maxWidth int, usage string) []statusSegment {
 	if modelName == "" {
 		modelName = "—"
 	}
+	// The effort level (specs/model-effort) follows the model name; Default
+	// shows nothing.
+	effort := statusField(m.client.Effort(), m.width)
 	usage = statusField(usage, m.width)
 	ctx := m.contextSegment()
-	makeParts := func(p, name string) []statusSegment {
+	makeParts := func(p, name, effort string) []statusSegment {
 		// Plan mode is an unmissable persistent marker on every frame: it
 		// precedes the identity so trimming the model retires before it.
 		// AUTO-EDIT (specs/approve-always) rides the same slot; plan mode
@@ -379,34 +382,43 @@ func (m *ui) statusIdentity(maxWidth int, usage string) []statusSegment {
 		} else if m.editGrant.Allowed() {
 			marker = []statusSegment{{"AUTO-EDIT", m.theme.Selected}}
 		}
-		parts := append(marker, []statusSegment{{p, m.theme.Selected}, {name, m.theme.Normal}, ctx}...)
+		parts := append(marker, statusSegment{p, m.theme.Selected}, statusSegment{name, m.theme.Normal})
+		if effort != "" {
+			parts = append(parts, statusSegment{effort, m.theme.Normal})
+		}
+		parts = append(parts, ctx)
 		if usage != "" {
 			parts = append(parts, statusSegment{usage, m.theme.Help})
 		}
 		return parts
 	}
-	parts := makeParts(provider, modelName)
+	parts := makeParts(provider, modelName, effort)
 	if statusWidth(parts) <= maxWidth {
 		return parts
 	}
 	if n := strings.Index(provider, " ("); n > 0 {
 		provider = provider[:n]
-		parts = makeParts(provider, modelName)
+		parts = makeParts(provider, modelName, effort)
 		if statusWidth(parts) <= maxWidth {
 			return parts
 		}
 	}
+	// The effort level gives way before the model name is shortened.
+	parts = makeParts(provider, modelName, "")
+	if statusWidth(parts) <= maxWidth {
+		return parts
+	}
 	// Preserve the visible provider and ctx placeholder; trim only the model
 	// before clipping critical page and mode controls.
-	room := maxWidth - statusWidth(makeParts(provider, ""))
+	room := maxWidth - statusWidth(makeParts(provider, "", ""))
 	if room < 1 {
 		provider = strings.TrimSpace(fit(provider, max(1, runewidth.StringWidth(provider)+room-1)))
-		room = maxWidth - statusWidth(makeParts(provider, ""))
+		room = maxWidth - statusWidth(makeParts(provider, "", ""))
 	}
 	if room < runewidth.StringWidth(modelName) {
 		modelName = strings.TrimSpace(fit(modelName, max(1, room)))
 	}
-	return makeParts(provider, modelName)
+	return makeParts(provider, modelName, "")
 }
 
 func (m *ui) statusLeft(maxWidth int) []statusSegment {

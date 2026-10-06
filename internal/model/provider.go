@@ -7,14 +7,16 @@ import "strings"
 // non-OpenAI-compatible protocol would be a new client surface, which v1 does
 // not include.
 type Provider struct {
-	Name          string   // canonical name used with --provider and stored keys
-	DisplayName   string   // human-readable name shown in the interface
-	BaseURL       string   // OpenAI-compatible /v1-style base URL for chat completions
-	KeyEnv        string   // dedicated environment variable for the provider's API key
-	DefaultModel  string   // model used when the user supplies none; "" requires --model
-	Hosted        bool     // hosted providers require a user-supplied API key
-	SessionHeader string   // header carrying the per-conversation session ID, if the provider requires one
-	Auth          AuthKind // authentication kind; zero value is a user-supplied API key
+	Name          string     // canonical name used with --provider and stored keys
+	DisplayName   string     // human-readable name shown in the interface
+	BaseURL       string     // OpenAI-compatible /v1-style base URL for chat completions
+	KeyEnv        string     // dedicated environment variable for the provider's API key
+	DefaultModel  string     // model used when the user supplies none; "" requires --model
+	Hosted        bool       // hosted providers require a user-supplied API key
+	SessionHeader string     // header carrying the per-conversation session ID, if the provider requires one
+	Auth          AuthKind   // authentication kind; zero value is a user-supplied API key
+	Effort        EffortWire // how the provider carries a reasoning-effort level; zero value carries none
+	EffortNote    string     // why effort cannot be carried, when known beyond "not yet verified"
 }
 
 // AuthKind selects how Likha authenticates to a provider. The zero value is
@@ -46,7 +48,7 @@ var Providers = []Provider{
 	{Name: "together", DisplayName: "Together AI", BaseURL: "https://api.together.ai/v1", KeyEnv: "LIKHA_TOGETHER_API_KEY", Hosted: true},
 	{Name: "mistral", DisplayName: "Mistral AI", BaseURL: "https://api.mistral.ai/v1", KeyEnv: "LIKHA_MISTRAL_API_KEY", Hosted: true},
 	{Name: "cerebras", DisplayName: "Cerebras", BaseURL: "https://api.cerebras.ai/v1", KeyEnv: "LIKHA_CEREBRAS_API_KEY", Hosted: true},
-	{Name: "claude", DisplayName: "Anthropic Claude", BaseURL: "https://api.anthropic.com/v1", KeyEnv: "LIKHA_CLAUDE_API_KEY", DefaultModel: "claude-opus-5-5", Hosted: true},
+	{Name: "claude", DisplayName: "Anthropic Claude", BaseURL: "https://api.anthropic.com/v1", KeyEnv: "LIKHA_CLAUDE_API_KEY", DefaultModel: "claude-opus-5-5", Hosted: true, EffortNote: "Anthropic's OpenAI-compatible endpoint ignores effort"},
 	{Name: "deepseek", DisplayName: "DeepSeek", BaseURL: "https://api.deepseek.com/v1", KeyEnv: "LIKHA_DEEPSEEK_API_KEY", DefaultModel: "deepseek-flash", Hosted: true},
 	{Name: "gemini", DisplayName: "Google Gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", KeyEnv: "LIKHA_GEMINI_API_KEY", DefaultModel: "gemini-2.5-flash", Hosted: true},
 }

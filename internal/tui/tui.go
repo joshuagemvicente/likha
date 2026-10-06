@@ -231,6 +231,7 @@ type ui struct {
 	toolExpanded     map[string]bool // tool items expanded inline, by call ID; never persisted
 	turnStarted      time.Time       // current user turn's start; zero outside one (and for compaction)
 	turnModel        string          // model the current user turn runs on
+	turnEffort       string          // effort level the current user turn runs at; "" is Default
 	turnThoughtBase  int             // reasoning ordinal of the current turn's first block
 	turnToolItems    int             // top-level tool items the current turn opened
 }
@@ -312,6 +313,10 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 	}
 	m.openOutputStore()
 	m.reportInterruptedTasks()
+	if client != nil {
+		// --model and the stored model never prompt; the stored level applies.
+		m.applyEffort(m.activeProvider(), name, liveEffort{}, nil)
+	}
 	if len(snapshot.Entries) > 0 && conn.Err == nil {
 		m.status = "Resumed session"
 	}
@@ -772,7 +777,11 @@ func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
 		m.entries = append(m.entries, entry{role: "Likha", content: "Run cancelled; no further tools will execute. Approved shell commands may leave detached processes running."})
 	} else if v.Kind == "error" {
 		m.status = "Error"
-		m.entries = append(m.entries, entry{role: "Error", content: v.Text})
+		content := v.Text
+		if note := effortRejectedNote(v.Err); note != "" {
+			content += "\n" + note
+		}
+		m.entries = append(m.entries, entry{role: "Error", content: content})
 	} else {
 		m.status = "Ready"
 	}
@@ -1219,12 +1228,14 @@ func (m *ui) handleModelsResult(msg modelsListMsg) {
 // for future runs. Reached through the models dialog; there is no typed
 // /model command (spec §7: dialog navigation selects; typed commands never
 // index).
-func (m *ui) applyModel(id string) {
+func (m *ui) applyModel(p model.Provider, id string, live liveEffort, effort *string) {
 	if err := m.client.SetModel(id); err != nil {
 		m.entries = append(m.entries, entry{role: "Error", content: err.Error()})
 		return
 	}
 	m.modelName = id
+	effortNote := m.applyEffort(p, id, live, effort)
+	m.status = "Connected"
 	m.resolveContextWindow()
 	if cfg, err := providers.LoadStoredConfig(m.stateDir); err == nil && cfg.Provider != "" {
 		cfg.Model = id
@@ -1233,7 +1244,7 @@ func (m *ui) applyModel(id string) {
 			return
 		}
 	}
-	m.entries = append(m.entries, entry{role: "Likha", content: "Model switched to " + id + " and stored for later runs."})
+	m.entries = append(m.entries, entry{role: "Likha", content: "Model switched to " + id + " and stored for later runs." + effortNote})
 }
 
 // resolveContextWindow refreshes the active model's context limit from the

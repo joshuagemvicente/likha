@@ -38,6 +38,9 @@ type StoredProviderConfig struct {
 	Composer       *StoredComposerConfig       `json:"composer,omitempty"`
 	StatusLine     *StoredStatusLineConfig     `json:"status_line,omitempty"`
 	ContextWindows map[string]map[string]int64 `json:"context_windows,omitempty"`
+	// Efforts records the reasoning-effort level chosen per provider and model
+	// (specs/model-effort). A missing pair means Default: no effort is sent.
+	Efforts map[string]map[string]string `json:"efforts,omitempty"`
 	// CommandTrust records, per canonical repository path, the verification
 	// checks the user trusted and their fingerprints at that time
 	// (specs/command-permissions). It is never read from a repository.
@@ -92,4 +95,30 @@ func SaveStoredConfig(stateDir string, cfg StoredProviderConfig) error {
 		return fmt.Errorf("writing stored provider config: %w", err)
 	}
 	return nil
+}
+
+// StoredEffort returns the effort level stored for the provider and model,
+// or "" (Default) when none is stored.
+func (c StoredProviderConfig) StoredEffort(provider, modelID string) string {
+	return c.Efforts[provider][modelID]
+}
+
+// SetStoredEffort records level for the provider and model. An empty level
+// (Default) removes the entry, and empty provider maps are dropped, so
+// config.json never holds a pair that means "send nothing".
+func (c *StoredProviderConfig) SetStoredEffort(provider, modelID, level string) {
+	if level == "" {
+		delete(c.Efforts[provider], modelID)
+		if len(c.Efforts[provider]) == 0 {
+			delete(c.Efforts, provider)
+		}
+		return
+	}
+	if c.Efforts == nil {
+		c.Efforts = map[string]map[string]string{}
+	}
+	if c.Efforts[provider] == nil {
+		c.Efforts[provider] = map[string]string{}
+	}
+	c.Efforts[provider][modelID] = level
 }

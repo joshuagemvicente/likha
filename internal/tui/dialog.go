@@ -24,6 +24,7 @@ const (
 	dialogSessions
 	dialogProviders
 	dialogComposer
+	dialogEffort // /effort on its own; the /models effort step rides on dialogModels
 )
 
 // dialogState drives the shared selection modal used by /themes, /models,
@@ -37,6 +38,10 @@ type dialogState struct {
 	query   string // case-insensitive substring filter over the row text
 	loadErr string // models dialog: connection/list error surfaced inside the dialog
 	loading bool   // models dialog: the list is still being fetched
+
+	// effort is the effort step (specs/model-effort): after a /models pick it
+	// replaces the list until Enter or Esc; for /effort it is the whole dialog.
+	effort *effortStep
 
 	// Sessions dialog delete confirmation (session_delete.go). The dialog
 	// only requests deletion; tui.go performs it and reports back.
@@ -168,7 +173,7 @@ func (m *ui) listSessionsDialog() {
 }
 
 // commandHelp is the text /help prints and unknown-command errors point to.
-const commandHelp = "Commands: /compact [focus] summarize the conversation into a compact brief; /init [guidance] survey the repository and propose a root AGENTS.md for review; /install <request> interview you about an install, show a plan, then run each step with approval; /sessions [n] list or resume a saved session; /tools inspect tool availability, source, and permissions; /tools clear-output explicitly clear this session's retained output; /models list models from every configured provider; /providers manage a provider's stored key (auth); switching happens through /models; /plan toggle read-only plan mode (edits, commands, and MCP calls refuse without approval flow); /agents inspect the explore profile, task tree, and child transcripts; /todo show the persisted plan checklist; /skills list the discovered global skill catalog; /skill <name> [request] load one skill and start a turn; /quit exit; /help this list. Ctrl+O inspects tool results without losing your draft. Selections open a dialog: ↑/↓ navigate, type to filter, Enter apply, Esc cancel. Unknown /commands are not sent to the model; // sends a literal slash."
+const commandHelp = "Commands: /compact [focus] summarize the conversation into a compact brief; /init [guidance] survey the repository and propose a root AGENTS.md for review; /install <request> interview you about an install, show a plan, then run each step with approval; /sessions [n] list or resume a saved session; /tools inspect tool availability, source, and permissions; /tools clear-output explicitly clear this session's retained output; /models list models from every configured provider and pick one, then its reasoning effort when it has levels; /effort [level] show or set the current model's reasoning effort; /providers manage a provider's stored key (auth); switching happens through /models; /plan toggle read-only plan mode (edits, commands, and MCP calls refuse without approval flow); /agents inspect the explore profile, task tree, and child transcripts; /todo show the persisted plan checklist; /skills list the discovered global skill catalog; /skill <name> [request] load one skill and start a turn; /quit exit; /help this list. Ctrl+O inspects tool results without losing your draft. Selections open a dialog: ↑/↓ navigate, type to filter, Enter apply, Esc cancel. Unknown /commands are not sent to the model; // sends a literal slash."
 
 // handleCommand dispatches a leading-slash input. Reserved commands act on
 // the application and never reach the model; unknown commands restore the
@@ -278,6 +283,8 @@ func (m *ui) handleCommand(line string) tea.Cmd {
 			return nil
 		}
 		return m.startCompaction(arg)
+	case "effort":
+		return m.handleEffortCommand(arg)
 	case "models":
 		if m.client == nil {
 			m.entries = append(m.entries, entry{role: "Error", content: "No provider configured; complete first-run setup first."})
@@ -391,6 +398,10 @@ func (m *ui) resumeSession(id string) tea.Cmd {
 // query and Backspace deletes (spec: the query applies to every dialog
 // kind); Enter applies, Esc clears the query first and then discards.
 func (m *ui) updateDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.dialog.effort != nil {
+		// The effort step owns every key: nothing reaches the model query.
+		return m, m.updateEffortStep(msg)
+	}
 	if m.dialog.kind == dialogSessions && m.dialog.deleteConfirm {
 		// The confirmation owns every key: nothing reaches the query.
 		return m, m.updateSessionDelete(msg)
@@ -535,17 +546,16 @@ func (m *ui) confirmDialog(matches []int) tea.Cmd {
 			return nil
 		}
 		row := m.dialogModelRows[origIndex]
-		m.dialog = dialogState{}
-		m.dialogModelRows = nil
-		m.dialogModelsNote = ""
-		m.layoutWidth = 0
-		m.applyModelRow(row)
-		// applyModelRow installs metadata for the newly selected provider/model;
-		// resolve after that update so the new limit wins over the old model's.
-		if m.modelName == row.model && m.isLiveProvider(row.provider) {
-			m.resolveContextWindow()
-			m.recalculateContext(m.history)
+		// A model with effort levels gets the effort step first; switching
+		// waits for its Enter (specs/model-effort). During a run the switch
+		// is refused below, so the step never opens then.
+		if !m.working && m.pending == nil {
+			if levels, liveDefault := m.effortLevelsFor(row.provider, row.model, row.live); len(levels) > 0 {
+				m.openEffortStep(row, levels, liveDefault, false)
+				return nil
+			}
 		}
+		m.finishModelSelection(row, nil)
 		return nil
 	}
 	// Guard the parallel arrays: matches were computed for the list seen at
@@ -590,6 +600,9 @@ func (m *ui) dialogView() string {
 	base := strings.Split(m.mainView(), "\n")
 	for i := range base {
 		base[i] = dimRowOn(base[i], m.theme.BaseBG())
+	}
+	if m.dialog.effort != nil {
+		return m.effortStepView(base)
 	}
 	width, height := m.width, m.height
 	var title, hint string
@@ -858,4 +871,21 @@ func (m *ui) dialogKindName() string {
 		return "providers"
 	}
 	return "items"
+}
+
+// finishModelSelection closes the /models dialog and switches to row. A
+// non-nil effort was chosen in the effort step; nil means the model offered
+// no step (specs/model-effort).
+func (m *ui) finishModelSelection(row modelsRow, effort *string) {
+	m.dialog = dialogState{}
+	m.dialogModelRows = nil
+	m.dialogModelsNote = ""
+	m.layoutWidth = 0
+	m.applyModelRow(row, effort)
+	// applyModelRow installs metadata for the newly selected provider/model;
+	// resolve after that update so the new limit wins over the old model's.
+	if m.modelName == row.model && m.isLiveProvider(row.provider) {
+		m.resolveContextWindow()
+		m.recalculateContext(m.history)
+	}
 }

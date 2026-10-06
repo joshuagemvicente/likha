@@ -488,6 +488,8 @@ func (m *ui) finishSetup(modelID string) tea.Cmd {
 	m.conn.Theme, m.conn.ComposerStyle = m.themeName, m.composerStyle
 	m.conn.ContextWindows = m.setup.contextWindows
 	m.resolveContextWindow()
+	// Setup never asks for effort; a stored level for the pair still applies.
+	m.applyEffort(p, modelID, liveEffort{}, nil)
 	m.setup.stage = setupTheme
 	m.setup.filter = nil
 	m.setup.themeCursor = 0

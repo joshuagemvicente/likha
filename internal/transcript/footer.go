@@ -26,6 +26,7 @@ const footerSeparator = " · "
 // (spec transcript-redesign § Turn footer).
 type TurnInfo struct {
 	Model     string        // the model the turn ran on
+	Effort    string        // the effort level the turn ran at; "" is Default (specs/model-effort)
 	Duration  time.Duration // wall time from prompt submit to run end
 	Tools     int           // top-level tool calls the turn showed as items
 	Cancelled bool          // the user cancelled the run
@@ -39,8 +40,11 @@ type TurnInfo struct {
 // turnJSON is the persisted shape. Field order is fixed by the struct, so
 // EncodeTurn output is stable.
 type turnJSON struct {
-	V         *int   `json:"v"`
-	Model     string `json:"model"`
+	V     *int   `json:"v"`
+	Model string `json:"model"`
+	// Effort is omitted at Default, so such turns encode exactly as before
+	// the field existed.
+	Effort    string `json:"effort,omitempty"`
 	MS        int64  `json:"ms"`
 	Tools     int    `json:"tools"`
 	Cancelled bool   `json:"cancelled"`
@@ -59,7 +63,7 @@ func EncodeTurn(t TurnInfo) string {
 	for _, d := range t.Thoughts {
 		thoughts = append(thoughts, turnMS(d))
 	}
-	data, err := json.Marshal(turnJSON{V: &v, Model: t.Model, MS: turnMS(t.Duration), Tools: max(t.Tools, 0), Cancelled: t.Cancelled, ThoughtsMS: thoughts})
+	data, err := json.Marshal(turnJSON{V: &v, Model: t.Model, Effort: t.Effort, MS: turnMS(t.Duration), Tools: max(t.Tools, 0), Cancelled: t.Cancelled, ThoughtsMS: thoughts})
 	if err != nil { // unreachable: every field marshals
 		return fmt.Sprintf(`{"v":%d}`, turnVersion)
 	}
@@ -89,7 +93,7 @@ func DecodeTurn(s string) (TurnInfo, bool) {
 	if raw.V == nil || *raw.V < 1 || raw.MS < 0 || raw.Tools < 0 || raw.MS > math.MaxInt64/int64(time.Millisecond) {
 		return TurnInfo{}, false
 	}
-	info := TurnInfo{Model: raw.Model, Duration: time.Duration(raw.MS) * time.Millisecond, Tools: raw.Tools, Cancelled: raw.Cancelled}
+	info := TurnInfo{Model: raw.Model, Effort: raw.Effort, Duration: time.Duration(raw.MS) * time.Millisecond, Tools: raw.Tools, Cancelled: raw.Cancelled}
 	for _, ms := range raw.ThoughtsMS {
 		if ms < 0 || ms > math.MaxInt64/int64(time.Millisecond) {
 			info.Thoughts = nil
@@ -125,12 +129,13 @@ func TurnDuration(d time.Duration) string {
 // FooterText is the footer line for a finished turn, without its glyph or
 // indent (the caller adds the gutter and Muted style):
 //
-//	nexum-router · 12.3s · 3 tools · cancelled
+//	nexum-router · high · 12.3s · 3 tools · cancelled
 //
+// The effort segment appears only when the turn ran above Default.
 // The tools segment reads "1 tool" for one call and is omitted at zero;
 // " · cancelled" appears only for cancelled turns; an empty model omits the
 // model segment. When the line is wider than width cells, segments drop
-// right-to-left (cancelled, then tools, then duration) and the last
+// right-to-left (cancelled, then tools, then duration, then effort) and the last
 // remaining segment truncates with ellipsis (clipRight: when ellipsis itself
 // does not fit, the segment is cut to width without it). The model name is
 // flattened to one row with hidden runes shown as \uXXXX (flattenRow), so
@@ -143,6 +148,9 @@ func FooterText(t TurnInfo, width int, ellipsis string) string {
 	var segments []string
 	if model := flattenRow(t.Model); model != "" {
 		segments = append(segments, model)
+	}
+	if effort := flattenRow(t.Effort); effort != "" {
+		segments = append(segments, effort)
 	}
 	segments = append(segments, TurnDuration(t.Duration))
 	switch {

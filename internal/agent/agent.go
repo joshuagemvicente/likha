@@ -77,6 +77,9 @@ type TurnEvent struct {
 	// A "stream_interrupted" event (steer now) carries the stopped request's
 	// usage when the provider reported any, and nil when it did not.
 	Usage *model.RequestUsage
+	// Err is the cause of a Kind "error" event, so the interface can match it
+	// with errors.As (an effort rejection gets a hint); Text is its message.
+	Err error
 }
 
 // ConsentRequest asks for one conversation-scoped web grant. Search consents

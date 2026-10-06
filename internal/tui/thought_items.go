@@ -106,6 +106,7 @@ func (m *ui) resetThoughts() {
 	m.reasoningStarted = time.Time{}
 	m.turnStarted = time.Time{}
 	m.turnModel = ""
+	m.turnEffort = ""
 	m.turnThoughtBase = 0
 	m.turnToolItems = 0
 }
@@ -160,6 +161,7 @@ func (m *ui) turnThoughts() []time.Duration {
 func (m *ui) beginTurnFooter() {
 	m.turnStarted = m.now()
 	m.turnModel = m.modelName
+	m.turnEffort = m.client.Effort()
 	m.turnThoughtBase = m.reasoningCount()
 	m.turnToolItems = 0
 }
@@ -175,6 +177,7 @@ func (m *ui) appendTurnFooter(tools int, cancelled bool) {
 	}
 	info := transcript.TurnInfo{
 		Model:     m.turnModel,
+		Effort:    m.turnEffort,
 		Duration:  max(m.now().Sub(m.turnStarted), 0),
 		Tools:     tools,
 		Cancelled: cancelled,

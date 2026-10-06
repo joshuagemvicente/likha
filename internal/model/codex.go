@@ -48,6 +48,7 @@ type codexRequest struct {
 	Tools        []responsesNamespace `json:"tools"`
 	Store        bool                 `json:"store"`
 	Stream       bool                 `json:"stream"`
+	Reasoning    *reasoningParam      `json:"reasoning,omitempty"`
 }
 
 // BuildCodexRequest maps a Likha conversation onto an OpenAI Responses API
@@ -56,7 +57,9 @@ type codexRequest struct {
 // Full text/tool history is replayed with store:false and stream:true. Tools
 // use one fixed namespace, while local names and schemas remain unchanged.
 // Display-only reasoning and unsupported request parameters are never sent.
-func BuildCodexRequest(modelName string, messages []Message, tools []ToolDefinition) ([]byte, error) {
+// A non-empty effort adds reasoning: {effort} (specs/model-effort); it is set
+// only when the chatgpt provider row carries effort, after its live probe.
+func BuildCodexRequest(modelName, effort string, messages []Message, tools []ToolDefinition) ([]byte, error) {
 	if strings.TrimSpace(modelName) == "" {
 		return nil, errors.New("model name is required")
 	}
@@ -102,6 +105,9 @@ func BuildCodexRequest(modelName string, messages []Message, tools []ToolDefinit
 		}
 	}
 	body := codexRequest{Model: modelName, Instructions: strings.Join(instructions, "\n\n"), Input: input, Tools: []responsesNamespace{}, Store: false, Stream: true}
+	if effort != "" {
+		body.Reasoning = &reasoningParam{Effort: effort}
+	}
 	functions := make([]codexTool, 0, len(tools))
 	seen := make(map[string]bool, len(tools))
 	for _, t := range tools {

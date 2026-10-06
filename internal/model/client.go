@@ -64,6 +64,9 @@ type Client struct {
 	sessionHeader string // provider-required per-conversation session header
 	sessionID     string // stable per-conversation session identifier
 
+	effortWire EffortWire // how the provider carries effort; EffortUnsupported sends none
+	effort     string     // reasoning-effort level for later requests; "" sends none
+
 	oauth *oauthSession // shared Sign in with ChatGPT session, including forks
 
 	rateMu              sync.Mutex // guards the last-seen Codex rate-limit headers and captured token usage
@@ -247,12 +250,23 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 		IncludeUsage bool `json:"include_usage"`
 	}
 	body := struct {
-		Model         string           `json:"model"`
-		Messages      []requestMessage `json:"messages"`
-		Tools         []requestTool    `json:"tools,omitempty"`
-		Stream        bool             `json:"stream"`
-		StreamOptions *streamOptions   `json:"stream_options,omitempty"`
+		Model           string           `json:"model"`
+		Messages        []requestMessage `json:"messages"`
+		Tools           []requestTool    `json:"tools,omitempty"`
+		Stream          bool             `json:"stream"`
+		StreamOptions   *streamOptions   `json:"stream_options,omitempty"`
+		ReasoningEffort string           `json:"reasoning_effort,omitempty"`
+		Reasoning       *reasoningParam  `json:"reasoning,omitempty"`
 	}{Model: c.model, Messages: make([]requestMessage, 0, len(messages)), Stream: true}
+	effort := c.Effort()
+	if effort != "" {
+		switch c.effortWire {
+		case EffortTopLevel:
+			body.ReasoningEffort = effort
+		case EffortObject:
+			body.Reasoning = &reasoningParam{Effort: effort}
+		}
+	}
 	body.StreamOptions = &streamOptions{IncludeUsage: true}
 	for _, m := range messages {
 		if m.Role != "system" && m.Role != "developer" && m.Role != "user" && m.Role != "assistant" && m.Role != "tool" {
@@ -331,6 +345,9 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 		message := fmt.Sprintf("model HTTP %s: %s", resp.Status, strings.TrimSpace(string(detail)))
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			return result, usageReport{}, fmt.Errorf("%w: %s", ErrUnauthorized, message)
+		}
+		if effort != "" && effortRejectedStatus(resp.StatusCode) {
+			return result, usageReport{}, &EffortRejectedError{Level: effort, Err: errors.New(message)}
 		}
 		return result, usageReport{}, errors.New(message)
 	}
@@ -417,7 +434,8 @@ func parseFinalUsageDetailed(raw json.RawMessage) usageReport {
 // Optional rate headers and terminal token usage are captured when present.
 func (c *Client) streamCodex(ctx context.Context, messages []Message, tools []ToolDefinition, onText func(string), onReasoning func(string), requestID uint64) (Message, usageReport, error) {
 	var result Message
-	payload, err := BuildCodexRequest(c.model, messages, tools)
+	effort := c.Effort()
+	payload, err := BuildCodexRequest(c.model, effort, messages, tools)
 	if err != nil {
 		return result, usageReport{}, err
 	}
@@ -429,6 +447,9 @@ func (c *Client) streamCodex(ctx context.Context, messages []Message, tools []To
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if effort != "" && effortRejectedStatus(resp.StatusCode) {
+			return result, usageReport{}, &EffortRejectedError{Level: effort, Err: oauthHTTPError(resp)}
+		}
 		return result, usageReport{}, oauthHTTPError(resp)
 	}
 	c.captureRateLimit(resp.Header)
@@ -581,7 +602,9 @@ type ModelDetails struct {
 	ID                  string
 	DisplayName         string // account catalog label; empty when not provided
 	ContextWindow       int64
-	ContextWindowSource string // response field that supplied ContextWindow; empty when unknown
+	ContextWindowSource string   // response field that supplied ContextWindow; empty when unknown
+	Efforts             []string // live effort levels, lowest first; empty when the list publishes none
+	DefaultEffort       string   // live default effort level; empty when unknown
 }
 
 // ListModelsWithDetails returns model IDs and any positive context-window
@@ -613,6 +636,7 @@ func decodeModelDetails(raw []byte) ([]ModelDetails, error) {
 		ContextLength      json.RawMessage `json:"context_length"`
 		ContextWindowCamel json.RawMessage `json:"contextWindow"`
 		Limit              json.RawMessage `json:"limit"`
+		Reasoning          json.RawMessage `json:"reasoning"`
 	}
 	var items []item
 	trimmed := bytes.TrimSpace(raw)
@@ -666,7 +690,8 @@ func decodeModelDetails(raw []byte) ([]ModelDetails, error) {
 				}
 			}
 		}
-		details = append(details, ModelDetails{ID: entry.ID, ContextWindow: window, ContextWindowSource: source})
+		efforts, defaultEffort := liveEfforts(entry.Reasoning)
+		details = append(details, ModelDetails{ID: entry.ID, ContextWindow: window, ContextWindowSource: source, Efforts: efforts, DefaultEffort: defaultEffort})
 	}
 	return details, nil
 }

@@ -161,7 +161,7 @@ func TestFetchModelsTargetReportsMetadataToObserver(t *testing.T) {
 			}
 		},
 	}
-	ids, windows, err := fetchModelsTarget(target)
+	ids, windows, _, err := fetchModelsTarget(target)
 	if err != nil {
 		t.Fatal(err)
 	}

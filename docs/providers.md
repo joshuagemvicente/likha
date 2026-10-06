@@ -76,6 +76,23 @@ ChatGPT choices come from the selected account's eligible models. For an endpoin
 outside the list, Likha uses the first model that endpoint reports.
 `likha --help` prints options, providers, environment variables, and examples.
 
+## Reasoning effort
+
+Likha sends a reasoning-effort level only to providers whose live probe shows the field is honored ([model-effort](../specs/model-effort/context.md#provider-support-matrix)). Until then the effort step is skipped for that provider and the switch message says `not yet verified for <provider>`.
+
+| Provider | Wire field | Effort status |
+| --- | --- | --- |
+| `openai` | `reasoning_effort` | pending-probe |
+| `openrouter` | `reasoning: {effort}` (levels read live from `/models`) | pending-probe |
+| `gemini` | `reasoning_effort` | pending-probe |
+| `xai`, `deepseek`, `groq`, `cerebras`, `together`, `bedrock` | `reasoning_effort` | pending-probe |
+| `chatgpt` | `reasoning: {effort}` (Responses) | pending-probe |
+| `opencode-zen`, `opencode-go`, `dialagram` | unknown | pending-probe |
+| `mistral` | `reasoning_effort` | blocked: chunked reasoning replies do not parse yet |
+| `claude` | — | not supported: Anthropic's OpenAI-compatible endpoint ignores effort |
+
+A probe sends one tool-bearing request at each published level of one model and records whether each was accepted, rejected, or ignored.
+
 ## First-run setup (no flags needed)
 
 Run `likha` without provider configuration:

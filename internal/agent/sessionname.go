@@ -46,7 +46,12 @@ func GenerateSessionNameUsage(ctx context.Context, client *model.Client, history
 	msgs = append(msgs, history...)
 	msgs = append(msgs, model.Message{Role: "user", Content: nameInstruction})
 
-	assistant, usage, usageOK, err := client.StreamUsage(ctx, msgs, nil, nil, nil)
+	// Naming always uses the provider's default effort (specs/model-effort).
+	background, err := client.WithoutEffort()
+	if err != nil {
+		return "", usage, false, err
+	}
+	assistant, usage, usageOK, err := background.StreamUsage(ctx, msgs, nil, nil, nil)
 	if err != nil {
 		return "", usage, usageOK, err
 	}

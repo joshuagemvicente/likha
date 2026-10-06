@@ -316,6 +316,7 @@ func (m *ui) handleOAuthLogin(v oauthLoginMsg) tea.Cmd {
 		}
 		_ = v.client.SetModel(modelID)
 		m.client, m.modelName = v.client, modelID
+		m.applyEffort(p, modelID, liveEffort{}, nil)
 		m.conn.ContextWindows, m.conn.Err = windows, nil
 		m.resolveContextWindow()
 		m.recalculateContext(m.history)

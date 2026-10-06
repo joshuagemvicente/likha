@@ -22,7 +22,7 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 	}
 	prompt = ExpandFileReferences(prompt, repo)
 	history := append(append([]model.Message(nil), prior...), model.Message{Role: "user", Content: prompt})
-	fail := func(err error) { emit(TurnEvent{Kind: "error", Text: err.Error(), History: history}) }
+	fail := func(err error) { emit(TurnEvent{Kind: "error", Text: err.Error(), Err: err, History: history}) }
 	if client == nil {
 		fail(errors.New("no provider configured"))
 		return

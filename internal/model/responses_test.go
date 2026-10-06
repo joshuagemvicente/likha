@@ -13,7 +13,7 @@ import (
 
 func TestResponsesSIWCRequestContract(t *testing.T) {
 	parameters := json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"limit":{"type":"integer"}},"required":["path"]}`)
-	payload, err := BuildCodexRequest("gpt-6.1-sol", []Message{
+	payload, err := BuildCodexRequest("gpt-6.1-sol", "", []Message{
 		{Role: "system", Content: "Use local tools."},
 		{Role: "user", Content: "Read a file."},
 		{Role: "assistant", Content: "Checking.", Reasoning: "not replayable", ToolCalls: []ToolCall{{ID: "call_1", Name: "read", Arguments: `{"path":"a.txt"}`}}},
@@ -70,7 +70,7 @@ func TestResponsesSIWCRequestContract(t *testing.T) {
 }
 
 func TestResponsesNoToolsAndNoHistoryAreArrays(t *testing.T) {
-	payload, err := BuildCodexRequest("gpt-6.1-sol", nil, nil)
+	payload, err := BuildCodexRequest("gpt-6.1-sol", "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestResponsesCanonicalNamespacedToolTurnAndReplay(t *testing.T) {
 	if !report.ok || report.request() != wantUsage {
 		t.Fatalf("usage metadata = %+v, want %+v", report.request(), wantUsage)
 	}
-	payload, err := BuildCodexRequest("gpt-6.1-sol", []Message{{Role: "user", Content: "Read a.txt."}, message,
+	payload, err := BuildCodexRequest("gpt-6.1-sol", "", []Message{{Role: "user", Content: "Read a.txt."}, message,
 		{Role: "tool", ToolCallID: "call_1", Content: "hello\nworld"}, {Role: "user", Content: "Summarize it."}}, tools)
 	if err != nil {
 		t.Fatal(err)
@@ -224,7 +224,7 @@ func TestResponsesOptionalNamespaceAndMCPRegistryNames(t *testing.T) {
 			if err != nil || len(message.ToolCalls) != 1 || message.ToolCalls[0].Name != name {
 				t.Fatalf("local MCP name changed: %+v, %v", message, err)
 			}
-			payload, err := BuildCodexRequest("gpt-6.1-sol", []Message{message}, nil)
+			payload, err := BuildCodexRequest("gpt-6.1-sol", "", []Message{message}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -428,24 +428,24 @@ func TestResponsesCallbacksAreIncremental(t *testing.T) {
 func TestResponsesRequestDefinitionValidation(t *testing.T) {
 	for _, parameters := range []string{`null`, `[]`, `true`, `"schema"`, `1`, `{"type":"string"}`, `{"type":["object","null"]}`} {
 		t.Run(parameters, func(t *testing.T) {
-			_, err := BuildCodexRequest("gpt-6.1-sol", nil, []ToolDefinition{{Name: "read", Parameters: json.RawMessage(parameters)}})
+			_, err := BuildCodexRequest("gpt-6.1-sol", "", nil, []ToolDefinition{{Name: "read", Parameters: json.RawMessage(parameters)}})
 			codexWantError(t, err, "invalid tool definition")
 		})
 	}
 	for _, name := range []string{"", "likha.read", "read\n", "réad", strings.Repeat("a", 65)} {
 		t.Run(name, func(t *testing.T) {
-			_, err := BuildCodexRequest("gpt-6.1-sol", nil, []ToolDefinition{{Name: name, Parameters: json.RawMessage(`{}`)}})
+			_, err := BuildCodexRequest("gpt-6.1-sol", "", nil, []ToolDefinition{{Name: name, Parameters: json.RawMessage(`{}`)}})
 			codexWantError(t, err, "invalid tool definition")
 		})
 	}
-	_, err := BuildCodexRequest("gpt-6.1-sol", nil, []ToolDefinition{{Name: "read", Parameters: json.RawMessage(`{}`)}, {Name: "read", Parameters: json.RawMessage(`{}`)}})
+	_, err := BuildCodexRequest("gpt-6.1-sol", "", nil, []ToolDefinition{{Name: "read", Parameters: json.RawMessage(`{}`)}, {Name: "read", Parameters: json.RawMessage(`{}`)}})
 	codexWantError(t, err, "duplicate tool definition")
-	_, err = BuildCodexRequest(" ", nil, nil)
+	_, err = BuildCodexRequest(" ", "", nil, nil)
 	codexWantError(t, err, "model name is required")
 }
 
 func TestResponsesRequestPreservesEmptyMessagesAndSystemOrder(t *testing.T) {
-	payload, err := BuildCodexRequest("gpt-6.1-sol", []Message{{Role: "system", Content: "first"}, {Role: "user"},
+	payload, err := BuildCodexRequest("gpt-6.1-sol", "", []Message{{Role: "system", Content: "first"}, {Role: "user"},
 		{Role: "system", Content: "second"}, {Role: "developer"}, {Role: "assistant"}}, nil)
 	if err != nil {
 		t.Fatal(err)

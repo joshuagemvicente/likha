@@ -24,6 +24,7 @@ type modelsSection struct {
 	provider       model.Provider
 	models         []string
 	contextWindows map[string]int64
+	efforts        map[string]liveEffort // live effort levels by model ID (OpenRouter); empty for catalog-only providers
 	modelNames     map[string]string
 }
 
@@ -36,6 +37,7 @@ type modelsRow struct {
 	model         string
 	contextWindow int64
 	displayName   string
+	live          liveEffort // live effort levels for this model; empty uses the catalog
 }
 
 // modelsSectionMsg carries one provider's arrived /models section. gen is
@@ -106,7 +108,7 @@ type modelsTarget struct {
 
 // fetchModelsTarget lists one target under the existing 5 s bound and reports
 // actual model metadata through the diagnostics observer.
-func fetchModelsTarget(tg modelsTarget) ([]string, map[string]int64, error) {
+func fetchModelsTarget(tg modelsTarget) ([]string, map[string]int64, map[string]liveEffort, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	sink := &modelDetailsSink{}
@@ -141,9 +143,10 @@ func fetchModelsTarget(tg modelsTarget) ([]string, map[string]int64, error) {
 		observeModelsFetch(tg.provider.Name, elapsed, err)
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	contextWindows := make(map[string]int64)
+	efforts := make(map[string]liveEffort)
 	for _, detail := range sink.details {
 		if detail.DisplayName != "" && tg.modelNames != nil {
 			tg.modelNames[detail.ID] = detail.DisplayName
@@ -153,8 +156,13 @@ func fetchModelsTarget(tg modelsTarget) ([]string, map[string]int64, error) {
 				contextWindows[detail.ID] = detail.ContextWindow
 			}
 		}
+		if detail.ID != "" && len(detail.Efforts) > 0 {
+			if _, exists := efforts[detail.ID]; !exists {
+				efforts[detail.ID] = liveEffort{levels: detail.Efforts, defaultLevel: detail.DefaultEffort}
+			}
+		}
 	}
-	return ids, contextWindows, nil
+	return ids, contextWindows, efforts, nil
 }
 
 // buildModelsTargets computes the /models fetch set in final display order:
@@ -326,7 +334,7 @@ func (m *ui) startModelsFetch() tea.Cmd {
 	for _, tg := range targets {
 		tg := tg
 		cmds = append(cmds, func() tea.Msg {
-			ids, contextWindows, err := fetchModelsTarget(tg)
+			ids, contextWindows, efforts, err := fetchModelsTarget(tg)
 			if err != nil || len(ids) == 0 {
 				sample := ""
 				if err != nil {
@@ -334,7 +342,7 @@ func (m *ui) startModelsFetch() tea.Cmd {
 				}
 				return modelsProviderFailedMsg{gen: gen, displayName: tg.provider.DisplayName, errSample: sample}
 			}
-			return modelsSectionMsg{gen: gen, section: modelsSection{provider: tg.provider, models: ids, contextWindows: contextWindows, modelNames: tg.modelNames}}
+			return modelsSectionMsg{gen: gen, section: modelsSection{provider: tg.provider, models: ids, contextWindows: contextWindows, efforts: efforts, modelNames: tg.modelNames}}
 		})
 	}
 	return tea.Batch(cmds...)
@@ -399,7 +407,7 @@ func (m *ui) applyModelsSections(sections []modelsSection) {
 				continue
 			}
 			seen[id] = true
-			rows = append(rows, modelsRow{provider: s.provider, model: id, contextWindow: s.contextWindows[id], displayName: s.modelNames[id]})
+			rows = append(rows, modelsRow{provider: s.provider, model: id, contextWindow: s.contextWindows[id], displayName: s.modelNames[id], live: s.efforts[id]})
 			flat = append(flat, id)
 			counts[id]++
 		}
@@ -543,13 +551,13 @@ func compactPrice(dollars float64) string {
 // provider and keeps the old session; nothing is stored first. The
 // just-completed list fetch is the freshness signal: no second verify
 // round-trip.
-func (m *ui) applyModelRow(row modelsRow) {
+func (m *ui) applyModelRow(row modelsRow, effort *string) {
 	if m.working || m.pending != nil {
 		m.entries = append(m.entries, entry{role: "Error", content: "Cancel the active run and resolve its review before switching models or providers."})
 		return
 	}
 	if m.isLiveProvider(row.provider) {
-		m.applyModel(row.model)
+		m.applyModel(row.provider, row.model, row.live, effort)
 		m.setActiveContextWindows(row.provider, row.model, row.contextWindow, true)
 		return
 	}
@@ -571,7 +579,7 @@ func (m *ui) applyModelRow(row modelsRow) {
 			return
 		}
 		bindOAuthStorage(client, m.stateDir, row.provider.Name)
-		m.activateModelClient(row.provider, client, row.model)
+		m.activateModelClient(row.provider, client, row.model, row.live, effort)
 		return
 	}
 	key, err := providers.StoredKey(m.stateDir, row.provider.Name)
@@ -590,14 +598,14 @@ func (m *ui) applyModelRow(row modelsRow) {
 		m.entries = append(m.entries, entry{role: "Error", content: "Switch to " + row.provider.DisplayName + " failed: " + err.Error()})
 		return
 	}
-	m.activateModelClient(row.provider, client, row.model)
+	m.activateModelClient(row.provider, client, row.model, row.live, effort)
 }
 
 // activateModelClient swaps the live client for the chosen provider+model,
 // stores the pair in config.json, and names both in one conversation entry.
 // The swap mirrors activateProvider: stream buffers reset so no bytes from
 // the previous provider bleed into the next turn.
-func (m *ui) activateModelClient(p model.Provider, client *model.Client, modelID string) {
+func (m *ui) activateModelClient(p model.Provider, client *model.Client, modelID string, live liveEffort, effort *string) {
 	sameProvider := m.isLiveProvider(p)
 	if p.SessionHeader != "" {
 		client.SetSessionHeader(p.SessionHeader)
@@ -620,7 +628,8 @@ func (m *ui) activateModelClient(p model.Provider, client *model.Client, modelID
 	m.setActiveContextWindows(p, modelID, m.rowContextWindow(p.Name, modelID), sameProvider)
 	m.status = "Connected"
 	m.layoutWidth = 0
-	m.entries = append(m.entries, entry{role: "Likha", content: "Model switched to " + modelID + " on " + p.DisplayName + " and stored for later runs."})
+	effortNote := m.applyEffort(p, modelID, live, effort)
+	m.entries = append(m.entries, entry{role: "Likha", content: "Model switched to " + modelID + " on " + p.DisplayName + " and stored for later runs." + effortNote})
 	cfg, err := providers.LoadStoredConfig(m.stateDir)
 	if err != nil {
 		m.entries = append(m.entries, entry{role: "Error", content: "Store model: " + err.Error()})

@@ -45,7 +45,12 @@ func CompactHistoryUsage(ctx context.Context, client *model.Client, history []mo
 	summarizeMsgs = append(summarizeMsgs, history...)
 	summarizeMsgs = append(summarizeMsgs, model.Message{Role: "user", Content: instruction})
 
-	assistant, usage, usageOK, err := client.StreamUsage(ctx, summarizeMsgs, nil, onText, nil)
+	// Compaction always uses the provider's default effort (specs/model-effort).
+	background, err := client.WithoutEffort()
+	if err != nil {
+		return nil, "", usage, false, err
+	}
+	assistant, usage, usageOK, err := background.StreamUsage(ctx, summarizeMsgs, nil, onText, nil)
 	if err != nil {
 		return nil, "", usage, usageOK, err
 	}

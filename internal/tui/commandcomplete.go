@@ -17,11 +17,12 @@ type commandItem struct {
 var commands = []commandItem{
 	{"agents", "inspect the explore profile, task tree, transcripts, and branch cancellation"},
 	{"compact", "summarize the conversation so far into a compact brief, /compact [focus] steers it"},
+	{"effort", "choose the current model's reasoning effort: /effort [level]"},
 	{"help", "list the reserved commands"},
 	{"init", "survey the repository and propose a root AGENTS.md for review: /init [guidance]"},
 	{"install", "interview you about an install, show a plan, then run each step with approval: /install <request>"},
 	{"mcp", "show the connected MCP servers or how to configure them"},
-	{"models", "switch the model for this session"},
+	{"models", "switch the model, then pick its reasoning effort when it has levels"},
 	{"plan", "toggle read-only plan mode: edits, commands, and MCP calls refuse without approval flow"},
 	{"providers", "manage a provider's stored key (auth); switching happens through /models"},
 	{"quit", "exit"},
