@@ -1,0 +1,42 @@
+Effort probe results: openai / gpt-5.5 (http://127.0.0.1:8080, endpoint override)
+ 1. Default (no effort field)
+    sent: none; HTTP 200; prompt 120, completion 540, reasoning 500; cost $0.0168 (estimated)
+    time: headers 0.12s, first token 0.45s, end 1.50s; tool: called, answer 440 (correct)
+    verdict: baseline (Default succeeded)
+ 2. reasoning_effort = none
+    sent: "reasoning_effort":"none"; HTTP 200; prompt 120, completion 540, reasoning 500; cost $0.0168 (estimated)
+    time: headers 0.12s, first token 0.45s, end 1.50s; tool: called, answer 440 (correct)
+    verdict: ignored-suspected (heuristic: flat across levels and the invalid control was accepted)
+ 3. reasoning_effort = low
+    sent: "reasoning_effort":"low"; HTTP 200; prompt 120, completion 540, reasoning 500; cost $0.0168 (estimated)
+    time: headers 0.12s, first token 0.45s, end 1.50s; tool: called, answer 440 (correct)
+    verdict: ignored-suspected (heuristic: flat across levels and the invalid control was accepted)
+    note: same as none (possible downgrade)
+ 4. reasoning_effort = medium
+    sent: "reasoning_effort":"medium"; HTTP 200; prompt 120, completion 540, reasoning 500; cost $0.0168 (estimated)
+    time: headers 0.12s, first token 0.45s, end 1.50s; tool: called, answer 440 (correct)
+    verdict: ignored-suspected (heuristic: flat across levels and the invalid control was accepted)
+    note: same as low (possible downgrade)
+ 5. reasoning_effort = high
+    sent: "reasoning_effort":"high"; HTTP 200; prompt 120, completion 540, reasoning 500; cost $0.0168 (estimated)
+    time: headers 0.12s, first token 0.45s, end 1.50s; tool: called, answer 440 (correct)
+    verdict: ignored-suspected (heuristic: flat across levels and the invalid control was accepted)
+    note: same as medium (possible downgrade)
+ 6. reasoning_effort = xhigh
+    sent: "reasoning_effort":"xhigh"; HTTP 200; prompt 120, completion 540, reasoning 500; cost $0.0168 (estimated)
+    time: headers 0.12s, first token 0.45s, end 1.50s; tool: called, answer 440 (correct)
+    verdict: ignored-suspected (heuristic: flat across levels and the invalid control was accepted)
+    note: same as high (possible downgrade)
+ 7. reasoning_effort = likha-probe-invalid (control)
+    sent: "reasoning_effort":"likha-probe-invalid"; HTTP 200; prompt 120, completion 540, reasoning 500; cost $0.0168 (estimated)
+    time: headers 0.12s, first token 0.45s, end 1.50s; tool: called, answer 440 (correct)
+    verdict: unvalidated (the invalid level was accepted)
+
+Summary
+  Run: 7 requests sent, 3,780 completion tokens, cost $0.1176 (includes catalog estimates)
+  reasoning_effort: 6 requests sent, 3,240 completion tokens, cost $0.1008 (includes catalog estimates)
+    levels flat (signal: reasoning tokens); control unvalidated
+    Eligible to enable reasoning_effort for openai: no — none ignored-suspected (heuristic: flat across levels and the invalid control was accepted) (endpoint override: not evidence for openai)
+  The probe changed no setting; enabling a provider is a separate, reviewed change.
+
+Verdicts come from one request per level; ignored-suspected is a heuristic, not proof. Re-run before relying on a borderline result.

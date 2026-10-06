@@ -1,0 +1,40 @@
+Effort probe results: openai / gpt-5.5 (http://127.0.0.1:8080, endpoint override)
+ 1. Default (no effort field)
+    sent: none; HTTP 200; prompt 120, completion 940, reasoning 900; cost $0.0288 (estimated)
+    time: headers 0.12s, first token 0.45s, end 1.50s; tool: called, answer 440 (correct)
+    verdict: baseline (Default succeeded)
+ 2. reasoning_effort = none
+    sent: "reasoning_effort":"none"; HTTP 200; prompt 120, completion 40, reasoning 0; cost $0.0018 (estimated)
+    time: headers 0.12s, first token 0.45s, end 1.50s; tool: called, answer 440 (correct)
+    verdict: accepted (HTTP 200; levels varied)
+ 3. reasoning_effort = low
+    sent: "reasoning_effort":"low"; HTTP 200; prompt 120, completion 240, reasoning 200; cost $0.0078 (estimated)
+    time: headers 0.12s, first token 0.45s, end 1.50s; tool: called, answer 440 (correct)
+    verdict: accepted (HTTP 200; levels varied)
+ 4. reasoning_effort = medium
+    sent: "reasoning_effort":"medium"; HTTP 200; prompt 120, completion 940, reasoning 900; cost $0.0288 (estimated)
+    time: headers 0.12s, first token 0.45s, end 1.50s; tool: called, answer 440 (correct)
+    verdict: accepted (HTTP 200; levels varied)
+ 5. reasoning_effort = high
+    sent: "reasoning_effort":"high"; HTTP 200; prompt 120, completion 2,440, reasoning 2,400; cost $0.0738 (estimated)
+    time: headers 0.12s, first token 0.45s, end 1.50s; tool: called, answer 440 (correct)
+    verdict: accepted (HTTP 200; levels varied)
+ 6. reasoning_effort = xhigh
+    sent: "reasoning_effort":"xhigh"; HTTP 200; prompt 120, completion 6,040, reasoning 6,000; cost $0.1818 (estimated)
+    time: headers 0.12s, first token 0.45s, end 1.50s; tool: called, answer 440 (correct)
+    verdict: accepted (HTTP 200; levels varied)
+ 7. reasoning_effort = likha-probe-invalid (control)
+    sent: "reasoning_effort":"likha-probe-invalid"; HTTP 400 (http_error); prompt not reported, completion not reported, reasoning not reported; cost unknown
+    time: headers 0.12s, first token -, end 1.50s; tool: not called
+    error: model HTTP 400 Bad Request: {"error":{"message":"invalid reasoning_effort"}}
+    verdict: validated (HTTP 400: the invalid level was rejected)
+
+Summary
+  Run: 7 requests sent, 10,640 completion tokens, cost $0.3228 (includes catalog estimates; 6 of 7 requests priced)
+  reasoning_effort: 6 requests sent, 9,700 completion tokens, cost $0.2940 (includes catalog estimates; 5 of 6 requests priced)
+    levels varied (signal: reasoning tokens); control validated
+    Eligible to enable reasoning_effort for openai: yes (endpoint override: not evidence for openai)
+  Recommended shape: reasoning_effort
+  The probe changed no setting; enabling a provider is a separate, reviewed change.
+
+Verdicts come from one request per level; ignored-suspected is a heuristic, not proof. Re-run before relying on a borderline result.
