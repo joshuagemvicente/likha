@@ -36,6 +36,15 @@ import (
 // askHint is the always-pinned key help at the bottom of the dialog.
 const askHint = "↑/↓ select  Tab free text  Enter submit  Ctrl+S skip  Esc cancel run"
 
+// askQuestionnaireHint replaces askHint for a questionnaire of more than one
+// page (specs/ask-user amendment 2026-10-05): ←/→ move between questions,
+// Enter answers the current one, Ctrl+S skips it. It wraps at its
+// double-space key groups so no binding splits across lines.
+const askQuestionnaireHint = "↑/↓ select  ←/→ question  Tab free text  Enter answer  Ctrl+S skip  Esc cancel run"
+
+// askRecommendedTag marks the option the model recommends.
+const askRecommendedTag = "Recommended"
+
 // askDefaultSkipHint informs the user where typed answer text travels
 // (FR-30). It renders muted inside the dialog and never implies that an
 // answer grants edit, command, MCP trust, or network permission.
@@ -50,6 +59,10 @@ const (
 	askUserOptionRunes   = 120
 	askUserAnswerBytes   = 8192
 	askUserMaxOptions    = 8
+	// Questionnaire bounds (amendment 2026-10-05): one to four questions,
+	// option descriptions of up to 200 characters.
+	askUserMaxQuestions     = 4
+	askUserDescriptionRunes = 200
 )
 
 // askMode mirrors where the selection rests: on a numbered choice
@@ -65,20 +78,46 @@ const (
 
 // askState is the whole pending ask_user interaction. One question is
 // pending at a time; count lives in the coordinator.
+//
+// A request renders as pages (tools.AskRequest.Pages): the single-question
+// form is one page, a questionnaire one page per question. question,
+// options, details, selected, and text always describe the current page;
+// drafts keep every other page's selection and typed text so ←/→ never lose
+// work, and answers holds each page's recorded outcome until the last
+// unanswered page submits the whole questionnaire.
 type askState struct {
-	pending    bool   // a question is on screen awaiting an answer
-	id         string // coordinator's delivery identity
-	callID     string // original tool call ID the answer must attach to
-	question   string
-	options    []string              // selectable choices; the free-text row follows them
-	selected   int                   // row index in [0 .. len(options)]: last is free text
-	text       string                // free-text answer being typed; end-anchored editing
-	mode       askMode               // mirror of selected position; see syncMode
-	generation uint64                // bumped on open and close; askClosedMsg routing compares it
-	responded  bool                  // set once just before close+reply; guards exactly-once delivery
-	skipHint   string                // muted note shown inside the dialog (e.g. provider warning)
-	committed  func(tools.AskAnswer) // coordinator-supplied reply callback
-	scroll     int                   // vertical page offset when the body is tall
+	pending       bool   // a question is on screen awaiting an answer
+	id            string // coordinator's delivery identity
+	callID        string // original tool call ID the answer must attach to
+	questionnaire bool   // the request used the questionnaire form
+	pages         []tools.AskQuestion
+	page          int             // current page index into pages
+	answers       []askPageAnswer // one per page; set once answered or skipped
+	drafts        []askDraft      // one per page; selection/text kept across ←/→
+	question      string
+	options       []string              // selectable choices; the free-text row follows them
+	details       []tools.AskOption     // current page's options with description/recommended
+	selected      int                   // row index in [0 .. len(options)]: last is free text
+	text          string                // free-text answer being typed; end-anchored editing
+	mode          askMode               // mirror of selected position; see syncMode
+	generation    uint64                // bumped on open and close; askClosedMsg routing compares it
+	responded     bool                  // set once just before close+reply; guards exactly-once delivery
+	skipHint      string                // muted note shown inside the dialog (e.g. provider warning)
+	committed     func(tools.AskAnswer) // coordinator-supplied reply callback
+	scroll        int                   // vertical page offset when the body is tall
+}
+
+// askPageAnswer is one page's recorded outcome inside a questionnaire.
+type askPageAnswer struct {
+	set    bool
+	answer tools.AskQuestionAnswer
+}
+
+// askDraft is a page's selection and typed text while it is not shown.
+type askDraft struct {
+	visited  bool
+	selected int
+	text     string
 }
 
 // rowCount counts selectable rows: every numbered choice plus the
@@ -144,7 +183,12 @@ func (m *ui) askVisible() bool {
 // question is dropped with a skipped reply so the model call resolves
 // instead of hanging.
 func (m *ui) openAskQuestion(rec tools.AskRequest, id, callID string, reply func(tools.AskAnswer)) {
-	if rec.Question == "" || reply == nil ||
+	pages := askClampPages(rec.Pages())
+	malformed := len(pages) == 0
+	for _, page := range pages {
+		malformed = malformed || page.Question == ""
+	}
+	if malformed || reply == nil ||
 		m.mode == modeSetup || m.pending != nil || m.keyModal.open || m.dialog.open || m.ask.pending {
 		m.entries = append(m.entries, entry{role: "Error", content: "Question dropped: another interaction is active or the call was malformed; no answer was sent."})
 		m.layoutWidth = 0
@@ -160,37 +204,117 @@ func (m *ui) openAskQuestion(rec tools.AskRequest, id, callID string, reply func
 	m.resetAgentInspection()
 	m.ask.generation++
 	m.ask = askState{
-		pending:    true,
-		id:         id,
-		callID:     callID,
-		question:   askTruncateBytes(rec.Question, askUserQuestionBytes),
-		options:    askClampOptions(rec.Options),
-		selected:   0,
-		generation: m.ask.generation,
-		skipHint:   askDefaultSkipHint,
-		committed:  reply,
+		pending:       true,
+		id:            id,
+		callID:        callID,
+		questionnaire: rec.IsQuestionnaire(),
+		pages:         pages,
+		answers:       make([]askPageAnswer, len(pages)),
+		drafts:        make([]askDraft, len(pages)),
+		generation:    m.ask.generation,
+		skipHint:      askDefaultSkipHint,
+		committed:     reply,
 	}
-	m.ask.syncMode()
-	m.entries = append(m.entries, entry{role: "Likha", content: "Question from the model:\n" + m.ask.question})
+	m.ask.loadPage(0)
+	// The "Question from the model:" marker is what resume reconciliation
+	// (reportUnansweredQuestions) looks for, so a questionnaire keeps it and
+	// lists every question beneath it.
+	content := "Question from the model:\n" + m.ask.question
+	if m.ask.questionnaire {
+		lines := make([]string, 0, len(pages))
+		for i, page := range pages {
+			lines = append(lines, fmt.Sprintf("%d. %s", i+1, page.Question))
+		}
+		content = "Question from the model:\n" + strings.Join(lines, "\n")
+	}
+	m.entries = append(m.entries, entry{role: "Likha", content: content})
 	m.jumpBottom()
 	m.layoutWidth = 0
 	m.persist()
 	m.status = "Question pending: answer, skip, or cancel"
 }
 
-// askClampOptions bounds the choices to the spec limits: at most eight
-// entries of 120 characters, with safe truncation as a backstop even
-// though the tool worker already validated the call.
-func askClampOptions(options []string) []string {
-	clamped := make([]string, 0, min(len(options), askUserMaxOptions))
-	for _, option := range options {
-		if len(clamped) == askUserMaxOptions {
+// askClampPages bounds a request's pages to the spec limits as a rendering
+// backstop: at most four questions, each question, option label, and
+// description clamped, and only the first recommended option kept.
+func askClampPages(pages []tools.AskQuestion) []tools.AskQuestion {
+	clamped := make([]tools.AskQuestion, 0, min(len(pages), askUserMaxQuestions))
+	for _, page := range pages {
+		if len(clamped) == askUserMaxQuestions {
 			break
 		}
-		clamped = append(clamped, askTruncateRunes(option, askUserOptionRunes))
+		out := tools.AskQuestion{Question: askTruncateBytes(page.Question, askUserQuestionBytes)}
+		recommended := false
+		for _, option := range page.Options {
+			if len(out.Options) == askUserMaxOptions {
+				break
+			}
+			out.Options = append(out.Options, tools.AskOption{
+				Label:       askTruncateRunes(option.Label, askUserOptionRunes),
+				Description: askTruncateRunes(option.Description, askUserDescriptionRunes),
+				Recommended: option.Recommended && !recommended,
+			})
+			recommended = recommended || option.Recommended
+		}
+		clamped = append(clamped, out)
 	}
 	return clamped
 }
+
+// askInitialRow is where a page's focus starts: its recommended option, or
+// the first row (the free-text row when there are no options).
+func askInitialRow(page tools.AskQuestion) int {
+	for i, option := range page.Options {
+		if option.Recommended {
+			return i
+		}
+	}
+	return 0
+}
+
+// loadPage makes page index the current page, restoring its draft when it
+// was shown before and its initial focus otherwise.
+func (a *askState) loadPage(index int) {
+	if index < 0 || index >= len(a.pages) {
+		return
+	}
+	page := a.pages[index]
+	a.page = index
+	a.question = page.Question
+	a.details = page.Options
+	a.options = make([]string, 0, len(page.Options))
+	for _, option := range page.Options {
+		a.options = append(a.options, option.Label)
+	}
+	a.selected, a.text, a.scroll = askInitialRow(page), "", 0
+	if index < len(a.drafts) && a.drafts[index].visited {
+		a.selected, a.text = a.drafts[index].selected, a.drafts[index].text
+	}
+	a.syncMode()
+}
+
+// saveDraft keeps the current page's selection and typed text.
+func (a *askState) saveDraft() {
+	if a.page < len(a.drafts) {
+		a.drafts[a.page] = askDraft{visited: true, selected: a.selected, text: a.text}
+	}
+}
+
+// nextUnanswered finds the next page without an answer after the current
+// one, wrapping around; -1 when every page is answered or skipped.
+func (a *askState) nextUnanswered() int {
+	for step := 1; step < len(a.pages); step++ {
+		index := (a.page + step) % len(a.pages)
+		if !a.answers[index].set {
+			return index
+		}
+	}
+	return -1
+}
+
+// multiPage reports whether the dialog pages between questions: only a
+// questionnaire of more than one question shows progress and ←/→.
+func (a *askState) multiPage() bool { return a.questionnaire && len(a.pages) > 1 }
 
 // askTruncateBytes cuts text at a rune boundary once limit bytes are
 // reached (the spec bounds are in bytes).
@@ -256,9 +380,14 @@ func (m *ui) answerAsk(note string, answer tools.AskAnswer) tea.Cmd {
 	m.persist()
 	m.ask.responded = true
 	m.closeAsk()
-	if answer.Skipped {
+	switch {
+	case answer.Skipped:
 		m.status = "Question skipped"
-	} else {
+	case len(answer.Answers) > 0 && askAllSkipped(answer.Answers):
+		m.status = "Questions skipped"
+	case len(answer.Answers) > 0:
+		m.status = "Answers sent"
+	default:
 		m.status = "Answer sent"
 	}
 	m.setLiveToolStatus(callID, "awaiting answer", "running")
@@ -272,6 +401,74 @@ func (m *ui) answerAsk(note string, answer tools.AskAnswer) tea.Cmd {
 	}
 	m.showActivity()
 	return m.activityTickCmd()
+}
+
+func askAllSkipped(answers []tools.AskQuestionAnswer) bool {
+	for _, answer := range answers {
+		if !answer.Skipped {
+			return false
+		}
+	}
+	return true
+}
+
+// recordAskPage stores the current questionnaire page's outcome, then moves
+// to the next unanswered page, or — when none is left — submits the whole
+// questionnaire through answerAsk, whose responded flag and close make the
+// submission exactly-once.
+func (m *ui) recordAskPage(answer tools.AskQuestionAnswer) tea.Cmd {
+	m.ask.answers[m.ask.page] = askPageAnswer{set: true, answer: answer}
+	m.ask.saveDraft()
+	if next := m.ask.nextUnanswered(); next >= 0 {
+		m.ask.loadPage(next)
+		m.status = fmt.Sprintf("Question %d of %d", next+1, len(m.ask.pages))
+		return nil
+	}
+	answers := make([]tools.AskQuestionAnswer, len(m.ask.pages))
+	notes := make([]string, len(m.ask.pages))
+	for i, page := range m.ask.pages {
+		recorded := m.ask.answers[i]
+		if !recorded.set || recorded.answer.Skipped {
+			answers[i] = tools.AskQuestionAnswer{Skipped: true}
+		} else {
+			answers[i] = recorded.answer
+		}
+		notes[i] = askAnswerNote(page.Question, answers[i])
+	}
+	return m.answerAsk(strings.Join(notes, "\n"), tools.AskAnswer{Answers: answers})
+}
+
+// askAnswerNote is one questionnaire line of the answer conversation event.
+// Every line keeps the single-question vocabulary ("ask answered (choice):",
+// "ask answered (text):", "question skipped") that resume reconciliation
+// recognizes, followed by the question it answers.
+func askAnswerNote(question string, answer tools.AskQuestionAnswer) string {
+	short := askTruncateRunes(strings.Join(strings.Fields(question), " "), 80)
+	if short != strings.Join(strings.Fields(question), " ") {
+		short += "…"
+	}
+	switch {
+	case answer.Skipped:
+		return "question skipped: " + short
+	case answer.Choice:
+		return "ask answered (choice): " + short + " → " + answer.Text
+	default:
+		return "ask answered (text): " + short + " → " + strings.Join(strings.Fields(answer.Text), " ")
+	}
+}
+
+// moveAskPage shows the neighbouring questionnaire page so an earlier (or
+// later) answer can be changed; the current page's draft is kept.
+func (m *ui) moveAskPage(delta int) {
+	if !m.ask.multiPage() {
+		return
+	}
+	next := max(0, min(len(m.ask.pages)-1, m.ask.page+delta))
+	if next == m.ask.page {
+		return
+	}
+	m.ask.saveDraft()
+	m.ask.loadPage(next)
 }
 
 // askInterruptedNote records an unanswered request as interrupted (FR-30):
@@ -332,6 +529,12 @@ func (m *ui) handleAskKey(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 		m.moveAskSelection(-1)
 	case "down":
 		m.moveAskSelection(1)
+	case "left":
+		// Free-text editing is end-anchored (no caret movement), so ←/→
+		// are free to page a questionnaire; the single form swallows them.
+		m.moveAskPage(-1)
+	case "right":
+		m.moveAskPage(1)
 	case "pgup", "ctrl+p":
 		m.ask.scroll -= max(1, m.height-10)
 		m.ask.scroll = max(0, m.ask.scroll)
@@ -355,15 +558,26 @@ func (m *ui) handleAskKey(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 				// An empty text answer is not an answer; nothing submits.
 				return true, nil
 			}
+			if m.ask.questionnaire {
+				return true, m.recordAskPage(tools.AskQuestionAnswer{Text: m.ask.text})
+			}
 			return true, m.answerAsk("ask answered (text): "+m.ask.text, tools.AskAnswer{Text: m.ask.text})
 		}
 		if m.ask.selected < 0 || m.ask.selected >= len(m.ask.options) {
 			return true, nil
 		}
 		chosen := m.ask.options[m.ask.selected]
+		if m.ask.questionnaire {
+			return true, m.recordAskPage(tools.AskQuestionAnswer{Text: chosen, Choice: true})
+		}
 		return true, m.answerAsk("ask answered (choice): "+chosen, tools.AskAnswer{Text: chosen})
 	case "ctrl+s":
-		// Skip is a refused/unanswered result, never an empty success.
+		// Skip is a refused/unanswered result, never an empty success. In
+		// a questionnaire it skips the current question only; skipping
+		// every question becomes the backend's all-skipped refusal.
+		if m.ask.questionnaire {
+			return true, m.recordAskPage(tools.AskQuestionAnswer{Skipped: true})
+		}
 		return true, m.answerAsk("question skipped", tools.AskAnswer{Skipped: true})
 	case "backspace", "ctrl+h":
 		if m.ask.textMode() {
@@ -416,6 +630,50 @@ func (m *ui) handleAskKey(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 type askLine struct {
 	text  string // unstyled; fit() runs at render time
 	style lipgloss.Style
+	// suffix (the Recommended tag) renders after text in its own style;
+	// the builder only sets it when text and suffix fit the inner width.
+	suffix      string
+	suffixStyle lipgloss.Style
+}
+
+// render fits the line to width with the suffix styled separately.
+func (l askLine) render(width int) string {
+	if l.suffix == "" {
+		return l.style.Render(fit(l.text, width))
+	}
+	used := runewidth.StringWidth(l.text) + runewidth.StringWidth(l.suffix)
+	if used > width {
+		return l.style.Render(fit(l.text+l.suffix, width))
+	}
+	return l.style.Render(l.text) + l.suffixStyle.Render(l.suffix) + l.style.Render(strings.Repeat(" ", width-used))
+}
+
+// askWrapGroups wraps a key hint at its double-space separated groups so a
+// binding never splits across lines; a group wider than width falls back
+// to character wrapping.
+func askWrapGroups(text string, width int) []string {
+	var lines []string
+	line := ""
+	for _, group := range strings.Split(text, "  ") {
+		if group == "" {
+			continue
+		}
+		switch {
+		case line == "":
+			line = group
+		case runewidth.StringWidth(line)+2+runewidth.StringWidth(group) <= width:
+			line += "  " + group
+		default:
+			lines = append(lines, line)
+			line = group
+		}
+		if runewidth.StringWidth(line) > width {
+			wrapped := wrap(line, width)
+			lines = append(lines, wrapped[:len(wrapped)-1]...)
+			line = wrapped[len(wrapped)-1]
+		}
+	}
+	return append(lines, line)
 }
 
 // askView renders the pending question as the shared centered modal: the
@@ -437,6 +695,14 @@ func (m *ui) askView() string {
 	width, height := m.width, m.height
 
 	title := "Model question"
+	hint := askHint
+	if m.ask.multiPage() {
+		// The progress marker leads the title's suffixes so a narrow
+		// terminal clips the line-range note first, never the progress.
+		title += fmt.Sprintf(" · %d of %d", m.ask.page+1, len(m.ask.pages))
+		hint = askQuestionnaireHint
+	}
+	tag := "  " + askRecommendedTag
 	source := "ask_user"
 	if m.ask.callID != "" {
 		source += " · call " + toolShortText(m.ask.callID, 64)
@@ -447,20 +713,46 @@ func (m *ui) askView() string {
 	// room. The question then wraps to the final inner width.
 	candidate := runewidth.StringWidth(title) + 2
 	candidate = max(candidate, runewidth.StringWidth(source)+2)
-	candidate = max(candidate, runewidth.StringWidth(askHint)+2)
+	candidate = max(candidate, runewidth.StringWidth(hint)+2)
 	if m.ask.skipHint != "" {
 		candidate = max(candidate, runewidth.StringWidth(m.ask.skipHint)+8)
 	}
 	for i, option := range m.ask.options {
 		w := runewidth.StringWidth(fmt.Sprintf("%d. %s", i+1, option)) + 6
+		if i < len(m.ask.details) && m.ask.details[i].Recommended {
+			w += runewidth.StringWidth(tag)
+		}
 		candidate = max(candidate, min(w, width-8))
+		if i < len(m.ask.details) && m.ask.details[i].Description != "" {
+			candidate = max(candidate, min(runewidth.StringWidth(m.ask.details[i].Description)+9, width-8))
+		}
 	}
 	boxWidth := max(24, min(width-4, candidate+4))
 	inner := boxWidth - 4
 
+	// The footer — blank, provider note, key hint — is pinned and fully
+	// counted (the note and hint wrap on narrow terminals), so a tall body
+	// pages instead of pushing the controls off screen.
+	var footer []string
+	footer = append(footer, m.theme.Base.Render(fit("", inner)))
+	if m.ask.skipHint != "" {
+		for _, line := range wrap(m.ask.skipHint, inner) {
+			footer = append(footer, withBase(m.theme.Muted, m.theme.Base).Render(fit(line, inner)))
+		}
+	} else {
+		footer = append(footer, m.theme.Base.Render(fit("", inner)))
+	}
+	hintLines := wrap(hint, inner)
+	if m.ask.multiPage() {
+		hintLines = askWrapGroups(hint, inner)
+	}
+	for _, line := range hintLines {
+		footer = append(footer, withBase(m.theme.Help, m.theme.Base).Render(fit(line, inner)))
+	}
+
 	// Pinned budget inside the borders: title, source, blank above the
-	// body; blank plus hint below. The body window gets what remains.
-	pinnedTop, pinnedBottom := 3, 2
+	// body; the footer below. The body window gets what remains.
+	pinnedTop, pinnedBottom := 3, len(footer)
 	bodyWindow := max(1, height-2-pinnedTop-pinnedBottom)
 
 	// Build the paged body: question, choices, free-text row, typed text.
@@ -472,12 +764,13 @@ func (m *ui) askView() string {
 			body = append(body, askLine{text: line, style: style})
 		}
 	}
-	addSelection := func(prefix, text string, style, contStyle lipgloss.Style, row int, anchorLast bool) {
+	addSelection := func(prefix, text string, style, contStyle lipgloss.Style, row int, anchorLast bool, tagged bool) {
 		start := len(body)
 		// Wrap so both the prefixed first line and the "  "-prefixed
 		// continuation stay inside the box: the shared width subtracts the
 		// widest prefix, then fit() pads but never trims (view.go's fit).
-		lines := wrap(text, max(1, inner-max(runewidth.StringWidth(prefix), 2)))
+		avail := max(1, inner-max(runewidth.StringWidth(prefix), 2))
+		lines := wrap(text, avail)
 		for i, line := range lines {
 			styled := style
 			if i > 0 {
@@ -489,6 +782,17 @@ func (m *ui) askView() string {
 			}
 			body = append(body, askLine{text: lead + line, style: styled})
 		}
+		if tagged {
+			// The tag never splits: it joins the label's last line when it
+			// fits there and takes its own indented line otherwise.
+			last := &body[len(body)-1]
+			tagStyle := withBase(m.theme.Accent, m.theme.Base).Bold(true)
+			if runewidth.StringWidth(lines[len(lines)-1])+runewidth.StringWidth(tag) <= avail {
+				last.suffix, last.suffixStyle = tag, tagStyle
+			} else {
+				body = append(body, askLine{text: strings.Repeat(" ", runewidth.StringWidth(prefix)), style: contStyle, suffix: askRecommendedTag, suffixStyle: tagStyle})
+			}
+		}
 		if row == m.ask.selected {
 			if anchorLast {
 				anchor = len(body) - 1
@@ -497,14 +801,38 @@ func (m *ui) askView() string {
 			}
 		}
 	}
+	muted := withBase(m.theme.Muted, m.theme.Base)
 	add(m.ask.question, plain)
+	if m.ask.questionnaire && m.ask.page < len(m.ask.answers) && m.ask.answers[m.ask.page].set {
+		// Revisited page: show what is recorded so a change is deliberate.
+		recorded := m.ask.answers[m.ask.page].answer
+		if recorded.Skipped {
+			add("Current answer: skipped", muted)
+		} else {
+			add("Current answer: "+strings.Join(strings.Fields(recorded.Text), " "), muted)
+		}
+	}
 	add("", m.theme.Base)
 	for i, option := range m.ask.options {
+		prefix := fmt.Sprintf("  %d. ", i+1)
+		style := m.theme.Base
 		if i == m.ask.selected {
-			addSelection(fmt.Sprintf("> %d. ", i+1), option, withBase(m.theme.Selected, m.theme.Base), withBase(m.theme.Selected, m.theme.Base), i, false)
-			continue
+			prefix = fmt.Sprintf("> %d. ", i+1)
+			style = withBase(m.theme.Selected, m.theme.Base)
 		}
-		addSelection(fmt.Sprintf("  %d. ", i+1), option, m.theme.Base, m.theme.Base, i, false)
+		var detail tools.AskOption
+		if i < len(m.ask.details) {
+			detail = m.ask.details[i]
+		}
+		addSelection(prefix, option, style, style, i, false, detail.Recommended)
+		if detail.Description != "" {
+			// Descriptions render muted, indented under the label, and
+			// wrap on narrow terminals.
+			indent := runewidth.StringWidth(prefix)
+			for _, line := range wrap(detail.Description, max(1, inner-indent)) {
+				body = append(body, askLine{text: strings.Repeat(" ", indent) + line, style: muted})
+			}
+		}
 	}
 	if m.ask.textMode() {
 		// Typed answer rendering: prompt line plus wrapped continuation,
@@ -513,9 +841,9 @@ func (m *ui) askView() string {
 		if m.caretOn {
 			caret = "▌"
 		}
-		addSelection("> ", m.ask.text+caret, withBase(m.theme.Selected, m.theme.Base), m.theme.Base, m.ask.freeRow(), true)
+		addSelection("> ", m.ask.text+caret, withBase(m.theme.Selected, m.theme.Base), m.theme.Base, m.ask.freeRow(), true, false)
 	} else {
-		addSelection("  ", "Free text", m.theme.Base, m.theme.Base, m.ask.freeRow(), false)
+		addSelection("  ", "Free text", m.theme.Base, m.theme.Base, m.ask.freeRow(), false, false)
 	}
 
 	// Clamp the page offset, then keep the selected row visible. When the
@@ -546,19 +874,9 @@ func (m *ui) askView() string {
 		rendered = append(rendered, m.theme.Muted.Render(fit("The question is empty.", inner)))
 	}
 	for i := start; i < end; i++ {
-		rendered = append(rendered, body[i].style.Render(fit(body[i].text, inner)))
+		rendered = append(rendered, body[i].render(inner))
 	}
-	rendered = append(rendered, m.theme.Base.Render(fit("", inner)))
-	if m.ask.skipHint != "" {
-		for _, line := range wrap(m.ask.skipHint, inner) {
-			rendered = append(rendered, withBase(m.theme.Muted, m.theme.Base).Render(fit(line, inner)))
-		}
-	} else {
-		rendered = append(rendered, m.theme.Base.Render(fit("", inner)))
-	}
-	for _, line := range wrap(askHint, inner) {
-		rendered = append(rendered, withBase(m.theme.Help, m.theme.Base).Render(fit(line, inner)))
-	}
+	rendered = append(rendered, footer...)
 
 	boxHeight := len(rendered)
 	top := max(0, (height-boxHeight-2)/2)

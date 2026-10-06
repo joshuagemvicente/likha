@@ -310,7 +310,20 @@ func taskCallActivity(name, argumentsJSON, content string, source tools.Source) 
 	case "task":
 		return activity("Task", taskNonEmpty(text("description"), text("agent")))
 	case "ask_user":
-		return activity("Ask", text("question"))
+		if question := text("question"); question != "" {
+			return activity("Ask", question)
+		}
+		// Questionnaire form: one question names itself, more a count.
+		var questions []struct {
+			Question string `json:"question"`
+		}
+		if raw, ok := fields["questions"]; ok && json.Unmarshal(raw, &questions) == nil && len(questions) > 0 {
+			if len(questions) == 1 {
+				return activity("Ask", flattenRow(questions[0].Question))
+			}
+			return activity("Ask", taskCount(len(questions), "question", "questions"))
+		}
+		return activity("Ask", "")
 	case "plan_update":
 		var steps []json.RawMessage
 		if raw, ok := fields["steps"]; ok && json.Unmarshal(raw, &steps) == nil {

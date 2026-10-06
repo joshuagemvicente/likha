@@ -189,7 +189,17 @@ func toolDisplayParts(name, argumentsJSON string, source tools.Source, ellipsis 
 			}
 			return display, toolHeaderText(description, ellipsis)
 		case "ask_user":
-			return display, toolHeaderText(text("question"), ellipsis)
+			if question := text("question"); question != "" {
+				return display, toolHeaderText(question, ellipsis)
+			}
+			// Questionnaire form: one question shows itself, more show a
+			// count; each answer lists under the item once it settles.
+			if questions := toolAskQuestions(argumentsJSON); len(questions) == 1 {
+				return display, toolHeaderText(questions[0], ellipsis)
+			} else if len(questions) > 1 {
+				return display, toolCount(len(questions), "question", "questions")
+			}
+			return display, ""
 		case "plan_update":
 			for _, field := range fields {
 				if field.key == "steps" {
@@ -520,6 +530,9 @@ func toolSuccessSummary(record session.ToolRecord, ellipsis string, limit int) (
 		if json.Unmarshal([]byte(content), &answer) == nil && answer.Answer != nil {
 			return "Answered: " + toolHeaderText(*answer.Answer, ellipsis), nil, 0
 		}
+		if summary, preview, ok := toolAskQuestionnaireSummary(record, ellipsis); ok {
+			return summary, preview, 0
+		}
 	case "plan_update":
 		var plan struct {
 			Cleared   bool `json:"cleared"`
@@ -543,6 +556,79 @@ func toolSuccessSummary(record session.ToolRecord, ellipsis string, limit int) (
 		}
 	}
 	return toolGenericSummary(content, limit)
+}
+
+// toolAskQuestions returns the questions of an ask_user call that used the
+// questionnaire form, or nil.
+func toolAskQuestions(argumentsJSON string) []string {
+	var arguments struct {
+		Questions []struct {
+			Question string `json:"question"`
+		} `json:"questions"`
+	}
+	if json.Unmarshal([]byte(argumentsJSON), &arguments) != nil {
+		return nil
+	}
+	questions := make([]string, 0, len(arguments.Questions))
+	for _, question := range arguments.Questions {
+		questions = append(questions, question.Question)
+	}
+	return questions
+}
+
+// toolAskQuestionnaireSummary renders a questionnaire result
+// ({"answers":[…]}, one entry per question in request order) as a count
+// plus one compact "question → answer" row per question, "skipped" for a
+// skipped one. Entries may carry their own question text; otherwise it
+// comes from the call's arguments. Every row shows, never only a preview:
+// a questionnaire holds at most four questions.
+func toolAskQuestionnaireSummary(record session.ToolRecord, ellipsis string) (string, []string, bool) {
+	var result struct {
+		Answers []json.RawMessage `json:"answers"`
+	}
+	if json.Unmarshal([]byte(record.Content), &result) != nil || result.Answers == nil {
+		return "", nil, false
+	}
+	questions := toolAskQuestions(record.Arguments)
+	rows := make([]string, 0, len(result.Answers))
+	answered := 0
+	for i, raw := range result.Answers {
+		var item struct {
+			Question string  `json:"question"`
+			Answer   *string `json:"answer"`
+			Text     *string `json:"text"`
+			Skipped  bool    `json:"skipped"`
+		}
+		if json.Unmarshal(raw, &item) != nil {
+			var plain string
+			if json.Unmarshal(raw, &plain) != nil {
+				continue
+			}
+			item.Answer = &plain
+		}
+		question := item.Question
+		if question == "" && i < len(questions) {
+			question = questions[i]
+		}
+		if question == "" {
+			question = fmt.Sprintf("Question %d", i+1)
+		}
+		answer := item.Answer
+		if answer == nil {
+			answer = item.Text
+		}
+		value := "skipped"
+		if !item.Skipped && answer != nil && *answer != "" {
+			value = toolHeaderText(*answer, ellipsis)
+			answered++
+		}
+		rows = append(rows, toolClipCells(toolHeaderText(question, ellipsis), toolHeaderValueCells, ellipsis)+" → "+value)
+	}
+	total := len(result.Answers)
+	if answered == total {
+		return "Answered " + toolCount(total, "question", "questions"), rows, true
+	}
+	return fmt.Sprintf("Answered %d of %d questions", answered, total), rows, true
 }
 
 func toolGenericSummary(content string, limit int) (string, []string, int) {

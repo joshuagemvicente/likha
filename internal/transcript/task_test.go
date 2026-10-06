@@ -138,6 +138,8 @@ func TestLiveLineToolVocabulary(t *testing.T) {
 		{"task", taskTestTool("task", `{"agent":"explore","description":"Map routes","prompt":"..."}`), "Task Map routes"},
 		{"task agent fallback", taskTestTool("task", `{"agent":"explore"}`), "Task explore"},
 		{"ask", taskTestTool("ask_user", `{"question":"Which DB?"}`), "Ask Which DB?"},
+		{"ask questionnaire", taskTestTool("ask_user", `{"questions":[{"question":"Which DB?"},{"question":"Which port?"}]}`), "Ask 2 questions"},
+		{"ask questionnaire one", taskTestTool("ask_user", `{"questions":[{"question":"Which DB?","options":[{"label":"Postgres","recommended":true}]}]}`), "Ask Which DB?"},
 		{"plan", taskTestTool("plan_update", `{"steps":[{"text":"a"},{"text":"b"}]}`), "Plan 2 steps"},
 		{"plan one", taskTestTool("plan_update", `{"steps":[{"text":"a"}]}`), "Plan 1 step"},
 		{"skill", taskTestTool("skill", `{"name":"deploy"}`), "Skill deploy"},

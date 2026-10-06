@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,6 +77,12 @@ const askE2ECallID = "ask_call_1"
 // round2; started is closed when round 2's request arrives.
 func askE2EServer(t *testing.T, round2 func(w http.ResponseWriter, r *http.Request)) (*model.Client, <-chan struct{}) {
 	t.Helper()
+	return askE2EServerArgs(t, `{"question":"What should the audit focus on?","options":["Comprehensive","Security only"]}`, round2)
+}
+
+// askE2EServerArgs is askE2EServer with the round 1 ask_user arguments given.
+func askE2EServerArgs(t *testing.T, arguments string, round2 func(w http.ResponseWriter, r *http.Request)) (*model.Client, <-chan struct{}) {
+	t.Helper()
 	started := make(chan struct{})
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +93,7 @@ func askE2EServer(t *testing.T, round2 func(w http.ResponseWriter, r *http.Reque
 		if calls.Add(1) == 1 {
 			call := map[string]any{"index": 0, "id": askE2ECallID, "type": "function", "function": map[string]any{
 				"name":      "ask_user",
-				"arguments": `{"question":"What should the audit focus on?","options":["Comprehensive","Security only"]}`,
+				"arguments": arguments,
 			}}
 			chunk := map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{call}}, "finish_reason": "tool_calls"}}}
 			data, _ := json.Marshal(chunk)
@@ -144,6 +151,61 @@ func TestAskE2EAnswerResumesRun(t *testing.T) {
 		t.Fatalf("ask item summary = %q (status %q), want Answered: Comprehensive", summary, record.Status)
 	}
 	if !permE2EhasAssistant(m, "Audit finished.") {
+		t.Fatalf("round 2 text never reached the transcript: %+v", m.entries)
+	}
+}
+
+// A questionnaire call runs through the real ask_user tool: the recommended
+// option starts focused, a skipped page is reported, and round 2 receives one
+// per-question result against the original call.
+func TestAskE2EQuestionnaireAnswersReachModel(t *testing.T) {
+	args := `{"questions":[` +
+		`{"question":"Install method?","options":[{"label":"Homebrew"},{"label":"Official script","description":"Upstream installer","recommended":true}]},` +
+		`{"question":"Default Node version?","options":[{"label":"LTS","recommended":true},{"label":"Latest"}]}]}`
+	bodies := make(chan string, 1)
+	client, _ := askE2EServerArgs(t, args, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies <- string(body)
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Plan ready.\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	})
+	m := steerE2EnewUI(t, "/sample", nil, client)
+	d := newStrictDriver(t, m)
+	sendRunes(m, "install nvm")
+	d.key(tea.KeyMsg{Type: tea.KeyEnter})
+
+	d.until(func() bool { return m.ask.pending }, "the questionnaire to open")
+	d.key(tea.KeyMsg{Type: tea.KeyEnter}) // page 1: the focused recommended option
+	d.key(tea.KeyMsg{Type: tea.KeyCtrlS}) // page 2: skip, which submits
+	d.until(func() bool { return !m.working }, "the run to finish after the questionnaire")
+
+	var body string
+	select {
+	case body = <-bodies:
+	default:
+		t.Fatal("round 2 request never arrived")
+	}
+	var request struct {
+		Messages []struct {
+			Role       string `json:"role"`
+			Content    any    `json:"content"`
+			ToolCallID string `json:"tool_call_id"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(body), &request); err != nil {
+		t.Fatalf("round 2 body: %v", err)
+	}
+	var result string
+	for _, msg := range request.Messages {
+		if msg.Role == "tool" && msg.ToolCallID == askE2ECallID {
+			result = fmt.Sprint(msg.Content)
+		}
+	}
+	for _, want := range []string{`"answers"`, `"answer":"Official script"`, `"choice":true`, `"question":"Default Node version?","skipped":true`} {
+		if !strings.Contains(result, want) {
+			t.Fatalf("tool result for %s missing %s:\n%s", askE2ECallID, want, result)
+		}
+	}
+	if !permE2EhasAssistant(m, "Plan ready.") {
 		t.Fatalf("round 2 text never reached the transcript: %+v", m.entries)
 	}
 }
