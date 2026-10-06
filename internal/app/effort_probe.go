@@ -196,6 +196,7 @@ func parseProbeLevels(raw string) ([]string, error) {
 
 // probeClient builds the client as a normal run does and reads the model's
 // live levels from the unbilled model list when the provider publishes them.
+// It never contacts an overridden endpoint before consent.
 func probeClient(p model.Provider, res providers.ResolvedProvider, modelID, stateDir string, stderr io.Writer) (*model.Client, []string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), probeListTimeout)
 	defer cancel()
@@ -224,6 +225,12 @@ func probeClient(p model.Provider, res providers.ResolvedProvider, modelID, stat
 		}
 		client.SetSessionHeader(p.SessionHeader)
 		client.SetSession(id)
+	}
+	if effortprobe.EndpointOverridden(p, res.Endpoint) {
+		// The override, possibly an ambient LIKHA_ENDPOINT, would receive the
+		// key before the plan shows it; the first request waits for consent.
+		fmt.Fprintln(stderr, "likha: endpoint override: the model list is not fetched before you confirm; using the bundled catalog's levels")
+		return client, nil, nil
 	}
 	details, err := listModelDetailsFunc(ctx, res.Endpoint, res.Key)
 	if err != nil {

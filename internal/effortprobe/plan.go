@@ -275,8 +275,14 @@ func planEndpoint(p model.Provider, endpoint string) (string, bool, error) {
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return "", false, fmt.Errorf("probe endpoint %q is not an absolute URL", endpoint)
 	}
-	override := strings.TrimRight(endpoint, "/") != strings.TrimRight(p.BaseURL, "/")
-	return u.Scheme + "://" + u.Host, override, nil
+	return u.Scheme + "://" + u.Host, EndpointOverridden(p, endpoint), nil
+}
+
+// EndpointOverridden reports an endpoint that is not the provider's own
+// base URL (decision 16). An empty endpoint means the provider's own.
+func EndpointOverridden(p model.Provider, endpoint string) bool {
+	endpoint = strings.TrimSpace(endpoint)
+	return endpoint != "" && strings.TrimRight(endpoint, "/") != strings.TrimRight(p.BaseURL, "/")
 }
 
 func nonEmpty(values []string) []string {

@@ -24,6 +24,7 @@ const probeTestKey = "test-key-app-6b0d27f9c3e1"
 type probeServer struct {
 	*httptest.Server
 	posts  atomic.Int32
+	gets   atomic.Int32
 	status int
 }
 
@@ -41,6 +42,7 @@ var probeServerTokens = map[string]int{"": 900, "none": 0, "low": 200, "medium":
 
 func (s *probeServer) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet && r.URL.Path == "/v1/models" {
+		s.gets.Add(1)
 		fmt.Fprint(w, `{"object":"list","data":[{"id":"gpt-5.5"}]}`)
 		return
 	}
@@ -288,5 +290,43 @@ func TestProbeNoLevelsExitsBeforeAnyRequest(t *testing.T) {
 	}
 	if server.posts.Load() != 0 || !strings.Contains(stderr.String(), "some-model publishes no effort levels on dialagram; nothing to probe") {
 		t.Fatalf("POSTs = %d, stderr = %q", server.posts.Load(), stderr.String())
+	}
+}
+
+// An endpoint override, including an ambient LIKHA_ENDPOINT, must not
+// receive the credential before the plan has shown the override and the
+// user has confirmed: the unbilled model-list GET is skipped there.
+func TestProbeEndpointOverrideGetsNothingBeforeConsent(t *testing.T) {
+	cases := []struct {
+		name string
+		flag bool // --endpoint instead of LIKHA_ENDPOINT
+	}{
+		{"LIKHA_ENDPOINT", false},
+		{"--endpoint", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			probeEnv(t)
+			server := newProbeServer(t, 0)
+			args := []string{"--probe-effort", "--provider", "openai", "--model", "gpt-5.5", "--api-key", probeTestKey}
+			if tc.flag {
+				args = append(args, "--endpoint", server.endpoint())
+			} else {
+				t.Setenv("LIKHA_ENDPOINT", server.endpoint())
+			}
+			var stdout, stderr bytes.Buffer
+			if code := Run(args, &stdout, &stderr); code != 2 {
+				t.Fatalf("exit = %d, want 2 (no --yes, no terminal); stderr = %s", code, stderr.String())
+			}
+			if gets, posts := server.gets.Load(), server.posts.Load(); gets != 0 || posts != 0 {
+				t.Fatalf("the override host got %d GETs and %d POSTs before consent", gets, posts)
+			}
+			if !strings.Contains(stderr.String(), "endpoint override: the model list is not fetched before you confirm") {
+				t.Fatalf("stderr = %q", stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "(endpoint override)") || !strings.Contains(stdout.String(), "Levels (catalog)") {
+				t.Fatalf("plan = %s", stdout.String())
+			}
+		})
 	}
 }

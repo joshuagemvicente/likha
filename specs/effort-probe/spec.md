@@ -119,7 +119,10 @@ Each was an open choice; the recommended option was taken.
    the plan, the caps and the estimated cost. It sends nothing until the
    user passes `--yes` or answers `y` at an interactive prompt. Listing
    models (an unbilled `GET /models`) may happen before consent, to learn
-   the levels.
+   the levels, but only from the provider's own endpoint: an endpoint
+   override (decision 16), which may come from an ambient
+   `LIKHA_ENDPOINT`, receives nothing, and so no credential, before
+   consent.
 10. **No retries.** Each planned request is sent once. A rate limit, server
     error, timeout or dropped stream makes that row inconclusive. A 401 or
     403 stops the run. The automatic retries of FR-36 are turned off for the
@@ -176,7 +179,8 @@ Each was an open choice; the recommended option was taken.
    ChatGPT or on Claude's native route, which have one shape.
 4. The levels come from the same place as in `/models`: the provider's live
    model list when it publishes them, else the bundled catalog, matched on
-   the exact provider and model. `--probe-levels` replaces the list; its
+   the exact provider and model. With an endpoint override the live list is
+   not fetched before consent (decision 9), so the catalog supplies them. `--probe-levels` replaces the list; its
    names follow the catalog's level rules (lower case, no spaces, no
    repeats, not `default`) and may not be `likha-probe-invalid`. A model
    with no levels and no `--probe-levels` exits 2 with
