@@ -30,12 +30,14 @@ rules in [specs/README.md](../README.md).
 
 - [ ] A resumed session shows the chunked reply's reasoning muted and its
       answer as assistant text.
-- [ ] Requests are unchanged. Mistral thinking is not sent back until
-      reasoning-replay lands.
-- [ ] After reasoning-replay lands (M2), a later request to the same
+- [ ] Requests to every provider without Mistral replay are unchanged.
+- [ ] With the `mistral` row's replay on (T10), a later request to the same
       Mistral endpoint and model carries exactly one leading thinking chunk
       before the answer text. Requests to any other endpoint or model carry
       none.
+- [ ] Mistral rejecting a request that carried thinking shows the
+      `/compact` hint once, and `/compact` and session naming send no
+      Mistral thinking.
 
 ## Effort matrix
 

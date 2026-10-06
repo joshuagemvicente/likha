@@ -355,7 +355,10 @@ func (m *ui) agentDetailLines(record explore.Record) []toolInspectionLine {
 			add("Tool call: "+message.ToolCallID, m.theme.Muted)
 		}
 		if message.Reasoning != "" {
-			add("Saved reasoning (display only; never sent to the provider)", m.theme.Muted)
+			// Not "never sent": DeepSeek and Mistral children send their own
+			// reasoning back within their run (FR-39); this saved copy is
+			// display only and goes nowhere.
+			add("Saved reasoning (display copy; a provider that needs reasoning back got the child's own copy during its run)", m.theme.Muted)
 			add(message.Reasoning, m.theme.Muted)
 		}
 		if index, found := resultByCall[message.ToolCallID]; found && message.Role == "tool" {

@@ -29,9 +29,10 @@ const (
 	ReplayAnthropicBlocks
 	// ReplayThinkingChunk sends Mistral thinking back as one leading
 	// "thinking" chunk inside a list-shaped content (specs/chunked-content
-	// M2). The mistral row stays off until FR-39's rejection hint exists
-	// (chunked-content T10), since a rejected replay would repeat on every
-	// later turn with no way out named.
+	// M2), only to the endpoint and model that issued it. The mistral row
+	// enables it now that a 400 on replayed thinking names /compact
+	// (chunked-content T10); until then a rejected replay would have
+	// repeated on every later turn with no way out named.
 	ReplayThinkingChunk
 )
 
@@ -197,10 +198,12 @@ func (c *Client) ReplaySource() ReplaySource {
 // WithoutReplay returns a client that captures and sends no replay state, for
 // tool-less background requests (compaction, session naming). Their bodies
 // match a provider without replay: DeepSeek needs reasoning_content only
-// when tools are sent, and the request's closing user prompt starts a new
-// Gemini turn, which Google does not validate. Sending state there would
-// only let the provider reject the very request meant to recover from a
-// rejection (spec decision 8). A client without replay is returned as is.
+// when tools are sent, the request's closing user prompt starts a new Gemini
+// turn, which Google does not validate, and Mistral documents no error for
+// history without thinking chunks, so its messages go as plain strings.
+// Sending state there would only let the provider reject the very request
+// meant to recover from a rejection (spec decision 8). A client without
+// replay is returned as is.
 func (c *Client) WithoutReplay() (*Client, error) {
 	if c == nil || c.replayWire == ReplayNone {
 		return c, nil

@@ -2,10 +2,10 @@
 
 **Status:** implemented (local) 2026-10-06 — M1 (parsing) and M2's
 Mistral thinking capture and wire encoding landed; automated suite green.
-The `mistral` row's replay flag stays off until reasoning-replay T12 lands
-FR-39's rejection hint (tasks T10), so no request carries Mistral thinking
-yet. Live Mistral probe (tasks T9) outstanding, so nothing claims Mistral
-works. Decisions recorded
+On 2026-10-07 (tasks T10) the `mistral` row's replay flag was turned on,
+now that FR-39's rejection hint exists: requests to the same Mistral
+endpoint and model carry each earlier reply's thinking. Live Mistral probe
+(tasks T9) outstanding, so nothing claims Mistral works. Decisions recorded
 2026-10-06 (user delegated defaults). No new functional requirement: this is
 conformance to [v1-spec FR-03](../v1-spec.md) (responses stream, and
 assistant text is distinguished from other output) and FR-15 (thinking-model
@@ -151,6 +151,10 @@ Out of scope:
    [reasoning-replay](../reasoning-replay/spec.md) T12 lands FR-39's
    rejection hint, so a 400 against replayed thinking names `/compact`
    instead of repeating as a bare error on every later turn (tasks T10).
+   *Amended 2026-10-07 (T10 landed):* the flag is on. Compaction and
+   session naming send no Mistral thinking ([reasoning-replay](../reasoning-replay/spec.md)
+   decision 8 as amended), so `/compact` still works after Mistral rejects
+   the replayed shape.
 9. **No new FR.** The feature makes an existing stream shape conform to
    FR-03 and FR-15. It adds no command and no setting. Its one new message,
    the error for a reply made only of unshowable content, is an ordinary
@@ -202,10 +206,14 @@ Out of scope:
 
 ### What is sent
 
-11. Requests are byte-identical to requests before this feature. Assistant
-    messages are still sent with string content, and Mistral thinking is
-    not sent back until [reasoning-replay](../reasoning-replay/spec.md)
-    lands.
+11. Requests are byte-identical to requests before this feature, except
+    on the `mistral` row since T10 (2026-10-07): there an earlier assistant
+    message whose reply held thinking, sent to the same endpoint and model,
+    carries one leading `thinking` chunk followed by its answer text as a
+    `text` chunk (decision 8, FR-39). Every other assistant message, every
+    other provider and Mistral's compaction and naming requests still send
+    string content. A 400 on a request carrying Mistral thinking shows the
+    `/compact` hint.
 
 ### Effort matrix
 
@@ -237,7 +245,11 @@ Out of scope:
   `null` or absent `thinking`, add nothing and do not fail the turn.
 - Every existing string-content stream test passes unchanged, and request
   bodies are byte-identical, including for a history that holds a reply
-  parsed from chunks.
+  parsed from chunks, on every provider row without Mistral replay.
+- On the `mistral` row (T10), the next request to the same endpoint and
+  model carries that reply's thinking as one leading thinking chunk; a 400
+  on it shows the `/compact` hint once; compaction and session naming
+  requests carry no thinking.
 - Two `thinking` chunks in separate deltas give one reasoning string that
   equals their concatenation.
 - Tool calls streamed after list-shaped thinking are returned complete,

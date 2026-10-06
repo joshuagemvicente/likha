@@ -122,7 +122,12 @@ Out of scope:
    way out of a rejection failed the same way and the session was stuck.
    Without replay state, a 400 on these requests is a plain provider error
    with no `/compact` hint (rule 12). claude-native defines its own
-   tool-less shape (its decision 6).
+   tool-less shape (its decision 6). *Amended 2026-10-07 by
+   [chunked-content](../chunked-content/spec.md) T10:* the same holds for
+   Mistral thinking chunks. Mistral documents no error for a history
+   without them, so compaction and session naming send Mistral messages as
+   plain string content, and `/compact` still works after Mistral rejected
+   the replayed shape.
 9. **Every completed response on an enabled provider is marked with its
    issuer, even when it carried no state.** Reason: it tells "this model
    issued nothing" (Gemini 2.5, a non-thinking turn) apart from "another
