@@ -54,8 +54,8 @@ var Providers = []Provider{
 	{Name: "mistral", DisplayName: "Mistral AI", BaseURL: "https://api.mistral.ai/v1", KeyEnv: "LIKHA_MISTRAL_API_KEY", Hosted: true},
 	{Name: "cerebras", DisplayName: "Cerebras", BaseURL: "https://api.cerebras.ai/v1", KeyEnv: "LIKHA_CEREBRAS_API_KEY", Hosted: true},
 	{Name: "claude", DisplayName: "Anthropic Claude", BaseURL: "https://api.anthropic.com/v1", KeyEnv: "LIKHA_CLAUDE_API_KEY", DefaultModel: "claude-opus-5-5", Hosted: true, EffortNote: "Anthropic's OpenAI-compatible endpoint ignores effort"},
-	{Name: "deepseek", DisplayName: "DeepSeek", BaseURL: "https://api.deepseek.com/v1", KeyEnv: "LIKHA_DEEPSEEK_API_KEY", DefaultModel: "deepseek-flash", Hosted: true},
-	{Name: "gemini", DisplayName: "Google Gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", KeyEnv: "LIKHA_GEMINI_API_KEY", DefaultModel: "gemini-2.5-flash", Hosted: true},
+	{Name: "deepseek", DisplayName: "DeepSeek", BaseURL: "https://api.deepseek.com/v1", KeyEnv: "LIKHA_DEEPSEEK_API_KEY", DefaultModel: "deepseek-flash", Hosted: true, Replay: ReplayReasoningContent},
+	{Name: "gemini", DisplayName: "Google Gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", KeyEnv: "LIKHA_GEMINI_API_KEY", DefaultModel: "gemini-2.5-flash", Hosted: true, Replay: ReplayThoughtSignature},
 }
 
 // ChatGPT's official Sign in with ChatGPT public-client endpoints.

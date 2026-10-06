@@ -182,12 +182,20 @@ func (c *Client) replayFor(m Message) *ReasoningReplay {
 	return m.Replay
 }
 
-// replaySentText returns the replay text a request on wire carries for an
-// assistant message whose state passed replayFor. Anthropic blocks are left
-// to the native Claude client, whose blocks replace the message's content
-// and tool calls rather than adding to them.
-func replaySentText(wire ReplayWire, replay *ReasoningReplay, m Message) []string {
-	switch wire {
+// replaySentText returns the replay text a request carries for m, at a
+// current-turn position or not: the state that passed replayFor, or Gemini's
+// skip value. Anthropic blocks are left to the native Claude client, whose
+// blocks replace the message's content and tool calls rather than adding to
+// them.
+func (c *Client) replaySentText(m Message, currentTurn bool) []string {
+	if c.needsSkipSignature(m, currentTurn) {
+		return []string{skipThoughtSignature}
+	}
+	replay := c.replayFor(m)
+	if replay == nil {
+		return nil
+	}
+	switch c.replayWire {
 	case ReplayReasoningContent:
 		if replay.ReasoningContent != nil {
 			return []string{*replay.ReasoningContent}

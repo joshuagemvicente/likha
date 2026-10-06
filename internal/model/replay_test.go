@@ -351,27 +351,13 @@ func TestRequestBodyUnchangedByReplayState(t *testing.T) {
 		`{"role":"assistant","content":"","tool_calls":[{"id":"c-other","type":"function","function":{"name":"read","arguments":"{}"}}]},` +
 		`{"role":"tool","content":"ok","tool_call_id":"c-other"}],` +
 		`"stream":true,"stream_options":{"include_usage":true}}`
-	cases := []struct {
-		name string
-		wire ReplayWire
-	}{
-		{"provider without replay", ReplayNone},
-		// Encoding belongs to the per-provider feature work; until it lands
-		// no wire may change the body.
-		{"reasoning content wire", ReplayReasoningContent},
-		{"thought signature wire", ReplayThoughtSignature},
+	// A client without replay sends none, whatever replay state the history
+	// holds and whoever issued it.
+	if _, err := client.Stream(context.Background(), replayHistory(t, client.ReplaySource()), nil, nil, nil); err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			bodies = nil
-			client.setReplayWire(tc.wire)
-			if _, err := client.Stream(context.Background(), replayHistory(t, client.ReplaySource()), nil, nil, nil); err != nil {
-				t.Fatal(err)
-			}
-			if len(bodies) != 1 || bodies[0] != golden {
-				t.Fatalf("body =\n%s\nwant\n%s", strings.Join(bodies, "\n"), golden)
-			}
-		})
+	if len(bodies) != 1 || bodies[0] != golden {
+		t.Fatalf("body =\n%s\nwant\n%s", strings.Join(bodies, "\n"), golden)
 	}
 }
 
@@ -388,6 +374,8 @@ func TestClientEstimateCountsOnlySentReplay(t *testing.T) {
 	ownText, _ := estimateTextTokens("hidden <reasoning>")
 	ownDetails, _ := estimateTextTokens(string(history[1].Replay.Details))
 	ownSignature, _ := estimateTextTokens("sig")
+	// The foreign call sits in the current turn, so Gemini gets the skip value.
+	skipValue, _ := estimateTextTokens(skipThoughtSignature)
 	cases := []struct {
 		name   string
 		client *Client
@@ -398,7 +386,7 @@ func TestClientEstimateCountsOnlySentReplay(t *testing.T) {
 		{"provider without replay", client, ReplayNone, base},
 		{"reasoning text from own endpoint", client, ReplayReasoningContent, base + ownText},
 		{"details from own model only", client, ReplayReasoningDetails, base + ownDetails},
-		{"signatures from own model only", client, ReplayThoughtSignature, base + ownSignature},
+		{"own signatures and the skip value", client, ReplayThoughtSignature, base + ownSignature + skipValue},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

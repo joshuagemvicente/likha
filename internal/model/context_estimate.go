@@ -61,12 +61,9 @@ func (c *Client) EstimateInputTokens(messages []Message, tools []ToolDefinition)
 	if !ok || c == nil {
 		return total, ok
 	}
-	for _, message := range messages {
-		replay := c.replayFor(message)
-		if replay == nil {
-			continue
-		}
-		for _, text := range replaySentText(c.replayWire, replay, message) {
+	turnStart := currentTurnStart(messages)
+	for i, message := range messages {
+		for _, text := range c.replaySentText(message, i >= turnStart) {
 			tokens, ok := estimateTextTokens(text)
 			if !ok || total > int64(^uint64(0)>>1)-tokens {
 				return 0, false
