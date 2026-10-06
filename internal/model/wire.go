@@ -29,11 +29,9 @@ func (w ProviderWire) route() string {
 // endpoint, even on a provider's host, keeps chat completions so a wire never
 // changes behind the user's back.
 func wireFor(base string) ProviderWire {
-	base = strings.TrimSuffix(base, "/")
-	for _, p := range Providers {
-		if p.BaseURL == base {
-			return p.Wire
-		}
+	row, ok := providerRowFor(strings.TrimSuffix(base, "/"), Providers)
+	if !ok {
+		return WireChat
 	}
-	return WireChat
+	return row.Wire
 }

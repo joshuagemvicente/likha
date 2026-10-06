@@ -274,12 +274,11 @@ func (c *Client) replaySentText(m Message, currentTurn bool) []string {
 // base. Rows that share a base share a wire, so row order cannot matter.
 // Custom endpoints match no row and get ReplayNone.
 func replayWireFor(base string, rows []Provider) ReplayWire {
-	for _, p := range rows {
-		if p.BaseURL == base {
-			return p.Replay
-		}
+	row, ok := providerRowFor(base, rows)
+	if !ok {
+		return ReplayNone
 	}
-	return ReplayNone
+	return row.Replay
 }
 
 // setReplayWire overrides the resolved wire. Tests use it to exercise forms

@@ -133,6 +133,21 @@ func LookupProvider(name string) (Provider, bool) {
 	return Provider{}, false
 }
 
+// providerRowFor returns the first row of rows whose base URL is exactly base.
+// It is the one base-URL lookup behind client resolution (wire, replay), so
+// those settings cannot disagree about which row an endpoint belongs to.
+// There is no prefix matching and no normalization: a custom endpoint, even
+// on a provider's host, matches no row. Rows that share a base URL must share
+// every setting resolved this way, so taking the first match is safe.
+func providerRowFor(base string, rows []Provider) (Provider, bool) {
+	for _, p := range rows {
+		if p.BaseURL == base {
+			return p, true
+		}
+	}
+	return Provider{}, false
+}
+
 // ProviderBaseURLs returns the base URL of every listed provider.
 func ProviderBaseURLs() []string {
 	urls := make([]string, 0, len(Providers))
