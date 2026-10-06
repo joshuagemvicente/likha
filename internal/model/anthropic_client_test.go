@@ -346,6 +346,46 @@ func TestAnthropicReplayRoundTrip(t *testing.T) {
 	}
 }
 
+// Claude can stream an empty or whitespace-only text block between thinking
+// and a tool call. The next request replays the thinking and the call but not
+// that block, which Claude rejects in a request.
+func TestAnthropicReplayLeavesOutWhitespaceText(t *testing.T) {
+	cases := []struct {
+		name string
+		text []string // text deltas of the block between thinking and tool_use
+	}{
+		{"empty text block", nil},
+		{"blank lines", []string{"\n\n"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			events := []string{evMessageStart, evThinkingStart(0), evThinking(0, "Read a."), evSignature(0, "sig-ws"), evStop(0), evTextStart(1)}
+			for _, piece := range tc.text {
+				events = append(events, evText(1, piece))
+			}
+			events = append(events, evStop(1), evToolStart(2, "toolu_1", "read"), evInput(2, `{"path":"a"}`), evStop(2), evMessageDelta("tool_use"), evMessageStop)
+			var recorder bodyRecorder
+			client := anthropicTestClient(t, "claude-opus-5-5", func(w http.ResponseWriter, r *http.Request) {
+				recorder.record(t, r)
+				writeSSE(w, events...)
+			})
+			history := []Message{{Role: "user", Content: "go"}}
+			reply, err := client.Stream(context.Background(), history, []ToolDefinition{readTool}, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			history = append(history, reply, Message{Role: "tool", ToolCallID: "toolu_1", Content: "A"})
+			if _, err := client.Stream(context.Background(), history, []ToolDefinition{readTool}, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			want := `{"role":"assistant","content":[{"type":"thinking","thinking":"Read a.","signature":"sig-ws"},{"type":"tool_use","id":"toolu_1","name":"read","input":{"path":"a"}}]}`
+			if body := recorder.body(t, 1); !strings.Contains(body, want) {
+				t.Fatalf("second body does not replay thinking without the blank text block:\n%s", body)
+			}
+		})
+	}
+}
+
 // A response cut off inside a thinking block keeps no blocks, so the next
 // request sends the turn without thinking.
 func TestAnthropicTruncatedThinkingIsNotReplayed(t *testing.T) {
@@ -447,8 +487,8 @@ func TestAnthropicRequestErrors(t *testing.T) {
 			check: func(t *testing.T, err error, apiErr *anthropicAPIError) {
 				var effort *EffortRejectedError
 				var replay *ReplayRejectedError
-				if errors.As(err, &effort) || errors.As(err, &replay) || apiErr.transient() {
-					t.Fatalf("plain 400 carries a hint or is transient: %v", err)
+				if errors.As(err, &effort) || errors.As(err, &replay) {
+					t.Fatalf("plain 400 carries a hint: %v", err)
 				}
 			}},
 		{name: "400 with effort", status: 400, body: jsonError("invalid_request_error", "bad"), effort: "max",
@@ -478,30 +518,21 @@ func TestAnthropicRequestErrors(t *testing.T) {
 		{name: "404", status: 404, body: jsonError("not_found_error", "model: nope"), wantPrefix: "model HTTP 404 Not Found: not_found_error: model: nope"},
 		{name: "413 non-JSON body", status: 413, body: "<html>Request Entity Too Large</html>", wantPrefix: "model HTTP 413 Request Entity Too Large: <html>Request Entity Too Large</html>",
 			check: func(t *testing.T, _ error, apiErr *anthropicAPIError) {
-				if apiErr.transient() || apiErr.Type != "" {
+				if apiErr.Type != "" {
 					t.Fatalf("413 = %+v", apiErr)
 				}
 			}},
-		{name: "429 with retry-after", status: 429, body: jsonError("rate_limit_error", "slow down"), header: map[string]string{"retry-after": "7"},
-			check: func(t *testing.T, _ error, apiErr *anthropicAPIError) {
-				if !apiErr.transient() || apiErr.RetryAfter != "7" {
-					t.Fatalf("429 = %+v transient %v", apiErr, apiErr.transient())
-				}
-			}},
+		{name: "429 rate limit", status: 429, body: jsonError("rate_limit_error", "slow down"), header: map[string]string{"retry-after": "7"},
+			wantPrefix: "model HTTP 429 Too Many Requests: rate_limit_error: slow down"},
 		{name: "429 spend cap", status: 429, body: `{"type":"error","error":{"type":"rate_limit_error","message":"cap","details":{"error_code":"enforced_spend_limit_reached"}}}`,
-			check: func(t *testing.T, _ error, apiErr *anthropicAPIError) {
-				if apiErr.transient() || !apiErr.spendCap() {
-					t.Fatalf("spend cap = %+v", apiErr)
-				}
-			}},
-		{name: "500", status: 500, body: jsonError("api_error", "boom"), check: transientCheck(true)},
-		{name: "503", status: 503, body: jsonError("api_error", "down"), check: transientCheck(true)},
-		{name: "529", status: 529, body: jsonError("overloaded_error", "Overloaded"), wantPrefix: "model HTTP 529", check: transientCheck(true)},
+			wantPrefix: "model HTTP 429 Too Many Requests: " + spendCapNote + "rate_limit_error: cap"},
+		{name: "500", status: 500, body: jsonError("api_error", "boom"), wantPrefix: "model HTTP 500 Internal Server Error: api_error: boom"},
+		{name: "529", status: 529, body: jsonError("overloaded_error", "Overloaded"), wantPrefix: "model HTTP 529"},
 		{name: "200 with a JSON body", status: 200, contentType: "application/json", body: `{"type":"message"}`, wantPrefix: `model returned incompatible content type "application/json" (expected SSE)`},
 		{name: "in-stream overloaded_error", status: 200, events: []string{evMessageStart, `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`},
-			wantPrefix: "model stream error: overloaded_error: Overloaded", check: transientCheck(true)},
+			wantPrefix: "model stream error: overloaded_error: Overloaded"},
 		{name: "in-stream invalid_request_error", status: 200, events: []string{evMessageStart, `{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}`},
-			wantPrefix: "model stream error: invalid_request_error: bad", check: transientCheck(false)},
+			wantPrefix: "model stream error: invalid_request_error: bad"},
 		{name: "EOF before message_stop", status: 200, events: []string{evMessageStart, evTextStart(0), evText(0, "half")}, wantPrefix: "model stream ended before message_stop"},
 		{name: "refusal", status: 200, events: []string{evMessageStart, evTextStart(0), evText(0, "Sure"), evStop(0),
 			`{"type":"message_delta","delta":{"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber","explanation":"Not this."}}}`, evMessageStop},
@@ -560,15 +591,6 @@ func TestAnthropicRequestErrors(t *testing.T) {
 				t.Fatalf("error %v does not carry status %d", err, tc.status)
 			}
 		})
-	}
-}
-
-func transientCheck(want bool) func(*testing.T, error, *anthropicAPIError) {
-	return func(t *testing.T, err error, apiErr *anthropicAPIError) {
-		t.Helper()
-		if apiErr == nil || apiErr.transient() != want {
-			t.Fatalf("error %v transient = %v, want %v", err, apiErr != nil && apiErr.transient(), want)
-		}
 	}
 }
 

@@ -22,17 +22,19 @@ var errClaudeEndsWithAssistant = errors.New("Claude request would end with an as
 // which is a dropped stream and never a finished answer (spec point 30).
 var errAnthropicStreamEnded = errors.New("model stream ended before message_stop")
 
+// spendCapNote leads the message of a spend-cap 429 so it does not read like
+// a rate limit that clears on its own (spec point 28).
+const spendCapNote = "spend limit reached (a quota, not a rate limit: requests keep failing until the organization's limit is raised or access resumes): "
+
 // anthropicAPIError is a failure Anthropic reported, either as a non-2xx
-// HTTP response or as an error event inside a 200 stream (Status 0). It keeps
-// the fields model-recovery's classifier needs (status, retry-after, error
-// code) so callers match with errors.As instead of reading the message.
+// HTTP response or as an error event inside a 200 stream (Status 0). Callers
+// match it with errors.As instead of reading the message.
 type anthropicAPIError struct {
 	Status     int    // HTTP status code; 0 for an in-stream error event
 	StatusText string // HTTP status line, e.g. "529 status code 529"
 	Type       string // Anthropic error.type, e.g. "overloaded_error"
 	Message    string // Anthropic error.message, bounded
 	Code       string // error.details.error_code, e.g. "enforced_spend_limit_reached"
-	RetryAfter string // retry-after header, verbatim
 	RequestID  string // request-id header, else the body's request_id
 	Raw        string // bounded body when it is not Anthropic's JSON error
 }
@@ -46,6 +48,9 @@ func (e *anthropicAPIError) Error() string {
 		b.WriteString("model stream error: ")
 	} else {
 		b.WriteString("model HTTP " + e.StatusText + ": ")
+	}
+	if e.spendCap() {
+		b.WriteString(spendCapNote)
 	}
 	switch {
 	case e.Type != "" && e.Message != "":
@@ -82,24 +87,6 @@ func (e *anthropicAPIError) spendCap() bool {
 	return e.Status == http.StatusTooManyRequests && e.Code == "enforced_spend_limit_reached"
 }
 
-// transient reports whether FR-36 treats the failure as worth retrying:
-// HTTP 408, 429 (except the spend cap) and 5xx including 529, and in-stream
-// overload, server, timeout and rate-limit errors. Quota, credential and
-// rejected-request failures never are. model-recovery's classifier reads it.
-func (e *anthropicAPIError) transient() bool {
-	if e.Status == 0 {
-		switch e.Type {
-		case "overloaded_error", "api_error", "rate_limit_error", "timeout_error":
-			return true
-		}
-		return false
-	}
-	if e.spendCap() {
-		return false
-	}
-	return e.Status == http.StatusRequestTimeout || e.Status == http.StatusTooManyRequests || e.Status >= 500
-}
-
 // anthropicErrorBody is Anthropic's documented error envelope:
 // {"type":"error","error":{"type","message","details"},"request_id"}.
 type anthropicErrorBody struct {
@@ -121,7 +108,6 @@ func readAnthropicHTTPError(resp *http.Response) *anthropicAPIError {
 	apiErr := &anthropicAPIError{
 		Status:     resp.StatusCode,
 		StatusText: resp.Status,
-		RetryAfter: strings.TrimSpace(resp.Header.Get("retry-after")),
 		RequestID:  strings.TrimSpace(resp.Header.Get("request-id")),
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBytes))

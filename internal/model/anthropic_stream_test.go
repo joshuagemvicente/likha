@@ -225,8 +225,8 @@ func TestConsumeAnthropicStreamFailures(t *testing.T) {
 			wantErr: "model stream error: overloaded_error: Overloaded",
 			check: func(t *testing.T, err error) {
 				var apiErr *anthropicAPIError
-				if !errors.As(err, &apiErr) || !apiErr.transient() {
-					t.Fatalf("error %v is not a transient API error", err)
+				if !errors.As(err, &apiErr) || apiErr.Status != 0 || apiErr.Type != "overloaded_error" {
+					t.Fatalf("error %v is not an in-stream overloaded API error", err)
 				}
 			},
 		},

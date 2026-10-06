@@ -151,6 +151,45 @@ func TestBuildAnthropicRequestMapping(t *testing.T) {
 				`{"role":"assistant","content":[{"type":"text","text":"Reading."},{"type":"text","text":"[tool call read {\"path\":\"a\"}]"}]},` +
 				`{"role":"user","content":[{"type":"text","text":"[tool result c1]\nA"},{"type":"text","text":"summarize"}]}]`,
 		},
+		{
+			name: "IDs another wire issued are mapped onto Claude's pattern, call and result alike",
+			messages: []Message{
+				{Role: "user", Content: "go"},
+				{Role: "assistant", ToolCalls: []ToolCall{
+					{ID: "functions.read:0", Name: "read", Arguments: `{"path":"a"}`},
+					{ID: "functions.read:1", Name: "read", Arguments: `{"path":"b"}`},
+				}},
+				{Role: "tool", ToolCallID: "functions.read:0", Content: "A"},
+				{Role: "tool", ToolCallID: "functions.read:1", Content: "B"},
+			},
+			want: `"messages":[{"role":"user","content":[{"type":"text","text":"go"}]},` +
+				`{"role":"assistant","content":[{"type":"tool_use","id":"functions_read_0_c216cab2","name":"read","input":{"path":"a"}},{"type":"tool_use","id":"functions_read_1_08bea971","name":"read","input":{"path":"b"}}]},` +
+				`{"role":"user","content":[{"type":"tool_result","tool_use_id":"functions_read_0_c216cab2","content":"A"},{"type":"tool_result","tool_use_id":"functions_read_1_08bea971","content":"B"}]}]`,
+		},
+		{
+			name: "null arguments are sent as an empty object",
+			messages: []Message{
+				{Role: "user", Content: "go"},
+				{Role: "assistant", ToolCalls: []ToolCall{{ID: "c1", Name: "list", Arguments: "null"}}},
+				{Role: "tool", ToolCallID: "c1", Content: "A"},
+			},
+			want: `"messages":[{"role":"user","content":[{"type":"text","text":"go"}]},` +
+				`{"role":"assistant","content":[{"type":"tool_use","id":"c1","name":"list","input":{}}]},` +
+				`{"role":"user","content":[{"type":"tool_result","tool_use_id":"c1","content":"A"}]}]`,
+		},
+		{
+			name:    "without tools, arguments that are not an object are shown as stored",
+			noTools: true,
+			messages: []Message{
+				{Role: "user", Content: "go"},
+				{Role: "assistant", ToolCalls: []ToolCall{{ID: "c1", Name: "list", Arguments: "[1]"}, {ID: "c2", Name: "list", Arguments: "null"}}},
+				{Role: "tool", ToolCallID: "c1", Content: "A"},
+				{Role: "user", Content: "summarize"},
+			},
+			want: `"messages":[{"role":"user","content":[{"type":"text","text":"go"}]},` +
+				`{"role":"assistant","content":[{"type":"text","text":"[tool call list [1]]"},{"type":"text","text":"[tool call list null]"}]},` +
+				`{"role":"user","content":[{"type":"text","text":"[tool result c1]\nA"},{"type":"text","text":"summarize"}]}]`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -179,8 +218,9 @@ func TestBuildAnthropicRequestRejects(t *testing.T) {
 		{name: "nothing to send", messages: []Message{{Role: "system", Content: "harness"}, {Role: "user", Content: " "}}, is: errClaudeEndsWithAssistant},
 		{name: "unknown role", messages: []Message{{Role: "robot", Content: "x"}}, want: `invalid message role "robot"`},
 		{name: "tool result without id", messages: []Message{user, {Role: "tool", Content: "x"}}, want: "tool result requires a tool call ID"},
-		{name: "array arguments", messages: []Message{{Role: "assistant", ToolCalls: []ToolCall{{ID: "c", Name: "read", Arguments: `[1]`}}}, user}, want: "invalid assistant tool call"},
-		{name: "call without id", messages: []Message{{Role: "assistant", ToolCalls: []ToolCall{{Name: "read", Arguments: `{}`}}}, user}, want: "invalid assistant tool call"},
+		{name: "array arguments", messages: []Message{{Role: "assistant", ToolCalls: []ToolCall{{ID: "c", Name: "read", Arguments: `[1]`}}}, user}, tools: []ToolDefinition{readTool},
+			want: "invalid assistant tool call read (c): Claude needs tool arguments as a JSON object; /compact continues from a summary"},
+		{name: "call without id", messages: []Message{{Role: "assistant", ToolCalls: []ToolCall{{Name: "read", Arguments: `{}`}}}, user}, tools: []ToolDefinition{readTool}, want: "invalid assistant tool call"},
 		{name: "invalid tool name", messages: []Message{user}, tools: []ToolDefinition{{Name: "mcp.server/tool", Parameters: json.RawMessage(`{}`)}}, want: `invalid tool definition "mcp.server/tool"`},
 		{name: "overlong tool name", messages: []Message{user}, tools: []ToolDefinition{{Name: strings.Repeat("a", 129), Parameters: json.RawMessage(`{}`)}}, want: `invalid tool definition "aaaa`},
 		{name: "duplicate tool name", messages: []Message{user}, tools: []ToolDefinition{readTool, readTool}, want: `invalid tool definition "read": duplicate tool name`},

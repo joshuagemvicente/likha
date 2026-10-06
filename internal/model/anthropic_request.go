@@ -2,11 +2,14 @@ package model
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // anthropicThinkingBeta is the beta that allows thinking.block_binding.
@@ -251,7 +254,7 @@ func (c *anthropicConversation) addToolResult(m Message) error {
 		c.appendBlocks("user", textBlock("[tool result "+m.ToolCallID+"]\n"+m.Content))
 		return nil
 	}
-	result := anthropicToolResultBlock{Type: "tool_result", ToolUseID: m.ToolCallID}
+	result := anthropicToolResultBlock{Type: "tool_result", ToolUseID: anthropicToolID(m.ToolCallID)}
 	if hasText(m.Content) {
 		result.Content = m.Content
 	}
@@ -267,6 +270,10 @@ func (c *anthropicConversation) appendBlocks(role string, blocks ...any) {
 }
 
 func (c *anthropicConversation) addAssistant(m Message) error {
+	if !c.withTools {
+		c.addAssistantText(m)
+		return nil
+	}
 	inputs := make([]json.RawMessage, len(m.ToolCalls))
 	for i, call := range m.ToolCalls {
 		input, err := toolCallInput(call)
@@ -285,11 +292,7 @@ func (c *anthropicConversation) addAssistant(m Message) error {
 		blocks = append(blocks, textBlock(m.Content))
 	}
 	for i, call := range m.ToolCalls {
-		if !c.withTools {
-			blocks = append(blocks, textBlock("[tool call "+call.Name+" "+string(inputs[i])+"]"))
-			continue
-		}
-		blocks = append(blocks, anthropicToolUseBlock{Type: "tool_use", ID: call.ID, Name: call.Name, Input: inputs[i]})
+		blocks = append(blocks, anthropicToolUseBlock{Type: "tool_use", ID: anthropicToolID(call.ID), Name: call.Name, Input: inputs[i]})
 	}
 	if len(blocks) == 0 {
 		// Nothing to send; the message stays in history (spec point 3).
@@ -297,6 +300,27 @@ func (c *anthropicConversation) addAssistant(m Message) error {
 	}
 	c.appendBlocks("assistant", blocks...)
 	return nil
+}
+
+// addAssistantText sends an assistant turn to a tool-less request as text
+// lines (spec decision 6). Arguments are shown as stored: the text needs no
+// structured input, so history another wire wrote with arguments that are
+// not an object still reaches /compact and session naming.
+func (c *anthropicConversation) addAssistantText(m Message) {
+	var blocks []any
+	if hasText(m.Content) {
+		blocks = append(blocks, textBlock(m.Content))
+	}
+	for _, call := range m.ToolCalls {
+		arguments := call.Arguments
+		if strings.TrimSpace(arguments) == "" {
+			arguments = "{}"
+		}
+		blocks = append(blocks, textBlock("[tool call "+call.Name+" "+arguments+"]"))
+	}
+	if len(blocks) > 0 {
+		c.appendBlocks("assistant", blocks...)
+	}
 }
 
 // acceptedReplay returns the stored content blocks of m when this request
@@ -343,6 +367,12 @@ func replayBlocksMatching(raw json.RawMessage, m Message) ([]any, bool) {
 		switch fields.Type {
 		case "text":
 			text.WriteString(fields.Text)
+			if !hasText(fields.Text) {
+				// Claude can stream an empty or whitespace-only text block
+				// but rejects one in a request; it still counts toward
+				// Content, so the check below sees the turn unchanged.
+				continue
+			}
 		case "tool_use":
 			if calls >= len(m.ToolCalls) || !sameToolUse(m.ToolCalls[calls], fields.ID, fields.Name, fields.Input) {
 				return nil, false
@@ -379,18 +409,45 @@ func sameToolUse(call ToolCall, id, name string, input json.RawMessage) bool {
 }
 
 // toolCallInput returns a call's arguments as a tool_use input: a JSON
-// object, with empty arguments meaning {}.
+// object, with empty or null arguments meaning {}. Chat wires store any valid
+// JSON, and null decodes into a tool's arguments exactly as {} does, so the
+// call keeps its meaning. Other non-objects cannot be sent as structured
+// input; the error names the call and the way out, since every later request
+// repeats the same history.
 func toolCallInput(call ToolCall) (json.RawMessage, error) {
 	if call.ID == "" || call.Name == "" {
-		return nil, errors.New("invalid assistant tool call")
+		return nil, errors.New("invalid assistant tool call: a call without an ID or name")
 	}
-	if strings.TrimSpace(call.Arguments) == "" {
+	arguments := strings.TrimSpace(call.Arguments)
+	if arguments == "" || arguments == "null" {
 		return json.RawMessage(`{}`), nil
 	}
-	if !isJSONObject([]byte(call.Arguments)) {
-		return nil, errors.New("invalid assistant tool call")
+	if !isJSONObject([]byte(arguments)) {
+		return nil, fmt.Errorf("invalid assistant tool call %s (%s): Claude needs tool arguments as a JSON object; /compact continues from a summary", call.Name, call.ID)
 	}
 	return json.RawMessage(call.Arguments), nil
+}
+
+var anthropicToolIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// anthropicToolID maps a stored tool call ID onto the pattern Claude accepts
+// for tool_use.id and tool_result.tool_use_id. Other wires issue IDs such as
+// "functions.bash:0"; those get their other characters replaced and a short
+// hash of the original, so the mapping is the same for a call and its result
+// and two IDs that differ only in replaced characters stay distinct. IDs
+// Claude issued already match and pass through unchanged.
+func anthropicToolID(id string) string {
+	if anthropicToolIDPattern.MatchString(id) {
+		return id
+	}
+	sanitized := strings.Map(func(r rune) rune {
+		if r < utf8.RuneSelf && (r == '_' || r == '-' || r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z') {
+			return r
+		}
+		return '_'
+	}, id)
+	sum := sha256.Sum256([]byte(id))
+	return sanitized + "_" + hex.EncodeToString(sum[:4])
 }
 
 // turn returns the last turn when it has role, else opens a new one, so
