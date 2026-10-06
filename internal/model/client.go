@@ -831,8 +831,10 @@ func (c *Client) markConnected() {
 type streamChunk struct {
 	Choices []struct {
 		Delta *struct {
-			Content   *string `json:"content"`
-			Reasoning *string `json:"reasoning"`
+			// Content is a string on most providers and a list of typed
+			// chunks on Mistral's reasoning models (specs/chunked-content).
+			Content   streamContent `json:"content"`
+			Reasoning *string       `json:"reasoning"`
 			// DeepSeek-style reasoning field used by some providers.
 			ReasoningContent *string `json:"reasoning_content"`
 			ToolCalls        []struct {
@@ -865,6 +867,9 @@ func appendPiece(value *strings.Builder, piece string) {
 func consumeStream(ctx context.Context, reader io.Reader, onText func(string), onReasoning func(string)) (Message, usageReport, error) {
 	result := Message{Role: "assistant"}
 	var lastUsage usageReport
+	// skipped holds the first chunk type the reply skipped; it matters only
+	// when the reply shows nothing else (specs/chunked-content decision 3).
+	var skipped *string
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), maxEventLineBytes)
 	calls := make(map[int]*streamedToolCall)
@@ -907,10 +912,22 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 		if delta == nil {
 			return nil // finish_reason-only event
 		}
-		if delta.Content != nil {
-			text.WriteString(*delta.Content)
-			if onText != nil && *delta.Content != "" {
-				onText(*delta.Content)
+		for _, piece := range delta.Content.pieces {
+			switch piece.kind {
+			case pieceAnswer:
+				text.WriteString(piece.text)
+				if onText != nil && piece.text != "" {
+					onText(piece.text)
+				}
+			case pieceThinking:
+				reasoning.WriteString(piece.text)
+				if onReasoning != nil && piece.text != "" {
+					onReasoning(piece.text)
+				}
+			case pieceSkipped:
+				if skipped == nil {
+					skipped = &piece.text
+				}
 			}
 		}
 		var reasoningPiece string
@@ -1025,6 +1042,11 @@ func consumeStream(ctx context.Context, reader io.Reader, onText func(string), o
 			return Message{}, usageReport{}, fmt.Errorf("incomplete structured tool call at index %d", index)
 		}
 		result.ToolCalls = append(result.ToolCalls, call)
+	}
+	if skipped != nil && text.Len() == 0 && reasoning.Len() == 0 && len(result.ToolCalls) == 0 {
+		// Before chunked content parsed, such a reply failed as malformed;
+		// a silent empty answer would report an unread reply as a success.
+		return Message{}, usageReport{}, fmt.Errorf("%w (type %q)", errUnshowableContent, *skipped)
 	}
 	result.Content = text.String()
 	result.Reasoning = reasoning.String()
