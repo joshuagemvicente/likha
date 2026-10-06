@@ -17,6 +17,15 @@ scope: both would be a new client surface, which v1 does not include.
 
 ## Resolved decisions
 
+> **Superseded 2026-10-06 for the `claude` row** by
+> [claude-native](../claude-native/spec.md) (FR-38): decisions 1 ("no client
+> changes"), 3 ("no client fork") and 5 (native `/v1/messages` and prompt
+> caching out of scope) no longer hold — the row now uses a native Messages
+> API client with `x-api-key` auth and automatic prompt caching. The Bearer
+> `GET /v1/models` question below is settled: the native client sends
+> `x-api-key` on the model list too. Decisions 2 and 4 stand (the default
+> model has since been set; the row stays pending-probe).
+
 1. **One table row, no client changes.** Append after `cerebras`:
    `{Name: "claude", DisplayName: "Anthropic Claude", BaseURL: "https://api.anthropic.com/v1", KeyEnv: "LIKHA_CLAUDE_API_KEY", DefaultModel: "", Hosted: true}`.
    No `SessionHeader`, zero `Auth` value (static Bearer key).
@@ -57,7 +66,9 @@ From the [compatibility documentation](https://platform.claude.com/docs/en/cli-s
 | `strict` tool schema flag | Ignored by Anthropic; Likha does not send it |
 
 Model-list route (`GET {base}/models` — used by Likha's `Check()` on
-connection and `/models`): **open question, must be probed.** The docs' header
+connection and `/models`): *(superseded by claude-native decision 2: the
+native client sends `x-api-key`, so the Bearer question no longer applies)*
+**open question, must be probed.** The docs' header
 table marks `authorization` fully supported, but a live check on 2026-10-04
 showed unauthenticated `GET /v1/models` → `x-api-key header is required`, and a
 request carrying an invalid Bearer key → `invalid x-api-key` — Bearer

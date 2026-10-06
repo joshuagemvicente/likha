@@ -14,9 +14,80 @@ it.
 Until M2 routes the `claude` row, the native client is dormant: the row still
 uses chat completions and nothing a user sees changes.
 
+**Implemented (local) 2026-10-06, review fixes 2026-10-07.** T1–T17 landed
+with the automated suite green (`go test ./...`, `go vet ./...`, `gofmt`,
+`-race` on model, agent and session). T18 is the user's live probe and stays
+open. Still outstanding outside this feature: FR-36 retries
+(model-recovery). The `/compact` hint for a rejected replay arrived with the
+2026-10-07 merge of reasoning-replay (see T9). Implementation notes
+and deviations from the task text:
+
+- **T1.** `ProviderWire`, `WireChat`, `WireAnthropic` and `wireFor` live in
+  `internal/model/wire.go`; `Provider.Wire` is one field in `provider.go`.
+  `wireFor` scans `Providers` itself instead of sharing `replayWireFor`'s
+  lookup, to keep `replay.go` (reasoning-replay's file) untouched while both
+  features are in flight. Same rule: exact base, one trailing slash ignored.
+- **T2–T4.** `buildAnthropicRequest` returns an `anthropicRequest` (body,
+  `anthropic-beta` value, replayed-turn count, effort sent) rather than bare
+  bytes, because T9 needs the last two to classify a 400. Content blocks are
+  plain values marshalled once; replayed blocks are `json.RawMessage`
+  elements of the stored array, so they go out exactly as stored.
+- **T5.** A `content_block_start` that already carries text or thinking is
+  treated as the block's first piece. Thinking deltas are streamed to the
+  reasoning view; a later thinking block is preceded by a blank line.
+- **T9.** reasoning-replay T12 has not landed, so this branch defines
+  `ReplayRejectedError{Missing, Sent int; Err error}` with T12's exact shape
+  in its own file, `internal/model/replay_error.go`; when reasoning-replay
+  merges, keep one copy. The TUI `/compact` hint is T12's TUI part and is not
+  added here; until it lands, a Claude 400 with replayed thinking is typed
+  but shows no hint. *Merged 2026-10-07:* one copy kept in
+  `replay_error.go` (reasoning-replay's duplicate in `replay_request.go`
+  removed), so the TUI hint now applies to Claude 400s; no Claude-specific
+  TUI test was added. model-recovery's `StreamError` has not landed either, so
+  the error is the unexported `anthropicAPIError` (status, status line, type,
+  message, `error.details.error_code`, request ID). A 429 whose error code is
+  `enforced_spend_limit_reached` is shown as a quota (`spend limit reached (a
+  quota, not a rate limit: …)`) in the error text itself. **Deviation (review
+  2026-10-07):** the `transient()` classifier and the `retry-after` field were
+  removed as dead code, since nothing reads them until model-recovery lands;
+  model-recovery adds the T9 transient table and `retry-after` when it wires
+  FR-36 retries. Nothing retries yet. Every error after the response starts
+  (stream error, early EOF, refusal, wrong content type) gets
+  ` (request <id>)` from the `request-id` header.
+- **T10.** The per-model output limit and adaptive flag are kept in a
+  package-level, mutex-guarded cache keyed by model ID, filled by every
+  native model-list fetch (startup check, setup, `/providers`, `/models`),
+  instead of a map on the client shared by `Fork`. Only the exact claude base
+  reaches this wire, so a model ID names the same model for every client,
+  and setup's list now informs the first request too. `Check` uses the
+  client's own HTTP client (a task fork's gate counts only POSTs, so the GET
+  is not charged); the package functions use the shared list client.
+- **T12.** Captured text blocks are kept verbatim, including empty and
+  whitespace-only ones, so the stored array is exactly what Claude returned;
+  the T13 consistency check compares their concatenation with `Content`.
+  **Fix (review 2026-10-07):** T13 leaves those blank text blocks out of the
+  replayed array (they still count toward the `Content` check), because
+  Claude rejects whitespace-only text in a request (T2 rule 3). Doing it at
+  send time also repairs sessions saved before the fix.
+- **T2 (review fixes 2026-10-07).** Tool call IDs another wire issued (for
+  example Kimi K2's `functions.bash:0`) do not match Claude's
+  `^[a-zA-Z0-9_-]+$`; with tools declared, `tool_use.id` and
+  `tool_result.tool_use_id` map such an ID to its allowed characters (others
+  replaced by `_`) plus `_` and 8 hex digits of its SHA-256, the same for a
+  call and its result. Claude-issued IDs pass unchanged, so replay is
+  unaffected. Tool-less requests render calls as text from the stored
+  arguments without object validation, so `/compact` and naming work on any
+  history; with tools, `null` arguments are sent as `{}` (they decode the
+  same) and other non-objects fail before sending with an error naming the
+  call and `/compact`.
+- **Known gap.** `EstimateInputTokens` still estimates Claude requests with
+  the chat shape and does not count replayed thinking bytes
+  (`replaySentText` belongs to reasoning-replay). Usage reported by the API
+  is exact; only the pre-send estimate is low.
+
 ## M1 — Request body (`internal/model/anthropic_request.go`)
 
-- [ ] **T1. Wire kind on the row.** Add `type ProviderWire uint8` with
+- [x] **T1. Wire kind on the row.** Add `type ProviderWire uint8` with
       `WireChat` (zero value) and `WireAnthropic` in `provider.go`, and
       `Provider.Wire ProviderWire`. Leave the `claude` row on `WireChat`
       until T8. Add `wireFor(base string) ProviderWire`, which returns the
@@ -26,7 +97,7 @@ uses chat completions and nothing a user sees changes.
       *Verify:* table test: claude base → `WireAnthropic` (after T8), any
       other row → `WireChat`, `https://api.anthropic.com/v1/` with trailing
       slash → same as without, unknown host → `WireChat`.
-- [ ] **T2. Message mapping.** `buildAnthropicRequest(in anthropicInput)
+- [x] **T2. Message mapping.** `buildAnthropicRequest(in anthropicInput)
       ([]byte, error)`, a pure function. Input: model, messages, tools,
       thinking mode, max tokens, effort, replay source. Rules, in order:
       1. **System hoisting.** Every `system` or `developer` message before
@@ -66,14 +137,14 @@ uses chat completions and nothing a user sees changes.
       tool results; a trailing assistant message errors; no-tools rendering;
       a whitespace-only user message and an empty assistant message are
       left out.
-- [ ] **T3. Tools.** Each `ToolDefinition` →
+- [x] **T3. Tools.** Each `ToolDefinition` →
       `{"name","description","input_schema"}` with `input_schema` the raw
       `Parameters`. Validate `^[A-Za-z0-9_-]{1,128}$`, a JSON object schema,
       and unique names; the error names the tool. No `strict`,
       `eager_input_streaming`, `cache_control` or `tool_choice`.
       *Verify:* golden body for two tools; invalid name and duplicate name
       errors.
-- [ ] **T4. Top-level fields.** Body fields, in this order:
+- [x] **T4. Top-level fields.** Body fields, in this order:
       `model`, `max_tokens`, `system` (omitted when empty), `messages`,
       `tools` (omitted when empty), `thinking` (omitted for mode none),
       `output_config` (only with a non-empty effort and `EffortAnthropic`),
@@ -89,7 +160,7 @@ uses chat completions and nothing a user sees changes.
 
 ## M2 — Streaming (`internal/model/anthropic_stream.go`)
 
-- [ ] **T5. SSE decoder.** `consumeAnthropicStream(ctx, r, onText,
+- [x] **T5. SSE decoder.** `consumeAnthropicStream(ctx, r, onText,
       onReasoning, capture) (Message, usageReport, error)`. Read `event:` and
       `data:` lines with the same scanner limits as `consumeStream`
       (1 MiB line, 16 MiB response). Dispatch on the data's `type`:
@@ -122,7 +193,7 @@ uses chat completions and nothing a user sees changes.
       signature + text; tool use with empty-string first `partial_json`;
       two interleaved thinking blocks around two tool calls; ping events;
       an unknown event type; a mid-stream error event.
-- [ ] **T6. Completion rules.**
+- [x] **T6. Completion rules.**
       - EOF or cancellation before `message_stop` is an error
         (`model stream ended before message_stop`), never a message.
       - Tool calls are emitted in block order. Accumulated input `""`
@@ -143,7 +214,7 @@ uses chat completions and nothing a user sees changes.
       `max_tokens` with a half-written tool input errors; with complete text
       it returns; `max_tokens` inside a thinking block returns the text and
       marks the response not replayable.
-- [ ] **T7. Usage.** Map the final usage into `usageReport`:
+- [x] **T7. Usage.** Map the final usage into `usageReport`:
       `Prompt = input_tokens + cache_creation_input_tokens +
       cache_read_input_tokens`, `cacheRead`, `cacheWrite`,
       `Completion = output_tokens`, `reasoning =
@@ -157,7 +228,7 @@ uses chat completions and nothing a user sees changes.
 
 ## M3 — Client, discovery and errors (`internal/model`)
 
-- [ ] **T8. Route the row.** Set `Wire: WireAnthropic` on the `claude` row
+- [x] **T8. Route the row.** Set `Wire: WireAnthropic` on the `claude` row
       and remove its `EffortNote` (decision 8). `New` sets
       `url = base + "/messages"` for `WireAnthropic`; `Client.stream`
       dispatches to `streamAnthropic` the way it dispatches OAuth clients
@@ -166,7 +237,7 @@ uses chat completions and nothing a user sees changes.
       `url`).
       *Verify:* fork tests for the new route; a task fork's gate counts a
       `/messages` POST and not a `/models` GET.
-- [ ] **T9. Request and HTTP errors.** `streamAnthropic` builds the body
+- [x] **T9. Request and HTTP errors.** `streamAnthropic` builds the body
       (T2–T4), sends it with the T4 headers, and classifies non-2xx:
       - parse `{"type":"error","error":{"type","message"},"request_id"}`
         (bounded to 64 KiB) and the `request-id` header;
@@ -193,7 +264,7 @@ uses chat completions and nothing a user sees changes.
       body, and in-stream `overloaded_error` and `invalid_request_error`;
       every error message carries the `request-id` header value; each error matches with `errors.Is`/`errors.As`,
       never by substring.
-- [ ] **T10. Model discovery.** `ListModels`, `ListModelsWithDetails`,
+- [x] **T10. Model discovery.** `ListModels`, `ListModelsWithDetails`,
       `Check` and `Client.Models` route `WireAnthropic` bases to
       `fetchAnthropicModels`: `GET {base}/models?limit=1000` with the native
       headers, following `has_more` / `last_id` → `after_id` for at most 10
@@ -209,7 +280,7 @@ uses chat completions and nothing a user sees changes.
       `Fork` shares the pointer.
       *Verify:* two-page fixture; a model with `capabilities: null`; 401;
       `Check` fills the map and a fork sees it.
-- [ ] **T11. Thinking mode and output limit.** `anthropicThinking(model)`:
+- [x] **T11. Thinking mode and output limit.** `anthropicThinking(model)`:
       the client map's adaptive flag when known; else the bundled exact-ID
       table `claudeAdaptiveModels` (`claude-opus-5-5`, `claude-fable-5-1`,
       `claude-fable-5`, `claude-sonnet-5-5`, `claude-opus-4-7`, plus
@@ -222,7 +293,7 @@ uses chat completions and nothing a user sees changes.
 
 ## M4 — Replay (needs reasoning-replay M1)
 
-- [ ] **T12. Capture.** Every completed response records replay state
+- [x] **T12. Capture.** Every completed response records replay state
       built with `NewReasoningReplay(c.ReplaySource(), ...)`: the client's
       full request URL (`.../v1/messages`, not `Base()`, so the
       compatibility route on the same base is a different issuer) and the
@@ -237,7 +308,7 @@ uses chat completions and nothing a user sees changes.
       *Verify:* the captured bytes for the interleaved fixture equal the
       expected array; a text-only response has `Replay.Source` set and empty
       `Blocks`; a thinking block without a signature gives empty `Blocks`.
-- [ ] **T13. Send.** In T2 rule 5, use `Replay.Blocks` only when all hold:
+- [x] **T13. Send.** In T2 rule 5, use `Replay.Blocks` only when all hold:
       tools are present, `Blocks` is non-empty, the shared
       `(*Client).replayFor` gate returns the message's state (its
       `Replay.Source` equals `c.ReplaySource()`: request URL and model; no
@@ -248,13 +319,13 @@ uses chat completions and nothing a user sees changes.
       *Verify:* same-model replay is byte-identical to the captured array;
       other model, other endpoint, edited `Content`, and no-tools requests
       rebuild without thinking.
-- [ ] **T14. Session round trip.** Rely on reasoning-replay's persistence.
+- [x] **T14. Session round trip.** Rely on reasoning-replay's persistence.
       *Verify:* save and resume a session holding Claude replay state, then
       build the next request and compare with the pre-save body.
 
 ## M5 — Callers, effort and docs
 
-- [ ] **T15. Effort wire kind.** Add `EffortAnthropic` to `EffortWire`
+- [x] **T15. Effort wire kind.** Add `EffortAnthropic` to `EffortWire`
       (`effort.go`) with a doc comment naming `output_config.effort`. The
       `claude` row stays `EffortUnsupported`; FR-40's probe flips it.
       `EffortUnavailableReason` then reads "not yet verified for Anthropic
@@ -265,12 +336,12 @@ uses chat completions and nothing a user sees changes.
       *Verify:* a client set to `EffortAnthropic` + `high` sends
       `output_config`; `EffortUnsupported` + `high` sends none; a 400 with
       effort returns `EffortRejectedError`.
-- [ ] **T16. Background callers.** No agent change. Confirm with tests that
+- [x] **T16. Background callers.** No agent change. Confirm with tests that
       compaction and session naming on a Claude client send no tools, no
       `cache_control`, no `output_config` and no thinking blocks, and that
       an explore child's requests replay its own blocks only.
       *Verify:* agent tests against the T9 test server.
-- [ ] **T17. Docs.** `docs/providers.md`: the claude row uses the native
+- [x] **T17. Docs.** `docs/providers.md`: the claude row uses the native
       Messages API, `x-api-key`, pending-probe. `CHANGELOG.md` Unreleased
       entry stating automated checks only. Mark claude-provider's decisions 1,
       3 and 5 and the Bearer `/v1/models` question superseded by this spec.

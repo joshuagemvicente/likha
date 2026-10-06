@@ -37,7 +37,7 @@ Responses compatibility; published-release verification is also pending.
 | Together AI | `together` | `LIKHA_TOGETHER_API_KEY` | `https://api.together.ai/v1` | none — pass `--model` | pending-probe |
 | Mistral AI | `mistral` | `LIKHA_MISTRAL_API_KEY` | `https://api.mistral.ai/v1` | none — pass `--model` | pending-probe |
 | Cerebras | `cerebras` | `LIKHA_CEREBRAS_API_KEY` | `https://api.cerebras.ai/v1` | none — pass `--model` | pending-probe |
-| Anthropic Claude | `claude` | `LIKHA_CLAUDE_API_KEY` | `https://api.anthropic.com/v1` (OpenAI SDK compatibility layer) | `claude-opus-5-5` | pending-probe |
+| Anthropic Claude | `claude` | `LIKHA_CLAUDE_API_KEY` | `https://api.anthropic.com/v1` (native Messages API; see [Anthropic Claude](#anthropic-claude)) | `claude-opus-5-5` | pending-probe |
 | DeepSeek | `deepseek` | `LIKHA_DEEPSEEK_API_KEY` | `https://api.deepseek.com/v1` | `deepseek-flash` | pending-probe |
 | Google Gemini | `gemini` | `LIKHA_GEMINI_API_KEY` | `https://generativelanguage.googleapis.com/v1beta/openai` (OpenAI compatibility endpoint) | `gemini-2.5-flash` | pending-probe |
 
@@ -89,7 +89,7 @@ Likha sends a reasoning-effort level only to providers whose live probe shows th
 | `chatgpt` | `reasoning: {effort}` (Responses) | pending-probe |
 | `opencode-zen`, `opencode-go`, `dialagram` | unknown | pending-probe |
 | `mistral` | `reasoning_effort` | pending-probe |
-| `claude` | — | not supported: Anthropic's OpenAI-compatible endpoint ignores effort |
+| `claude` | `output_config: {effort}` (native Messages API) | pending-probe |
 
 A probe sends one tool-bearing request at each published level of one model and records whether each was accepted, rejected, or ignored.
 
@@ -101,10 +101,40 @@ Some providers want their own reasoning state back on later requests and reject 
 | --- | --- | --- |
 | `deepseek` | each earlier turn's `reasoning_content`, also after switching between DeepSeek models | pending-probe |
 | `gemini` | each tool call's thought signature; a current-turn call another model issued gets Google's skip value | pending-probe |
+| `claude` | thinking blocks, unchanged, only to the same model (native Messages API; see [Anthropic Claude](#anthropic-claude)) | pending-probe |
 | `openrouter` | nothing yet: `reasoning_details` replay is built but stays off until its probe passes | pending-probe |
+| `mistral` | nothing yet: thinking-chunk replay is built but stays off | — |
 | every other provider | nothing; requests are unchanged | — |
 
 If a provider rejects a request whose earlier turns lack this state or carry it, the error adds a hint: `/compact` continues from a summary without it. The summarize request (and automatic session naming) sends no reasoning state, so it is not rejected for it.
+
+## Anthropic Claude
+
+The `claude` provider uses Anthropic's native Messages API
+([claude-native](../specs/claude-native/spec.md)), not the OpenAI SDK
+compatibility layer. It is **pending-probe**: no live request has been checked
+yet.
+
+- Requests go to `POST https://api.anthropic.com/v1/messages`, streamed, with
+  `x-api-key: <your key>` and `anthropic-version: 2023-06-01`. No
+  `Authorization` header is sent. The key sources are the same as for every
+  API-key provider.
+- The connection check, setup, `/providers` and `/models` read
+  `GET https://api.anthropic.com/v1/models` with the same headers. It supplies
+  display names, context windows, output limits and thinking support.
+- On models that support adaptive thinking (Opus 5.5, Fable 5.1 and 5, Sonnet
+  5.5, Opus 4.7 and others), Claude's summarized reasoning streams into the
+  muted reasoning view. Thinking blocks go back unchanged only to the same
+  model on later requests of a tool loop. Haiku 4.5 and models Likha cannot
+  classify run without thinking.
+- Requests with tools use Anthropic's automatic prompt caching. Cache reads
+  and writes count toward the prompt and are priced at their own rates.
+- Only the exact base URL above uses this wire. A custom `--endpoint`, Bedrock
+  and OpenRouter keep chat completions.
+- A refusal ends the turn with `Claude declined the request (category: …).`
+  and Anthropic's explanation. Errors include Anthropic's request ID.
+- Keys that act on more than one workspace need an `anthropic-workspace-id`
+  header, which Likha does not send.
 
 ## First-run setup (no flags needed)
 

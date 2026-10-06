@@ -67,21 +67,6 @@ func thinkingChunk(replay *ReasoningReplay) *requestThinkingChunk {
 	}
 }
 
-// ReplayRejectedError marks an HTTP 400 on a request whose replay state may
-// be the cause: it lacked state the provider documents as required (Missing
-// counts those assistant messages) or it carried replay state (Sent counts
-// those). Every later request repeats the same history and fails the same
-// way, so the interface points at /compact. Err is the provider error.
-type ReplayRejectedError struct {
-	Missing int
-	Sent    int
-	Err     error
-}
-
-func (e *ReplayRejectedError) Error() string { return e.Err.Error() }
-
-func (e *ReplayRejectedError) Unwrap() error { return e.Err }
-
 // replayEncoder adds replay fields to one request's messages and counts what
 // it sent and what was missing, so a rejection can say whether replay may be
 // to blame.

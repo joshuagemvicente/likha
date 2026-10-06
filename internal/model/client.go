@@ -111,7 +111,7 @@ func New(endpoint, name, apiKey string) (*Client, error) {
 		return nil, errors.New("model name is required")
 	}
 	return &Client{
-		url:        base + "/chat/completions",
+		url:        base + wireFor(base).route(),
 		base:       base,
 		model:      name,
 		apiKey:     apiKey,
@@ -268,6 +268,9 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 	requestID := c.beginTokenUsage()
 	if c.oauth != nil {
 		return c.streamCodex(ctx, messages, tools, onText, onReasoning, requestID)
+	}
+	if c.nativeAnthropic() {
+		return c.streamAnthropic(ctx, messages, tools, onText, onReasoning, requestID)
 	}
 	type streamOptions struct {
 		IncludeUsage bool `json:"include_usage"`
@@ -594,6 +597,10 @@ func (c *Client) Check(ctx context.Context) error {
 		_, err := c.Models(ctx)
 		return err
 	}
+	if c.nativeAnthropic() {
+		_, err := fetchAnthropicModels(ctx, c.http, c.base, c.apiKey)
+		return err
+	}
 	raw, err := fetchModelList(ctx, c.base, c.apiKey)
 	if err != nil {
 		return err
@@ -611,6 +618,9 @@ func ListModels(ctx context.Context, endpoint, apiKey string) ([]string, error) 
 	base, err := parseEndpoint(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnexpectedResponse, err)
+	}
+	if wireFor(base) == WireAnthropic {
+		return anthropicModelIDs(ctx, base, apiKey)
 	}
 	raw, err := fetchModelList(ctx, base, apiKey)
 	if err != nil {
@@ -641,6 +651,9 @@ func ListModelsWithDetails(ctx context.Context, endpoint, apiKey string) ([]Mode
 	base, err := parseEndpoint(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnexpectedResponse, err)
+	}
+	if wireFor(base) == WireAnthropic {
+		return fetchAnthropicModels(ctx, sharedListClient, base, apiKey)
 	}
 	raw, err := fetchModelList(ctx, base, apiKey)
 	if err != nil {

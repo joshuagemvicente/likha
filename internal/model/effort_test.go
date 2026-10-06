@@ -179,6 +179,7 @@ func TestEffortUnavailableReason(t *testing.T) {
 		{"supported", Provider{DisplayName: "OpenAI", Effort: EffortTopLevel}, ""},
 		{"unprobed", Provider{DisplayName: "Groq"}, "not yet verified for Groq"},
 		{"custom endpoint", Provider{}, "not yet verified for this endpoint"},
+		{"note", Provider{DisplayName: "X", EffortNote: "X ignores effort"}, "X ignores effort"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -187,8 +188,10 @@ func TestEffortUnavailableReason(t *testing.T) {
 			}
 		})
 	}
+	// The native client carries effort once FR-40's probe passes, so Claude
+	// is merely unverified (claude-native decision 8).
 	claude, ok := LookupProvider("claude")
-	if !ok || EffortUnavailableReason(claude) != "Anthropic's OpenAI-compatible endpoint ignores effort" {
+	if !ok || EffortUnavailableReason(claude) != "not yet verified for Anthropic Claude" {
 		t.Fatalf("claude reason = %q", EffortUnavailableReason(claude))
 	}
 }

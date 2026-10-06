@@ -1,8 +1,13 @@
 # Feature: Native Claude client (Anthropic Messages API)
 
-**Status:** planned — decisions recorded 2026-10-06 (user delegated defaults);
-no implementation started. Requirement: v1-spec FR-38 (to be amended into
-[v1-spec.md](../v1-spec.md) before implementation). Uses the replay data
+**Status:** implemented (local) 2026-10-06, review fixes 2026-10-07 —
+automated suite green; live admission probe outstanding (the provider stays
+pending-probe). The `/compact` hint for a 400 on replayed thinking (point
+27) shows since the 2026-10-07 merge with reasoning-replay, whose TUI hint
+reads the shared `ReplayRejectedError`. Not yet implemented: FR-36 automatic
+retries of the transient failures in point 28 (model-recovery); a spend-cap
+429 is already shown as a quota error. Decisions recorded 2026-10-06 (user delegated defaults).
+Requirement: v1-spec FR-38 ([v1-spec.md](../v1-spec.md)). Uses the replay data
 model owned by [reasoning-replay](../reasoning-replay/spec.md) (FR-39).
 Effort on this wire is enabled only by the effort probe (FR-40).
 Supersedes the "one table row, no client changes" decision of
