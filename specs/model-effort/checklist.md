@@ -32,7 +32,8 @@ rules in [specs/README.md](../README.md).
 ## Requests
 
 - [ ] At Default, request bodies are byte-identical to bodies sent before
-      this feature, on both wire paths.
+      this feature, on every wire path (chat completions, Responses and
+      Anthropic Messages).
 - [ ] At a level, each main-turn request carries exactly one effort field,
       in the provider's recorded wire form, observed by a test server.
 - [ ] Explore children and profile tasks carry the session's level;

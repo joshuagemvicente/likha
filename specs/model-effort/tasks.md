@@ -36,7 +36,10 @@ and every request is unchanged.
       (`reasoning: {effort}`). Add `Provider.Effort EffortWire` and
       `Provider.EffortNote string`. Only `claude` sets the note:
       "Anthropic's OpenAI-compatible endpoint ignores effort". Every row
-      stays `EffortUnsupported` until M5.
+      stays `EffortUnsupported` until M5. *(Superseded 2026-10-07:
+      claude-native removed the note, so Claude reads `not yet verified for
+      Anthropic Claude` like any unprobed provider, and added the
+      `EffortAnthropic` wire kind for `output_config.effort`.)*
 - [x] **T5. Level resolution.** Add `EffortLevels(p Provider, modelID string,
       live []string) []string`. It returns nil when `p.Effort` is
       unsupported. Otherwise it returns `live` when non-empty, else the
@@ -155,15 +158,21 @@ and every request is unchanged.
       *Verify:* decoder test with a captured OpenRouter fixture.
 - [ ] **T20. Probe and enable, one provider per change.** Probes are run by
       the user with `likha --probe-effort --provider NAME --model ID`
-      ([effort-probe](../effort-probe/spec.md)); recording a report follows
-      effort-probe tasks T16. Per provider, record the result in
-      [context.md](context.md#provider-support-matrix) and
-      `docs/providers.md`, then set `Provider.Effort`. Suggested order:
-      openai, openrouter, gemini, xai, deepseek, then the rest. Before
-      enabling `openai`, the probe must cover a GPT-6 model with tools at a
-      level above `none` (research.md). Mistral may be probed once
-      chunked-content M1 lands, and is enabled only after its M2 lands
-      (chunked-content decision 10).
+      ([effort-probe](../effort-probe/spec.md), FR-40), never by an agent;
+      recording a report follows effort-probe tasks T16. Per provider,
+      record the result in the
+      [probe log](context.md#probe-log) and
+      [matrix](context.md#provider-support-matrix) and in
+      `docs/providers.md`, then set `Provider.Effort` in a separate change
+      that cites a `passed` report against the provider's own endpoint.
+      Suggested order: openai, openrouter, gemini, xai, deepseek, then the
+      rest. Before enabling `openai`, the probe must cover a GPT-6 model with
+      tools at a level above `none` (research.md). Mistral can be probed now
+      (chunked-content M1 landed), and its row's thinking replay is on
+      (chunked-content T10, decision 10), so it waits only for a passed
+      probe. Claude is enabled with `EffortAnthropic` only after a passed
+      probe; `--probe-effort --provider claude` sends the native
+      `output_config` shape since the effort-probe follow-up (2026-10-07).
 - [x] **T21. Docs and changelog.** `docs/usage.md` covers `/effort` and the
       effort step; `docs/providers.md` gets an effort column. Add an
       **Unreleased** entry in `CHANGELOG.md` that states which providers were
@@ -206,3 +215,16 @@ Verification: `go test ./...`, `go vet ./...`, `gofmt` clean, and
 tests. TUI tests enable a provider row in-process the way a passed probe
 would; no shipped row is enabled. Outstanding: T20 live probes, and a
 real-terminal walkthrough of the effort step.
+
+## Merge notes (2026-10-07)
+
+claude-native, chunked-content, reasoning-replay and effort-probe merged
+after this feature. The specs now say: Claude uses the native Messages API
+and carries effort as `output_config.effort` once its probe passes, with the
+switch entry `not yet verified for Anthropic Claude`; Mistral is
+pending-probe because chunked replies parse; reasoning echo is
+reasoning-replay's (FR-39). Copy only; no behavior changed. On merging into
+main, the same day's follow-ups landed first: `--probe-effort` on `claude`
+now sends `output_config.effort`, and the `mistral` row now replays thinking
+(chunked-content T10), so the Claude "not evidence yet" and Mistral "waits
+for replay" wording was updated to match.

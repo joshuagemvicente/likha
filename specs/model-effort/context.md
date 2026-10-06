@@ -6,10 +6,13 @@ spec. All decisions live in [spec.md](spec.md); sources in
 
 ## Wire paths
 
-- Every API-key provider, including `claude` (`https://api.anthropic.com/v1`)
-  and `gemini` (`…/v1beta/openai`), goes through OpenAI-compatible
-  `/chat/completions`. Only `chatgpt` (Sign in with ChatGPT) uses the
-  Responses API.
+- Every API-key provider except `claude`, including `gemini`
+  (`…/v1beta/openai`), goes through OpenAI-compatible `/chat/completions`.
+  `chatgpt` (Sign in with ChatGPT) uses the Responses API. `claude` uses
+  Anthropic's native Messages API since
+  [claude-native](../claude-native/spec.md) (FR-38): `anthropic_client.go`
+  sends a level only as `output_config.effort`, under the `EffortAnthropic`
+  wire kind, and the live `GET /v1/models` list supplies its levels.
 - `internal/model/client.go`
   - `Client.stream` builds the chat-completions body as an anonymous struct
     (`model`, `messages`, `tools`, `stream`, `stream_options`). It has no
@@ -18,9 +21,9 @@ spec. All decisions live in [spec.md](spec.md); sources in
   - `streamChunk.Delta.Content` reads string and chunk-list content.
     Mistral's chunk lists at `high` parse since
     [chunked-content](../chunked-content/spec.md) M1 (resolved).
-  - `ModelDetails` and `decodeModelDetails` parse `id` and context-window
-    fields only. OpenRouter's `reasoning.supported_efforts` and
-    `default_effort` would be added here.
+  - `ModelDetails` and `decodeModelDetails` read OpenRouter's
+    `reasoning.supported_efforts` and `default_effort` into `Efforts` and
+    `DefaultEffort` (tasks T19).
 - `internal/model/codex.go`
   - `codexRequest` and `BuildCodexRequest` build the Responses body. Its doc
     comment promises that unsupported request parameters are never sent. A
@@ -83,8 +86,11 @@ spec. All decisions live in [spec.md](spec.md); sources in
 ## Provider support matrix
 
 No provider can carry effort until a live probe passes. Probes are run by
-the user. Each probe sends one tool-bearing request at each published level
-of one model and records accepted, rejected or ignored.
+the user with `likha --probe-effort --provider NAME --model ID`
+([effort-probe](../effort-probe/spec.md), FR-40). Each probe sends one
+tool-bearing request at Default, at each published level of one model and
+at one invalid control level, and records accepted, rejected,
+ignored-suspected or inconclusive.
 
 | Provider | Wire field | Probe status | Notes |
 | --- | --- | --- | --- |
@@ -96,11 +102,11 @@ of one model and records accepted, rejected or ignored.
 | groq | `reasoning_effort` | pending-probe | |
 | cerebras | `reasoning_effort` | pending-probe | |
 | together | `reasoning_effort` | pending-probe | |
-| mistral | `reasoning_effort` | pending-probe | chunk content parses (chunked-content); probe high with tools; thinking replay on since chunked-content T10 (2026-10-07), so effort waits only for the probe |
+| mistral | `reasoning_effort` | pending-probe | chunked replies parse since chunked-content M1, so the probe can run; probe high with tools; thinking replay on since chunked-content T10 (2026-10-07), so effort waits only for the probe |
 | bedrock | `reasoning_effort` | pending-probe | no `/models`; catalog only |
 | chatgpt | `reasoning: {effort}` (Responses) | pending-probe | revise `BuildCodexRequest` contract |
 | opencode-zen, opencode-go, dialagram | unknown | pending-probe | relays; behavior undocumented |
-| claude | `output_config: {effort}` (native Messages API, `EffortAnthropic`) | pending-probe | native client landed (claude-native); row enabled only by an FR-40 probe |
+| claude | `output_config.effort` (native Messages API, `EffortAnthropic`) | pending-probe | native client landed (claude-native); `--probe-effort --provider claude` sends `output_config.effort` since the effort-probe follow-up (2026-10-07), so a Claude run against Anthropic's own endpoint can be evidence; row enabled only by a passed FR-40 probe |
 
 ### Probe log
 
@@ -116,28 +122,39 @@ has been run yet.
 
 ## Known gaps (not in this feature)
 
-- **Reasoning echo.** DeepSeek (thinking on by default) requires
-  `reasoning_content` to be passed back when tools are present, and Gemini 3
-  requires thought signatures on tool calls. Likha never sends reasoning back
-  (FR-15). These failures can happen today at default effort, independent of
-  this feature. They need their own spec.
+Each gap below is resolved in code (implemented (local)); none is verified
+against a live provider, and enabling effort on any row still waits for the
+user-run probe.
+
+- **Reasoning echo.** Resolved by
+  [reasoning-replay](../reasoning-replay/spec.md) (FR-39, which amends
+  FR-15): DeepSeek's `reasoning_content` and Gemini 3's tool-call thought
+  signatures are kept and sent back only to their issuer. Its live probes
+  (reasoning-replay tasks T18) are outstanding.
 - **Mistral chunk content.** Resolved by
   [chunked-content](../chunked-content/spec.md): chunk lists parse (M1) and
-  Mistral thinking is replayed to its issuer (M2). Enabling effort still
-  waits for the user-run probe.
-- **Native Claude client.** Needed for Claude effort, visible thinking and
-  prompt caching. *(Landed locally 2026-10-06 as
-  [claude-native](../claude-native/spec.md); effort stays off until the
-  FR-40 probe.)*
+  Mistral thinking capture and replay are built (M2), and the `mistral` row
+  replays thinking since chunked-content T10 (2026-10-07), so decision 10
+  now holds Mistral effort only until its probe passes. Live Mistral replay
+  is unverified until the user's probe (chunked-content T9).
+- **Native Claude client.** Resolved by
+  [claude-native](../claude-native/spec.md) (FR-38): Claude uses the
+  Messages API, with effort wired as `output_config.effort`. The row stays
+  off until a Claude probe passes; the probe sends the native
+  `output_config` shape since the 2026-10-07 follow-up
+  ([effort-probe](../effort-probe/tasks.md) merge note, resolved).
 
 ## Specs and docs
 
 - [v1-spec.md](../v1-spec.md):
   - FR-03: reserved commands, visible errors for bad input, draft kept.
   - FR-11: errors stay visible.
-  - FR-15: reasoning is never sent back.
+  - FR-15: display reasoning is never sent back (amended by FR-39).
   - FR-36: rejected requests are not retried.
   - FR-37: this feature.
+  - FR-38: the native Claude client ([claude-native](../claude-native/spec.md)).
+  - FR-39: reasoning replay ([reasoning-replay](../reasoning-replay/spec.md)).
+  - FR-40: the effort probe ([effort-probe](../effort-probe/spec.md)).
 - [all-models](../all-models/spec.md), [models-perf](../models-perf/spec.md):
   the `/models` dialog this feature extends.
 - [model-metadata](../model-metadata/spec.md): the catalog and override rules.

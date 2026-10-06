@@ -1,8 +1,11 @@
 # Feature: Model effort (choose how hard a reasoning model thinks)
 
 **Status:** in progress — M1–M4 and live OpenRouter levels implemented (local)
-2026-10-06, automated suite green; provider live probes (M5) outstanding, so no
-provider carries effort yet and the effort step appears nowhere. Requirement: [v1-spec FR-37](../v1-spec.md#model-effort-amendment-user-approved-2026-10-06).
+2026-10-06, automated suite green; provider live probes (M5, run by the user
+with `likha --probe-effort`) outstanding, so no provider carries effort yet
+and the effort step appears nowhere. Claude wording revised 2026-10-07 after
+the merges with claude-native, chunked-content, reasoning-replay and
+effort-probe. Requirement: [v1-spec FR-37](../v1-spec.md#model-effort-amendment-user-approved-2026-10-06).
 Replaces the earlier `/think` draft (formerly `specs/thinking-control/`).
 
 ## Context
@@ -51,16 +54,19 @@ Out of scope:
 - Token-budget control. Models that publish only a thinking budget or an
   on/off switch get no effort choice, unless the catalog records a
   provider-documented level list for them (decision 8).
-- Claude effort on the wire. The native Messages API client
-  ([claude-native](../claude-native/spec.md)) carries effort as
-  `output_config.effort`, but the `claude` row stays unsupported until its
-  FR-40 probe passes, like every other provider. (Superseded 2026-10-06: this
-  bullet said Claude's OpenAI-compatible endpoint ignores effort; Claude no
-  longer uses that endpoint.)
+- Enabling Claude effort. The native Messages API client
+  ([claude-native](../claude-native/spec.md), FR-38) already carries a level
+  as `output_config.effort`, but the `claude` row stays unsupported until a
+  user-run FR-40 probe on Anthropic's own endpoint passes, like every other
+  provider. (Superseded 2026-10-06: this bullet said Claude's
+  OpenAI-compatible endpoint ignores effort; Claude no longer uses that
+  endpoint.)
 - A command-line flag or environment variable for effort.
 - Prompt keywords. `ultrathink` and similar words in a prompt are ordinary
   user text.
-- Sending reasoning back to the provider. FR-15 is unchanged.
+- Sending reasoning back to the provider. Display reasoning is never sent
+  (FR-15 as amended by FR-39); provider-issued replay state belongs to
+  [reasoning-replay](../reasoning-replay/spec.md).
 
 ## Decisions (user interview, 2026-10-06)
 
@@ -72,9 +78,14 @@ Out of scope:
    before this feature, and the provider applies its own default.
 4. **First-run setup does not ask.** New users start at Default.
 5. **Providers that cannot carry effort skip the step.** These are providers
-   without a passed live probe, Claude included until its native-wire probe
-   passes ([claude-native](../claude-native/spec.md) decision 8). The switch
-   is not silent: Likha says effort stays at the provider default and why.
+   without a passed live probe. Claude is one of them: its native Messages
+   API carries effort as `output_config.effort`, but the row stays off until
+   its `output_config` probe passes
+   ([claude-native](../claude-native/spec.md) decision 8,
+   [effort-probe](../effort-probe/spec.md)). The switch is not silent: Likha
+   says effort stays at the provider default and why. (Revised 2026-10-07:
+   Claude was first excluded because its OpenAI-compatible endpoint ignored
+   effort; it no longer uses that endpoint.)
 6. **The command is `/effort`.** It uses the same word as the provider APIs,
    Codex CLI and Claude Code. It replaces the draft's `/think`.
 7. **The level is remembered per provider and model** in the private
@@ -116,7 +127,9 @@ Out of scope:
 6. Enter on a reasoning model whose provider cannot carry effort switches
    immediately. The conversation entry adds why effort stays at the provider
    default: `Effort stays at the provider default: not yet verified for
-   <provider>.` (for Claude: `… not yet verified for Anthropic Claude.`)
+   <provider>.` Claude uses the same wording as every unprobed provider:
+   `Effort stays at the provider default: not yet verified for Anthropic
+   Claude.`
 7. Switching models refuses during an active run or pending review, as today.
    The step is never opened in that state.
 
@@ -189,8 +202,9 @@ Out of scope:
 - Esc in the step returns to the model list and leaves model, level and
   `config.json` unchanged.
 - A model without levels, or on an unprobed provider, switches on the first
-  Enter. A reasoning model on an unprobed provider, Claude included, gets the
-  explanation in its switch entry.
+  Enter. A reasoning model on an unprobed provider gets the explanation in
+  its switch entry; on Claude it reads `not yet verified for Anthropic
+  Claude`, with no claim that the endpoint ignores effort.
 - Re-opening `/models` and pressing Enter on the same model puts the cursor
   on the remembered level.
 - `/effort high` sets the level, `/effort` opens the step, and
