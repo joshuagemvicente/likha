@@ -119,9 +119,12 @@ type Plan struct {
 	Shapes           []Shape
 	// Documented is the provider's documented shape among Shapes, if any;
 	// it wins when more than one shape is eligible (spec point 20).
-	Documented   *Shape
-	Levels       []Level
-	LevelSource  string
+	Documented  *Shape
+	Levels      []Level
+	LevelSource string
+	// Published is every level the model publishes, probed or not.
+	// Eligibility needs each of them probed and accepted (spec point 20).
+	Published    []string
 	Caps         Caps
 	Notes        []string
 	LikhaVersion string
@@ -146,7 +149,8 @@ func NewPlan(p model.Provider, modelID string, live []string, opts Options) (Pla
 	if err != nil {
 		return Plan{}, err
 	}
-	levels, source, err := planLevels(p, modelID, live, opts.Levels)
+	published := publishedLevels(p, modelID, live)
+	levels, source, err := planLevels(published, modelID, p.Name, len(live) > 0, opts.Levels)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -157,7 +161,7 @@ func NewPlan(p model.Provider, modelID string, live []string, opts Options) (Pla
 	plan := Plan{
 		Provider: p, Model: modelID, Endpoint: endpoint, EndpointOverride: override,
 		Shapes: shapes, Documented: documented, Levels: levels, LevelSource: source,
-		Caps: DefaultCaps(), LikhaVersion: opts.LikhaVersion, secrets: nonEmpty(opts.Secrets),
+		Published: published, Caps: DefaultCaps(), LikhaVersion: opts.LikhaVersion, secrets: nonEmpty(opts.Secrets),
 	}
 	if p.Name == "claude" {
 		plan.Notes = append(plan.Notes, claudeCompatNote)
@@ -212,18 +216,24 @@ func matchShape(doc *Shape, s Shape) *Shape {
 	return nil
 }
 
-// planLevels resolves the levels as /models does, with the effort wire
-// forced on for a local copy of the provider row only (tasks T3).
-func planLevels(p model.Provider, modelID string, live, requested []string) ([]Level, string, error) {
+// publishedLevels resolves the model's levels as /models does, with the
+// effort wire forced on for a local copy of the provider row only (tasks T3).
+func publishedLevels(p model.Provider, modelID string, live []string) []string {
 	probeRow := p
 	probeRow.Effort = model.EffortTopLevel // any carrying wire; the row itself is untouched
-	published := model.EffortLevels(probeRow, modelID, live)
+	return model.EffortLevels(probeRow, modelID, live)
+}
+
+// planLevels picks the levels to probe: the published ones, or the
+// --probe-levels names with unpublished ones marked. fromLive says the
+// published list came from the provider's live model list.
+func planLevels(published []string, modelID, provider string, fromLive bool, requested []string) ([]Level, string, error) {
 	if len(requested) == 0 {
 		if len(published) == 0 {
-			return nil, "", fmt.Errorf("%w: %s publishes no effort levels on %s; nothing to probe (use --probe-levels to test candidate levels)", ErrNoLevels, modelID, p.Name)
+			return nil, "", fmt.Errorf("%w: %s publishes no effort levels on %s; nothing to probe (use --probe-levels to test candidate levels)", ErrNoLevels, modelID, provider)
 		}
 		source := SourceCatalog
-		if len(live) > 0 {
+		if fromLive {
 			source = SourceLive
 		}
 		levels := make([]Level, 0, len(published))

@@ -3,6 +3,8 @@ package effortprobe
 import (
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 )
 
 // Verdict is a row's judgement (spec points 13–18).
@@ -146,7 +148,7 @@ func evaluateShape(plan Plan, shape string, rows []Row, defaultVerdict Verdict) 
 		}
 	}
 	addSameAsNotes(rows, s.levels, signal)
-	eligible, reason := eligibility(rows, s.levels, defaultVerdict, control, finding)
+	eligible, reason := eligibility(plan.Published, rows, s.levels, defaultVerdict, control, finding)
 	return ShapeSummary{
 		Shape: shape, Signal: signal, Finding: finding, Control: control, Eligible: eligible,
 		Eligibility: eligibilityLine(plan, shape, eligible, reason),
@@ -319,10 +321,15 @@ func nearlyEqual(a, b int64) bool {
 }
 
 // eligibility applies spec point 20 and returns the first blocking reason.
-// Notes never block, and unpublished levels never count.
-func eligibility(rows []Row, levels []int, defaultVerdict, control Verdict, finding Finding) (bool, string) {
+// Every level the model publishes must have been probed and accepted, so a
+// --probe-levels subset or a run on unpublished levels only never makes a
+// shape eligible (decision 13). Notes never block.
+func eligibility(published []string, rows []Row, levels []int, defaultVerdict, control Verdict, finding Finding) (bool, string) {
 	if defaultVerdict != VerdictBaseline {
 		return false, fmt.Sprintf("Default was %s", defaultVerdict)
+	}
+	if reason := unprobedPublished(published, rows, levels); reason != "" {
+		return false, reason
 	}
 	for _, i := range levels {
 		row := rows[i]
@@ -338,6 +345,30 @@ func eligibility(rows []Row, levels []int, defaultVerdict, control Verdict, find
 		return false, fmt.Sprintf("levels %s and the control was %s, so nothing shows the field is read", finding, control)
 	}
 	return true, ""
+}
+
+// unprobedPublished names what keeps the shape's rows from covering the
+// model's published levels, or returns "" when every one was probed.
+func unprobedPublished(published []string, rows []Row, levels []int) string {
+	var probed []string
+	for _, i := range levels {
+		if rows[i].Published {
+			probed = append(probed, rows[i].Level)
+		}
+	}
+	if len(probed) == 0 {
+		return "no published level was probed; unpublished levels never count toward eligibility"
+	}
+	var missing []string
+	for _, name := range published {
+		if !slices.Contains(probed, name) {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Sprintf("not every published level was probed (missing: %s)", strings.Join(missing, ", "))
+	}
+	return ""
 }
 
 func eligibilityLine(plan Plan, shape string, eligible bool, reason string) string {

@@ -50,8 +50,21 @@ var validated = control(OutcomeHTTPError, http.StatusBadRequest)
 var unvalidated = control(OutcomeOK, http.StatusOK)
 var controlTimeout = control(OutcomeTimeout, http.StatusOK)
 
-func topPlan(override bool) Plan {
-	return Plan{Provider: lookupProvider("openai"), Shapes: []Shape{shapeTop}, Documented: &shapeTop, EndpointOverride: override}
+// topPlan is a reasoning_effort plan whose model publishes exactly the
+// published level rows of rows, so every published level was probed.
+func topPlan(override bool, rows []Row) Plan {
+	return Plan{Provider: lookupProvider("openai"), Shapes: []Shape{shapeTop}, Documented: &shapeTop,
+		EndpointOverride: override, Published: publishedIn(rows)}
+}
+
+func publishedIn(rows []Row) []string {
+	var names []string
+	for _, row := range rows {
+		if row.Kind == KindLevel && row.Published && !slices.Contains(names, row.Level) {
+			names = append(names, row.Level)
+		}
+	}
+	return names
 }
 
 func TestEvaluate(t *testing.T) {
@@ -157,7 +170,7 @@ func TestEvaluate(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rows := slices.Clone(tc.rows)
-			summary := evaluate(topPlan(tc.overrideRun), rows)
+			summary := evaluate(topPlan(tc.overrideRun, rows), rows)
 			if got := verdicts(rows); !slices.Equal(got, tc.want) {
 				t.Fatalf("verdicts = %v, want %v", got, tc.want)
 			}
@@ -211,7 +224,8 @@ func TestEvaluateRecommendsOneShape(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan := Plan{Provider: lookupProvider("opencode-go"), Shapes: []Shape{shapeTop, shapeObject}, Documented: tc.documented}
+			plan := Plan{Provider: lookupProvider("opencode-go"), Shapes: []Shape{shapeTop, shapeObject}, Documented: tc.documented,
+				Published: []string{"low", "high"}}
 			summary := evaluate(plan, rows(tc.objectCtl))
 			if !summary.Shapes[0].Eligible || !summary.Shapes[1].Eligible || summary.Recommended != tc.want {
 				t.Fatalf("summary = %+v", summary)
@@ -224,8 +238,57 @@ func TestEvaluateUnpublishedLevelsNeverCount(t *testing.T) {
 	rejected := failed(KindLevel, "reasoning_effort", "turbo", OutcomeHTTPError, http.StatusBadRequest)
 	rejected.Published = false
 	rows := []Row{defaultOK(), level("low", 100), level("high", 2000), rejected, validated}
-	summary := evaluate(topPlan(false), rows)
+	summary := evaluate(topPlan(false, rows), rows)
 	if rows[3].Verdict != VerdictRejected || !summary.Shapes[0].Eligible {
 		t.Fatalf("an unpublished rejected level blocked eligibility: %+v", summary.Shapes[0])
+	}
+}
+
+// Eligibility needs every level the model publishes to have been probed
+// and accepted; unpublished levels never stand in for them (spec point 20,
+// decision 13).
+func TestEvaluateEligibilityNeedsEveryPublishedLevel(t *testing.T) {
+	unpublished := func(name string, reasoning int64) Row {
+		row := level(name, reasoning)
+		row.Published = false
+		return row
+	}
+	cases := []struct {
+		name      string
+		published []string
+		rows      []Row
+		reason    string
+	}{
+		{
+			name:      "a subset of the published levels",
+			published: gpt55Levels,
+			rows:      []Row{defaultOK(), level("medium", 600), level("high", 2000), validated},
+			reason:    "not every published level was probed (missing: none, low, xhigh)",
+		},
+		{
+			name:   "only unpublished levels on a model that publishes none",
+			rows:   []Row{defaultOK(), unpublished("low", 100), unpublished("high", 2000), validated},
+			reason: "no published level was probed; unpublished levels never count toward eligibility",
+		},
+		{
+			name:      "only unpublished levels on a model that publishes some",
+			published: []string{"low", "high"},
+			rows:      []Row{defaultOK(), unpublished("turbo", 100), unpublished("max", 2000), validated},
+			reason:    "no published level was probed; unpublished levels never count toward eligibility",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := topPlan(false, nil)
+			plan.Published = tc.published
+			summary := evaluate(plan, slices.Clone(tc.rows))
+			s := summary.Shapes[0]
+			if s.Eligible || summary.Recommended != "" {
+				t.Fatalf("eligible with unprobed published levels: %+v, recommended %q", s, summary.Recommended)
+			}
+			if !strings.Contains(s.Eligibility, "no — "+tc.reason) {
+				t.Fatalf("eligibility = %q, want reason %q", s.Eligibility, tc.reason)
+			}
+		})
 	}
 }

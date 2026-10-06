@@ -49,6 +49,7 @@ type Report struct {
 	EndpointOverride bool       `json:"endpoint_override"`
 	Shapes           []string   `json:"shapes"`
 	Levels           []Level    `json:"levels"`
+	PublishedLevels  []string   `json:"published_levels"`
 	LevelSource      string     `json:"level_source"`
 	Caps             ReportCaps `json:"caps"`
 	TaskVersion      int        `json:"task_version"`
@@ -67,7 +68,7 @@ func newReport(plan Plan, start time.Time) Report {
 	return Report{
 		FormatVersion: formatVersion, LikhaVersion: plan.LikhaVersion, StartedAt: start.UTC(),
 		Provider: plan.Provider.Name, Model: plan.Model, Endpoint: plan.Endpoint, EndpointOverride: plan.EndpointOverride,
-		Shapes: shapes, Levels: plan.Levels, LevelSource: plan.LevelSource,
+		Shapes: shapes, Levels: plan.Levels, PublishedLevels: plan.Published, LevelSource: plan.LevelSource,
 		Caps: ReportCaps{
 			MaxRequests: plan.Caps.MaxRequests, CompletionTokenBudget: plan.Caps.TokenBudget,
 			RequestTimeoutSeconds: int64(plan.Caps.RequestTimeout / time.Second), AssumedOutputTokens: plan.Caps.AssumedOutput,

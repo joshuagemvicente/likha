@@ -415,10 +415,15 @@ func TestRunChatGPTUsesResponsesReasoningObject(t *testing.T) {
 	if !slices.Contains(low.Notes, noteUnpub) {
 		t.Fatalf("unpublished level lacks its note: %v", low.Notes)
 	}
-	// Unpublished levels never count toward eligibility; with none
-	// published the shape is unmeasured but the control was validated.
-	if s := run.report.Summary.Shapes[0]; s.Shape != "reasoning.effort" || s.Control != VerdictValidated {
-		t.Fatalf("summary = %+v", s)
+	// Unpublished levels never count toward eligibility: even with the
+	// control validated, a run on unpublished levels only can support a
+	// catalog override, never enabling (decision 13).
+	s := run.report.Summary.Shapes[0]
+	if s.Shape != "reasoning.effort" || s.Control != VerdictValidated || s.Eligible || run.report.Summary.Recommended != "" {
+		t.Fatalf("summary = %+v, recommended %q", s, run.report.Summary.Recommended)
+	}
+	if !strings.Contains(s.Eligibility, "no published level was probed") || strings.Contains(run.table, "Recommended shape") {
+		t.Fatalf("eligibility = %q\n%s", s.Eligibility, run.table)
 	}
 	if !strings.Contains(run.table, "cost: plan allowance") {
 		t.Fatalf("ChatGPT rows must not show a per-token charge:\n%s", run.table)

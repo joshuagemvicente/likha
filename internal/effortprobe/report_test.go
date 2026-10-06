@@ -55,7 +55,7 @@ func TestWriteReportRoundTripAndModes(t *testing.T) {
 	if decoded.FormatVersion != formatVersion || decoded.TaskVersion != probeTaskVersion || decoded.Caps.RequestTimeoutSeconds != 180 {
 		t.Fatalf("report header = %+v", decoded)
 	}
-	for _, key := range []string{`"format_version"`, `"likha_version"`, `"started_at"`, `"endpoint_override"`, `"level_source"`, `"rows"`, `"summary"`, `"interrupted"`, `"disclaimer"`} {
+	for _, key := range []string{`"format_version"`, `"likha_version"`, `"started_at"`, `"endpoint_override"`, `"level_source"`, `"published_levels"`, `"rows"`, `"summary"`, `"interrupted"`, `"disclaimer"`} {
 		if !strings.Contains(string(raw), key) {
 			t.Fatalf("report lacks %s", key)
 		}
