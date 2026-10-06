@@ -51,7 +51,7 @@ var Providers = []Provider{
 	{Name: "groq", DisplayName: "Groq", BaseURL: "https://api.groq.com/openai/v1", KeyEnv: "LIKHA_GROQ_API_KEY", Hosted: true},
 	{Name: "xai", DisplayName: "xAI", BaseURL: "https://api.x.ai/v1", KeyEnv: "LIKHA_XAI_API_KEY", Hosted: true},
 	{Name: "together", DisplayName: "Together AI", BaseURL: "https://api.together.ai/v1", KeyEnv: "LIKHA_TOGETHER_API_KEY", Hosted: true},
-	{Name: "mistral", DisplayName: "Mistral AI", BaseURL: "https://api.mistral.ai/v1", KeyEnv: "LIKHA_MISTRAL_API_KEY", Hosted: true, Replay: ReplayThinkingChunk},
+	{Name: "mistral", DisplayName: "Mistral AI", BaseURL: "https://api.mistral.ai/v1", KeyEnv: "LIKHA_MISTRAL_API_KEY", Hosted: true},
 	{Name: "cerebras", DisplayName: "Cerebras", BaseURL: "https://api.cerebras.ai/v1", KeyEnv: "LIKHA_CEREBRAS_API_KEY", Hosted: true},
 	{Name: "claude", DisplayName: "Anthropic Claude", BaseURL: "https://api.anthropic.com/v1", KeyEnv: "LIKHA_CLAUDE_API_KEY", DefaultModel: "claude-opus-5-5", Hosted: true, EffortNote: "Anthropic's OpenAI-compatible endpoint ignores effort"},
 	{Name: "deepseek", DisplayName: "DeepSeek", BaseURL: "https://api.deepseek.com/v1", KeyEnv: "LIKHA_DEEPSEEK_API_KEY", DefaultModel: "deepseek-flash", Hosted: true},

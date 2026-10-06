@@ -9,13 +9,17 @@ import (
 	"testing"
 )
 
-func TestMistralRowRecordsThinkingReplay(t *testing.T) {
+// The mistral row keeps replay off until FR-39's rejection hint exists
+// (specs/chunked-content T10): a replayed shape Mistral rejects would
+// otherwise fail every later turn with a bare HTTP 400 and no way out named.
+// The thinking-chunk wire is exercised through setReplayWire meanwhile.
+func TestMistralRowKeepsReplayOff(t *testing.T) {
 	cases := []struct {
 		name string
 		base string
 		want ReplayWire
 	}{
-		{"mistral", "https://api.mistral.ai/v1", ReplayThinkingChunk},
+		{"mistral", "https://api.mistral.ai/v1", ReplayNone},
 		{"relay passing chunks through", "https://openrouter.ai/api/v1", ReplayNone},
 		{"custom endpoint", "http://127.0.0.1:8080/v1", ReplayNone},
 	}
@@ -336,6 +340,7 @@ func TestClientEstimateCountsThinkingReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	client.setReplayWire(ReplayThinkingChunk)
 	replay, err := NewReasoningReplay(client.ReplaySource(), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -29,7 +29,9 @@ const (
 	ReplayAnthropicBlocks
 	// ReplayThinkingChunk sends Mistral thinking back as one leading
 	// "thinking" chunk inside a list-shaped content (specs/chunked-content
-	// M2).
+	// M2). The mistral row stays off until FR-39's rejection hint exists
+	// (chunked-content T10), since a rejected replay would repeat on every
+	// later turn with no way out named.
 	ReplayThinkingChunk
 )
 
