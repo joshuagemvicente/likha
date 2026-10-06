@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -197,6 +198,46 @@ func TestProbeRunsAndChangesNoConfiguration(t *testing.T) {
 	}
 	if strings.Contains(out+stderr.String()+string(readFile(t, path)), probeTestKey) {
 		t.Fatal("the API key appears in the output or the report")
+	}
+}
+
+// brokenResultsWriter accepts the plan, then fails every write from the
+// results table on, as a stdout on a full disk would.
+type brokenResultsWriter struct {
+	bytes.Buffer
+	broken bool
+}
+
+var errStdoutFull = errors.New("no space left on device")
+
+func (w *brokenResultsWriter) Write(p []byte) (int, error) {
+	if bytes.HasPrefix(p, []byte("Effort probe results")) {
+		w.broken = true
+	}
+	if w.broken {
+		return 0, errStdoutFull
+	}
+	return w.Buffer.Write(p)
+}
+
+func TestProbeUnprintedResultsFailButKeepReport(t *testing.T) {
+	state := probeEnv(t)
+	server := newProbeServer(t, 0)
+	var stdout brokenResultsWriter
+	var stderr bytes.Buffer
+	args := []string{"--probe-effort", "--provider", "openai", "--model", "gpt-5.5", "--endpoint", server.endpoint(), "--api-key", probeTestKey, "--yes"}
+	if code := Run(args, &stdout, &stderr); code != 1 {
+		t.Fatalf("exit = %d, want 1 when the results could not be printed; stderr = %s", code, stderr.String())
+	}
+	entries, err := os.ReadDir(filepath.Join(state, "effort-probes"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("the paid-for report was not kept: %v, %v", entries, err)
+	}
+	path := filepath.Join(state, "effort-probes", entries[0].Name())
+	for _, want := range []string{"print probe results: " + errStdoutFull.Error(), "Report: " + path} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr lacks %q:\n%s", want, stderr.String())
+		}
 	}
 }
 

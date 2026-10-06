@@ -325,7 +325,9 @@ Each was an open choice; the recommended option was taken.
     added instead. The path is printed last. A report is written for every
     run that sent at least one model request, including runs stopped by
     point 4's Default failure or a 401/403. A report that cannot be written
-    is an error (exit 1), and the table has already been printed.
+    is an error (exit 1), and the table has already been printed. A table
+    that cannot be printed (stdout closed or full) is also an error (exit 1),
+    after the report is written; the report path then goes to stderr.
 24. The report holds: its format version, Likha's version, start and end
     times, provider, model, endpoint scheme and host (never credentials,
     path, query or fragment), whether the endpoint was overridden, shapes,
@@ -367,7 +369,7 @@ Each was an open choice; the recommended option was taken.
 | Code | Meaning |
 | --- | --- |
 | 0 | The probe ran to the end and the report was written, whatever the verdicts. |
-| 1 | Declined at the prompt, Default failed with anything but 400/422, a 401/403 stopped the run, or the report could not be written. |
+| 1 | Declined at the prompt, Default failed with anything but 400/422, a 401/403 stopped the run, the report could not be written, or the results could not be printed (the report is still written and its path goes to stderr). |
 | 2 | Usage error (including a missing provider or model), unknown provider, missing credential, a plan above 17 requests, or no levels to probe. Nothing was sent. |
 | 130 | Interrupted with Ctrl+C. A partial report was written if any model request had been sent. |
 

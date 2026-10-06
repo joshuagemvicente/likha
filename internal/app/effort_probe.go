@@ -101,8 +101,12 @@ func effortProbeFlow(cfg probeConfig, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "likha: %v\n", err)
 		return probeExitFailed
 	}
-	if err := effortprobe.WriteTable(stdout, report); err != nil {
-		fmt.Fprintf(stderr, "likha: print probe results: %v\n", err)
+	// A failed table print does not stop here: the requests are already paid
+	// for, so the report is still saved. The run then exits 1, since the user
+	// never saw the verdicts.
+	printErr := effortprobe.WriteTable(stdout, report)
+	if printErr != nil {
+		fmt.Fprintf(stderr, "likha: print probe results: %v\n", printErr)
 	}
 	if report.Sent() > 0 {
 		path, err := effortprobe.WriteReport(stateDir, report)
@@ -110,9 +114,18 @@ func effortProbeFlow(cfg probeConfig, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "likha: write probe report: %v\n", err)
 			return probeExitFailed
 		}
-		fmt.Fprintf(stdout, "Report: %s\n", path)
+		if printErr != nil {
+			fmt.Fprintf(stderr, "Report: %s\n", path)
+		} else if _, err := fmt.Fprintf(stdout, "Report: %s\n", path); err != nil {
+			fmt.Fprintf(stderr, "likha: print report path %s: %v\n", path, err)
+			printErr = err
+		}
 	}
-	return probeExitCode(report)
+	code = probeExitCode(report)
+	if code == probeExitOK && printErr != nil {
+		return probeExitFailed
+	}
+	return code
 }
 
 func probeExitCode(report effortprobe.Report) int {
