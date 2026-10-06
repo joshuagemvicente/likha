@@ -25,13 +25,16 @@ type usageReport struct {
 // two totals (specs/model-metadata § Token accounting). Absent fields stay
 // zero; costSeen marks a provider-reported charge.
 type usageDetail struct {
-	cacheRead  int64   // prompt tokens read from cache (subset of prompt)
-	cacheWrite int64   // prompt tokens written to cache (subset of prompt)
-	reasoning  int64   // reasoning tokens (subset of completion once normalized)
-	total      int64   // total_tokens, when totalSeen
-	totalSeen  bool    // total_tokens was a valid count
-	cost       float64 // provider-charged US dollars
-	costSeen   bool
+	cacheRead  int64 // prompt tokens read from cache (subset of prompt)
+	cacheWrite int64 // prompt tokens written to cache (subset of prompt)
+	reasoning  int64 // reasoning tokens (subset of completion once normalized)
+	// reasoningSeen marks a valid reported reasoning count, so a reported
+	// zero is distinguishable from an absent count (specs/effort-probe).
+	reasoningSeen bool
+	total         int64   // total_tokens, when totalSeen
+	totalSeen     bool    // total_tokens was a valid count
+	cost          float64 // provider-charged US dollars
+	costSeen      bool
 }
 
 // withAdditiveReasoning folds reasoning tokens into the completion count when
@@ -64,7 +67,8 @@ func (r usageReport) request() RequestUsage {
 	return RequestUsage{
 		Prompt: r.usage.Prompt, Completion: r.usage.Completion,
 		PromptSeen: r.usage.PromptSeen, CompletionSeen: r.ok && r.seen.completion,
-		CacheRead: r.detail.cacheRead, CacheWrite: r.detail.cacheWrite, Reasoning: r.detail.reasoning,
+		CacheRead: r.detail.cacheRead, CacheWrite: r.detail.cacheWrite,
+		Reasoning: r.detail.reasoning, ReasoningSeen: r.detail.reasoningSeen,
 		Cost: r.detail.cost, CostSeen: r.detail.costSeen,
 	}
 }
@@ -113,9 +117,9 @@ func parseUsageDetail(usage map[string]json.RawMessage) usageDetail {
 		d.cacheWrite = n
 	}
 	if n, ok := nested("completion_tokens_details", "reasoning_tokens"); ok {
-		d.reasoning = n
+		d.reasoning, d.reasoningSeen = n, true
 	} else if n, ok := nested("output_tokens_details", "reasoning_tokens"); ok {
-		d.reasoning = n
+		d.reasoning, d.reasoningSeen = n, true
 	}
 	if n, ok := count(usage["total_tokens"]); ok {
 		d.total, d.totalSeen = n, true

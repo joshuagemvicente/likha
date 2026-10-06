@@ -129,6 +129,41 @@ func (c *Client) ForkForTask(beforeRequest func(context.Context) error) (*Client
 	return child, nil
 }
 
+// ForkWithTransport forks the active client and sends its HTTP requests
+// through wrap(inherited transport), so a caller can observe each request it
+// makes (specs/effort-probe: status, header latency, outgoing body). The
+// wrapper sees every attempt Stream makes on the fork, including the
+// stream_options fallback and Codex's post-401 retry; model-list GETs on the
+// fork pass through it too. OAuth token refreshes do not: they use the shared
+// session's original client. The parent's transport is never changed.
+//
+// The wrapper must not read or record request headers, which carry the
+// credential. When it reads a request body it must leave req.Body intact,
+// for example by reading a copy from req.GetBody (set for every request
+// this package builds). Fork's configuration-boundary requirements apply.
+func (c *Client) ForkWithTransport(wrap func(http.RoundTripper) http.RoundTripper) (*Client, error) {
+	if wrap == nil {
+		return nil, errors.New("fork observed model client: transport wrapper is required")
+	}
+	child, err := c.Fork()
+	if err != nil {
+		return nil, err
+	}
+	// Copy only the http.Client's immutable configuration, as ForkForTask does.
+	httpClient := *child.http
+	next := httpClient.Transport
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	wrapped := wrap(next)
+	if wrapped == nil {
+		return nil, errors.New("fork observed model client: transport wrapper returned nil")
+	}
+	httpClient.Transport = wrapped
+	child.http = &httpClient
+	return child, nil
+}
+
 // taskRequestTransport is immutable after construction. Only the generating
 // endpoint is gated; credentials, request bodies, and usage are not retained.
 type taskRequestTransport struct {
