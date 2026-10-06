@@ -257,6 +257,27 @@ func TestProbeUnauthorizedStillWritesReport(t *testing.T) {
 	}
 }
 
+// The probe flags' help text is copied into docs/usage.md; this keeps the
+// two identical.
+func TestProbeHelpMatchesUsageDoc(t *testing.T) {
+	help := usageText()
+	start := strings.Index(help, "  --probe-effort")
+	end := strings.Index(help, "without a prompt.\n")
+	if start < 0 || end < start {
+		t.Fatalf("help lacks the probe flags:\n%s", help)
+	}
+	block := help[start : end+len("without a prompt.\n")]
+	for _, flagName := range []string{"--probe-effort", "--probe-wire", "--probe-levels", "--yes"} {
+		if !strings.Contains(block, flagName) {
+			t.Fatalf("help block lacks %s", flagName)
+		}
+	}
+	doc := readFile(t, filepath.Join("..", "..", "docs", "usage.md"))
+	if !strings.Contains(string(doc), block) {
+		t.Fatalf("docs/usage.md does not carry the help text verbatim:\n%s", block)
+	}
+}
+
 func TestProbeNoLevelsExitsBeforeAnyRequest(t *testing.T) {
 	probeEnv(t)
 	server := newProbeServer(t, 0)

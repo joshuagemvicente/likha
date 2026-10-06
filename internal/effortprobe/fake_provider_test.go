@@ -42,6 +42,7 @@ type fakeProvider struct {
 
 	mu    sync.Mutex
 	posts []string // effort field of each POST: "reasoning_effort=high", "reasoning.effort=low" or "none"
+	rests []string // each POST body with its effort fields removed
 }
 
 func newFakeProvider(t *testing.T, behave behavior) *fakeProvider {
@@ -58,6 +59,30 @@ func (f *fakeProvider) recorded() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.posts...)
+}
+
+// bodiesWithoutEffort returns every POST body minus its effort fields.
+func (f *fakeProvider) bodiesWithoutEffort() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.rests...)
+}
+
+// withoutEffort re-encodes a body without the fields that carry effort, so
+// requests can be compared on everything else.
+func withoutEffort(t *testing.T, raw []byte) string {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Errorf("request body is not JSON: %v", err)
+		return ""
+	}
+	delete(fields, "reasoning_effort")
+	delete(fields, "reasoning")
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		t.Errorf("re-encode body: %v", err)
+	}
+	return string(encoded)
 }
 
 func (f *fakeProvider) serve(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +102,7 @@ func (f *fakeProvider) serve(w http.ResponseWriter, r *http.Request) {
 	effort, label, carried := readEffort(f.t, raw)
 	f.mu.Lock()
 	f.posts = append(f.posts, label)
+	f.rests = append(f.rests, withoutEffort(f.t, raw))
 	f.mu.Unlock()
 	answer := f.behave(effort, carried)
 	switch {

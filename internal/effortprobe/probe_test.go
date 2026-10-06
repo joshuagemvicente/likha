@@ -457,6 +457,51 @@ func TestRunInterruptedMarksTheReport(t *testing.T) {
 	}
 }
 
+// Every request carries the same task and tool; only the effort field
+// differs (spec point 9).
+func TestRunRequestsDifferOnlyInEffort(t *testing.T) {
+	check := func(t *testing.T, fake *fakeProvider, wantRequests int) {
+		t.Helper()
+		bodies := fake.bodiesWithoutEffort()
+		if len(bodies) != wantRequests {
+			t.Fatalf("bodies = %d, want %d", len(bodies), wantRequests)
+		}
+		for i, body := range bodies {
+			if body != bodies[0] {
+				t.Fatalf("request %d differs beyond effort:\n%s\nvs\n%s", i+1, body, bodies[0])
+			}
+		}
+		if !strings.Contains(bodies[0], answerTool) || !strings.Contains(bodies[0], "prime numbers below 60") {
+			t.Fatalf("body lacks the probe task or tool: %s", bodies[0])
+		}
+	}
+	t.Run("chat completions", func(t *testing.T) {
+		fake := newFakeProvider(t, honors)
+		p, _ := model.LookupProvider("opencode-go")
+		plan, err := NewPlan(p, "deepseek-v4-flash", nil, Options{Endpoint: fake.endpoint()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		client, err := model.New(fake.endpoint(), "deepseek-v4-flash", testKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runPlan(t, client, plan, fake)
+		check(t, fake, 9)
+	})
+	t.Run("responses", func(t *testing.T) {
+		fake := newFakeProvider(t, honors)
+		client := chatGPTClient(t, fake, probeModel)
+		p, _ := model.LookupProvider("chatgpt")
+		plan, err := NewPlan(p, probeModel, nil, Options{Levels: []string{"low", "high"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		runPlan(t, client, plan, fake)
+		check(t, fake, 4)
+	})
+}
+
 func TestRunNeverChangesTheCallersClient(t *testing.T) {
 	fake := newFakeProvider(t, honors)
 	client, err := model.New(fake.endpoint(), probeModel, testKey)
