@@ -50,7 +50,7 @@ func TestDiscoverContextWindowReportsEveryModelToObserver(t *testing.T) {
 	})
 
 	var observed bool
-	got := discoverContextWindowWithObserver("selected-model", "https://provider.example/v1", "key", "openrouter", func(provider, operation string, elapsed time.Duration, details []model.ModelDetails, err error) {
+	got := discoverModelMetadata("selected-model", "https://provider.example/v1", "key", "openrouter", func(provider, operation string, elapsed time.Duration, details []model.ModelDetails, err error) {
 		observed = true
 		if provider != "openrouter" || operation != "startup /models" || elapsed < 0 || err != nil {
 			t.Fatalf("observer event = (%q, %q, %s, %v), want successful startup model metadata", provider, operation, elapsed, err)
@@ -62,8 +62,21 @@ func TestDiscoverContextWindowReportsEveryModelToObserver(t *testing.T) {
 	if !observed {
 		t.Fatal("model metadata observer was not called")
 	}
-	if got["selected-model"] != 128_000 {
-		t.Fatalf("context windows = %#v, want selected-model:128000", got)
+	if got.ContextWindow != 128_000 {
+		t.Fatalf("selected model metadata = %#v, want context window 128000", got)
+	}
+}
+
+func TestDiscoverModelMetadataCarriesLiveEffortLevels(t *testing.T) {
+	withModelDetailsFunc(t, func(context.Context, string, string) ([]model.ModelDetails, error) {
+		return []model.ModelDetails{
+			{ID: "other-model", Efforts: []string{"low"}},
+			{ID: "selected-model", Efforts: []string{"minimal", "low", "high"}, DefaultEffort: "low"},
+		}, nil
+	})
+	got := discoverModelMetadata("selected-model", "https://provider.example/v1", "key", "openrouter", nil)
+	if !reflect.DeepEqual(got.Efforts, []string{"minimal", "low", "high"}) || got.DefaultEffort != "low" {
+		t.Fatalf("selected model effort = %v default %q, want the live levels", got.Efforts, got.DefaultEffort)
 	}
 }
 

@@ -293,6 +293,7 @@ func (m *ui) handleOAuthLogin(v oauthLoginMsg) tea.Cmd {
 		m.setup.checking, m.setup.err = false, ""
 		m.setup.creds = v.creds
 		m.setup.models, m.setup.contextWindows, m.setup.modelNames = ids, windows, names
+		m.setup.efforts = liveEffortsByModel(v.details)
 		m.setup.modelCursor, m.setup.filter = 0, nil
 		if !acknowledged {
 			m.setup.stage = setupPlanNotice
@@ -316,7 +317,7 @@ func (m *ui) handleOAuthLogin(v oauthLoginMsg) tea.Cmd {
 		}
 		_ = v.client.SetModel(modelID)
 		m.client, m.modelName = v.client, modelID
-		m.applyEffort(p, modelID, liveEffort{}, nil)
+		m.applyEffort(p, modelID, liveEffortsByModel(v.details)[modelID], nil)
 		m.conn.ContextWindows, m.conn.Err = windows, nil
 		m.resolveContextWindow()
 		m.recalculateContext(m.history)

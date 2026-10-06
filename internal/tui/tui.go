@@ -150,6 +150,7 @@ type ui struct {
 	dialogModelCounts  map[string]int           // model id → occurrence count across sections; >1 rows render the id with its provider name
 	dialogModelsNote   string                   // muted unreachable-provider note for the /models dialog; "" when every fetch succeeded
 	modelsCache        modelsCache              // in-memory last-good sections (specs/models-perf); dies with the process
+	activeLive         liveEffort               // live effort levels of the active model as fetched with its last switch; zero when none
 	modelsGen          uint64                   // /models open generation; per-section arrivals carry it, stale ones drop
 	modelsPending      int                      // outstanding per-provider fetches in the current open
 	modelsNavigated    bool                     // user navigated/typed in this open; arrivals must not yank the cursor after
@@ -314,8 +315,9 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 	m.openOutputStore()
 	m.reportInterruptedTasks()
 	if client != nil {
-		// --model and the stored model never prompt; the stored level applies.
-		m.applyEffort(m.activeProvider(), name, liveEffort{}, nil)
+		// --model and the stored model never prompt; the stored level applies,
+		// checked against the live levels the startup /models fetch published.
+		m.applyEffort(m.activeProvider(), name, liveEffort{levels: conn.EffortLevels, defaultLevel: conn.DefaultEffort}, nil)
 	}
 	if len(snapshot.Entries) > 0 && conn.Err == nil {
 		m.status = "Resumed session"
@@ -1556,6 +1558,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setup.err = ""
 		m.setup.models = v.models
 		m.setup.contextWindows = v.contextWindows
+		m.setup.efforts = v.efforts
 		if len(v.models) == 1 {
 			return m, m.finishSetup(v.models[0])
 		}

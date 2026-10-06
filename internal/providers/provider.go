@@ -27,6 +27,8 @@ type Connection struct {
 	StatusLine             StoredStatusLineConfig      // optional status segments loaded from config.json
 	ContextWindows         map[string]int64            // positive provider-reported windows for the active provider
 	ContextWindowOverrides map[string]map[string]int64 // user overrides by canonical provider and model ID
+	EffortLevels           []string                    // live effort levels the startup /models fetch published for the active model, lowest first; nil when none
+	DefaultEffort          string                      // the active model's live default effort level; "" when unknown
 	ModelMetadataObserver  ModelMetadataObserver       // optional opt-in diagnostics for model-list metadata
 	Nerd                   bool                        // user opted into Nerd Font markers
 	ASCII                  bool                        // user selected the plain-ASCII block glyph set

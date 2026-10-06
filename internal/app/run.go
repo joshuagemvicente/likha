@@ -109,12 +109,16 @@ var listModelDetailsFunc = model.ListModelsWithDetails
 // A missing, invalid, or unavailable value is unknown; callers can still use
 // the stored override or documented catalog. This never sends a prompt.
 func discoverContextWindow(modelID, endpoint, apiKey string) map[string]int64 {
-	return discoverContextWindowWithObserver(modelID, endpoint, apiKey, "", nil)
+	return contextWindowOf(discoverModelMetadata(modelID, endpoint, apiKey, "", nil))
 }
 
-func discoverContextWindowWithObserver(modelID, endpoint, apiKey, provider string, observe providers.ModelMetadataObserver) map[string]int64 {
+// discoverModelMetadata fetches the details the provider's model list
+// reports for the configured model: its context window and the live effort
+// levels a stored effort is checked against at launch. A failed request or
+// an unlisted model yields the zero value. This never sends a prompt.
+func discoverModelMetadata(modelID, endpoint, apiKey, provider string, observe providers.ModelMetadataObserver) model.ModelDetails {
 	if strings.TrimSpace(modelID) == "" || strings.TrimSpace(endpoint) == "" {
-		return nil
+		return model.ModelDetails{}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), contextWindowMetadataTimeout)
 	defer cancel()
@@ -124,14 +128,28 @@ func discoverContextWindowWithObserver(modelID, endpoint, apiKey, provider strin
 		observe(provider, "startup /models", time.Since(start), details, err)
 	}
 	if err != nil {
-		return nil
+		return model.ModelDetails{}
 	}
+	return modelDetail(details, modelID)
+}
+
+// modelDetail returns the first entry for modelID, or the zero value.
+func modelDetail(details []model.ModelDetails, modelID string) model.ModelDetails {
 	for _, detail := range details {
-		if detail.ID == modelID && detail.ContextWindow > 0 {
-			return map[string]int64{detail.ID: detail.ContextWindow}
+		if detail.ID == modelID {
+			return detail
 		}
 	}
-	return nil
+	return model.ModelDetails{}
+}
+
+// contextWindowOf returns detail's positive context window keyed by model
+// ID, or nil when it reports none.
+func contextWindowOf(detail model.ModelDetails) map[string]int64 {
+	if detail.ID == "" || detail.ContextWindow <= 0 {
+		return nil
+	}
+	return map[string]int64{detail.ID: detail.ContextWindow}
 }
 
 // usageText builds the help text with the provider block generated from the
@@ -402,6 +420,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	var startupErr error
 	var contextWindows map[string]int64
+	var active model.ModelDetails // the active model's /models entry; carries its live effort levels
 	if client != nil {
 		// Startup connection check: verify the provider answers before the
 		// first prompt. A failure is reported in the interface, not fatal, so
@@ -413,6 +432,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			var details []model.ModelDetails
 			modelName, contextWindows, details, startupErr = discoverOAuthModel(ctx, client, modelName)
 			cancel()
+			active = modelDetail(details, modelName)
 			if metadataObserver != nil {
 				metadataObserver(selected.Name, "startup authenticated /models", time.Since(start), details, startupErr)
 			}
@@ -425,7 +445,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			if providerID == "" {
 				providerID = "custom"
 			}
-			contextWindows = discoverContextWindowWithObserver(modelName, chosen, key, providerID, metadataObserver)
+			active = discoverModelMetadata(modelName, chosen, key, providerID, metadataObserver)
+			contextWindows = contextWindowOf(active)
 		}
 	}
 	var snapshot session.Snapshot
@@ -448,6 +469,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		Provider: display, ProviderCanonical: selected.Name, Verified: verified, Err: startupErr,
 		Setup: setupNeeded, Theme: themeName, ComposerStyle: composerStyle, StatusLine: statusLine,
 		ContextWindows: contextWindows, ContextWindowOverrides: stored.ContextWindows, ModelMetadataObserver: metadataObserver,
+		EffortLevels: active.Efforts, DefaultEffort: active.DefaultEffort,
 		Nerd: *nerdFlag || os.Getenv("LIKHA_NERD") == "1", ASCII: asciiGlyphs(*asciiFlag), Mcp: mcpServers,
 	}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
 	if _, err := program.Run(); err != nil {

@@ -228,3 +228,18 @@ main, the same day's follow-ups landed first: `--probe-effort` on `claude`
 now sends `output_config.effort`, and the `mistral` row now replays thinking
 (chunked-content T10), so the Claude "not evidence yet" and Mistral "waits
 for replay" wording was updated to match.
+
+## Fix notes (2026-10-07): stored level against live levels
+
+A stored level is now checked against the live levels fetched with the
+switch, not against the bundled catalog alone (spec points 19 and 20,
+decision 8). The startup `/models` fetch that already discovers the context
+window passes the active model's live levels to the TUI through
+`providers.Connection` (`EffortLevels`, `DefaultEffort`); first-run setup
+and ChatGPT sign-in pass the levels from the model list they just fetched.
+`/effort` uses the cached `/models` section when there is one, else the
+levels fetched with the last switch (`ui.activeLive`). Before, a level picked
+from OpenRouter's or Claude's live list was rejected with the stale-level
+notice, or dropped silently when the catalog had no row, at the next launch.
+Covered by TUI tests that enable a row in-process; no shipped row carries
+effort yet, so no user-visible change until a probe enables one.

@@ -372,3 +372,120 @@ func TestRejectedEffortTurnErrorCarriesHint(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// liveOnlyModel is an OpenRouter model with no bundled catalog row, so its
+// effort levels can only come from the provider's live /models list.
+const liveOnlyModel = "acme/live-only"
+
+// storeLiveOnlyEffort stores level for the OpenRouter live-only model.
+func storeLiveOnlyEffort(t *testing.T, stateDir, level string) {
+	t.Helper()
+	cfg := providers.StoredProviderConfig{Provider: "openrouter", Model: liveOnlyModel}
+	cfg.SetStoredEffort("openrouter", liveOnlyModel, level)
+	if err := providers.SaveStoredConfig(stateDir, cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLiveStoredEffortAppliesAtLaunch(t *testing.T) {
+	enableEffort(t, "openrouter", model.EffortObject)
+	cases := []struct {
+		name   string
+		stored string
+		want   string
+		notice string
+	}{
+		{"live-only level", "minimal", "minimal", ""},
+		{"no longer in the live list", "xhigh", "", "Stored effort xhigh is not offered for " + liveOnlyModel + "; using default."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			storeLiveOnlyEffort(t, stateDir, tc.stored)
+			client, err := model.New("https://openrouter.ai/api/v1", liveOnlyModel, "k")
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn := providers.Connection{
+				Provider: "OpenRouter", ProviderCanonical: "openrouter", Verified: true,
+				EffortLevels: []string{"minimal", "low", "high"}, DefaultEffort: "low",
+			}
+			m := NewUI("/sample", nil, client, liveOnlyModel, conn, stateDir, nil, session.Snapshot{})
+			if client.Effort() != tc.want {
+				t.Fatalf("effort at launch = %q, want %q (entries %+v)", client.Effort(), tc.want, m.entries)
+			}
+			found := tc.notice == ""
+			for _, e := range m.entries {
+				if strings.HasPrefix(e.content, "Stored effort") && e.content != tc.notice {
+					t.Fatalf("unexpected notice %q", e.content)
+				}
+				found = found || e.content == tc.notice
+			}
+			if !found {
+				t.Fatalf("notice %q missing: %+v", tc.notice, m.entries)
+			}
+
+			// /effort offers the launch-time live levels before /models runs.
+			m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+			command(m, "/effort high")
+			if last := lastEntry(m); last.role == "Error" || client.Effort() != "high" {
+				t.Fatalf("/effort high after launch = %+v at %q", last, client.Effort())
+			}
+		})
+	}
+}
+
+func TestLiveStoredEffortAppliesAfterSetup(t *testing.T) {
+	enableEffort(t, "openrouter", model.EffortObject)
+	stateDir := t.TempDir()
+	storeLiveOnlyEffort(t, stateDir, "minimal")
+	m := NewUI("/sample", nil, nil, "", providers.Connection{Setup: true}, stateDir, nil, session.Snapshot{})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	for model.Providers[m.setup.cursor].Name != "openrouter" {
+		m.Update(key("down"))
+	}
+	m.Update(key("enter"))
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("sk-or")})
+	m.Update(key("enter"))
+	m.Update(setupCheckMsg{
+		models:  []string{liveOnlyModel},
+		efforts: map[string]liveEffort{liveOnlyModel: {levels: []string{"minimal", "low", "high"}}},
+	})
+	if m.client == nil {
+		t.Fatalf("setup did not finish: stage=%d err=%q", m.setup.stage, m.setup.err)
+	}
+	if m.client.Effort() != "minimal" {
+		t.Fatalf("effort after setup = %q, want minimal (entries %+v)", m.client.Effort(), m.entries)
+	}
+}
+
+func TestLiveStoredEffortAppliesAfterOAuthSetup(t *testing.T) {
+	enableEffort(t, "chatgpt", model.EffortObject)
+	stateDir := t.TempDir()
+	cfg := providers.StoredProviderConfig{}
+	cfg.SetStoredEffort("chatgpt", "live-one", "minimal")
+	if err := providers.SaveStoredConfig(stateDir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	m := NewUI("/sample", nil, nil, "", providers.Connection{Setup: true}, stateDir, nil, session.Snapshot{})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	setupCursorOnChatgpt(t, m)
+	m.Update(key("enter"))
+	creds := oauthUICredentials(t, m.stateDir, "issued-live-effort")
+	client, err := oauthCandidate(model.Providers[m.setup.cursor], creds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	details := []model.ModelDetails{{ID: "live-one", Efforts: []string{"minimal", "low", "high"}}}
+	m.Update(oauthLoginMsg{attempt: m.oauth.id, creds: creds, client: client, details: details})
+	m.Update(key("enter")) // acknowledge shared plan limits; one model finishes setup
+	if m.client == nil {
+		m.Update(key("enter")) // pick the only model
+	}
+	if m.client == nil {
+		t.Fatalf("setup did not finish: stage=%d err=%q", m.setup.stage, m.setup.err)
+	}
+	if m.client.Effort() != "minimal" {
+		t.Fatalf("effort after sign-in = %q, want minimal (entries %+v)", m.client.Effort(), m.entries)
+	}
+}

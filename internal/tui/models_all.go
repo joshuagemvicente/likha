@@ -146,7 +146,6 @@ func fetchModelsTarget(tg modelsTarget) ([]string, map[string]int64, map[string]
 		return nil, nil, nil, err
 	}
 	contextWindows := make(map[string]int64)
-	efforts := make(map[string]liveEffort)
 	for _, detail := range sink.details {
 		if detail.DisplayName != "" && tg.modelNames != nil {
 			tg.modelNames[detail.ID] = detail.DisplayName
@@ -156,13 +155,8 @@ func fetchModelsTarget(tg modelsTarget) ([]string, map[string]int64, map[string]
 				contextWindows[detail.ID] = detail.ContextWindow
 			}
 		}
-		if detail.ID != "" && len(detail.Efforts) > 0 {
-			if _, exists := efforts[detail.ID]; !exists {
-				efforts[detail.ID] = liveEffort{levels: detail.Efforts, defaultLevel: detail.DefaultEffort}
-			}
-		}
 	}
-	return ids, contextWindows, efforts, nil
+	return ids, contextWindows, liveEffortsByModel(sink.details), nil
 }
 
 // buildModelsTargets computes the /models fetch set in final display order:

@@ -43,8 +43,8 @@ var effortLevelHints = map[string]string{
 }
 
 // effortLevelsFor returns the levels Likha offers for a provider and model,
-// preferring the live list carried by row (or, for the active model, the
-// cached /models section) over the catalog.
+// preferring the given live list (or, failing that, the cached /models
+// section) over the catalog.
 func (m *ui) effortLevelsFor(p model.Provider, modelID string, live liveEffort) ([]string, string) {
 	if len(live.levels) == 0 {
 		live = m.cachedLiveEffort(p.Name, modelID)
@@ -54,6 +54,22 @@ func (m *ui) effortLevelsFor(p model.Provider, modelID string, live liveEffort) 
 		return levels, ""
 	}
 	return levels, live.defaultLevel
+}
+
+// liveEffortsByModel collects the live effort levels a model list published,
+// keyed by model ID; the first entry for an ID wins. Models without levels
+// are left out, so the bundled catalog applies to them.
+func liveEffortsByModel(details []model.ModelDetails) map[string]liveEffort {
+	efforts := make(map[string]liveEffort)
+	for _, detail := range details {
+		if detail.ID == "" || len(detail.Efforts) == 0 {
+			continue
+		}
+		if _, exists := efforts[detail.ID]; !exists {
+			efforts[detail.ID] = liveEffort{levels: detail.Efforts, defaultLevel: detail.DefaultEffort}
+		}
+	}
+	return efforts
 }
 
 // cachedLiveEffort returns the live levels from the last /models fetch of
@@ -91,6 +107,11 @@ func (m *ui) storedEffort(providerID, modelID string) string {
 // A non-nil choice was picked in the effort step and is stored, "" meaning
 // Default. It returns the sentence the model-switch entry appends, or "".
 func (m *ui) applyEffort(p model.Provider, modelID string, live liveEffort, choice *string) string {
+	if len(live.levels) == 0 {
+		live = m.cachedLiveEffort(p.Name, modelID)
+	}
+	// Remembered so /effort offers the live levels before /models has run.
+	m.activeLive = live
 	levels, _ := m.effortLevelsFor(p, modelID, live)
 	if len(levels) == 0 {
 		m.client.SetEffort(model.EffortUnsupported, "")
@@ -212,7 +233,13 @@ func (m *ui) handleEffortCommand(arg string) tea.Cmd {
 		return nil
 	}
 	p := m.activeProvider()
-	levels, liveDefault := m.effortLevelsFor(p, m.modelName, liveEffort{})
+	// A /models fetch since the switch is fresher than the levels fetched
+	// with it (startup, setup, sign-in).
+	live := m.cachedLiveEffort(p.Name, m.modelName)
+	if len(live.levels) == 0 {
+		live = m.activeLive
+	}
+	levels, liveDefault := m.effortLevelsFor(p, m.modelName, live)
 	if len(levels) == 0 {
 		reason := model.EffortUnavailableReason(p)
 		if reason == "" {

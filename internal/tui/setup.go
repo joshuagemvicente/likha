@@ -42,7 +42,8 @@ type setupState struct {
 	models         []string
 	modelNames     map[string]string
 	contextWindows map[string]int64
-	modelCursor    int // model index into models (not into the filtered rows)
+	efforts        map[string]liveEffort // live effort levels by model ID from the checked model list
+	modelCursor    int                   // model index into models (not into the filtered rows)
 	err            string
 	checking       bool
 	spin           int  // spinner frame while checking or waiting for sign-in
@@ -113,7 +114,7 @@ func (m *ui) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if indexOf(matches, m.setup.cursor) < 0 {
 				return m, nil
 			}
-			m.setup.contextWindows = nil
+			m.setup.contextWindows, m.setup.efforts = nil, nil
 			m.setup.filter = nil
 			if model.Providers[m.setup.cursor].Auth == model.AuthOAuth {
 				m.setup.stage = setupLogin
@@ -376,7 +377,7 @@ func (m *ui) startSetupCheck(p model.Provider, key string, fromEnv bool) tea.Cmd
 	m.setup.err, m.setup.checking = "", true
 	m.setup.envKey = fromEnv
 	m.setup.models = nil
-	m.setup.contextWindows = nil
+	m.setup.contextWindows, m.setup.efforts = nil, nil
 	observe := m.conn.ModelMetadataObserver
 	return tea.Batch(m.armSetupTick(), func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -394,7 +395,7 @@ func (m *ui) startSetupCheck(p model.Provider, key string, fromEnv bool) tea.Cmd
 				windows[detail.ID] = detail.ContextWindow
 			}
 		}
-		return setupCheckMsg{provider: p, key: key, models: ids, contextWindows: windows, err: err}
+		return setupCheckMsg{provider: p, key: key, models: ids, contextWindows: windows, efforts: liveEffortsByModel(details), err: err}
 	})
 }
 
@@ -403,6 +404,7 @@ type setupCheckMsg struct {
 	key            string
 	models         []string
 	contextWindows map[string]int64
+	efforts        map[string]liveEffort // live effort levels by model ID; empty when the list publishes none
 	err            error
 }
 
@@ -488,8 +490,9 @@ func (m *ui) finishSetup(modelID string) tea.Cmd {
 	m.conn.Theme, m.conn.ComposerStyle = m.themeName, m.composerStyle
 	m.conn.ContextWindows = m.setup.contextWindows
 	m.resolveContextWindow()
-	// Setup never asks for effort; a stored level for the pair still applies.
-	m.applyEffort(p, modelID, liveEffort{}, nil)
+	// Setup never asks for effort; a stored level for the pair still applies,
+	// checked against the live levels the setup model list published.
+	m.applyEffort(p, modelID, m.setup.efforts[modelID], nil)
 	m.setup.stage = setupTheme
 	m.setup.filter = nil
 	m.setup.themeCursor = 0
