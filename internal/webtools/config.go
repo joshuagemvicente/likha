@@ -18,8 +18,14 @@ import (
 )
 
 const (
-	configFileName = "tools.json"
-	keyFileName    = "tool-keys.json"
+	// configFileName is the main likha config file; web settings live under
+	// its top-level "web" key beside the provider, model, and theme.
+	configFileName = "config.json"
+	// legacyConfigFileName held the web settings before they moved into
+	// config.json. It is read only while config.json has no "web" key;
+	// app startup folds it into config.json (MigrateLegacyConfig).
+	legacyConfigFileName = "tools.json"
+	keyFileName          = "tool-keys.json"
 	// braveBackend is the Brave search backend name; the full supported list
 	// lives in SupportedBackends (provider.go).
 	braveBackend = "brave"
@@ -31,9 +37,9 @@ const (
 	ExaKeyEnv    = "EXA_API_KEY"
 )
 
-// Config is the nonsecret web-tool enablement loaded from
-// <stateDir>/tools.json. Neither credentials nor environment presence enables
-// a tool by itself.
+// Config is the nonsecret web-tool enablement loaded from the "web" key of
+// <stateDir>/config.json. Neither credentials nor environment presence
+// enables a tool by itself; both tools are on unless the file turns them off.
 type Config struct {
 	Search SearchConfig `json:"search"`
 	Fetch  FetchConfig  `json:"fetch"`
@@ -48,68 +54,125 @@ type FetchConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
-// LoadConfig reads <stateDir>/tools.json shaped
+// DefaultConfig is the configuration when nothing is stored: keyless
+// DuckDuckGo search and public HTTPS fetch both on. Each still asks for
+// consent on first use in a conversation.
+func DefaultConfig() Config {
+	return Config{
+		Search: SearchConfig{Enabled: true, Backend: DefaultBackend},
+		Fetch:  FetchConfig{Enabled: true},
+	}
+}
+
+// LoadConfig reads the "web" key of <stateDir>/config.json, shaped
 // {"web":{"search":{"enabled":true,"backend":"brave"},"fetch":{"enabled":true}}}.
-// A missing file returns the zero Config with a nil error (unconfigured, tools
-// disabled). Enabled search with no backend uses DefaultBackend (keyless
-// DuckDuckGo). Malformed JSON or an unsupported backend returns an error
-// naming the problem; the caller disables both web tools and reports it.
+// Every field is optional and an absent one keeps DefaultConfig: search and
+// fetch on, backend DuckDuckGo. Only an explicit "enabled": false turns a
+// tool off. While config.json has no "web" key, a legacy <stateDir>/tools.json
+// of the same shape is read instead. Malformed JSON or an unsupported backend
+// returns an error naming the file and the problem; the caller disables both
+// web tools and reports it.
 func LoadConfig(stateDir string) (Config, error) {
-	var config Config
+	config := DefaultConfig()
 	if strings.TrimSpace(stateDir) == "" {
 		return config, errors.New("a state directory is required to load " + configFileName)
 	}
-	data, err := os.ReadFile(filepath.Join(stateDir, configFileName))
-	if errors.Is(err, os.ErrNotExist) {
-		return config, nil
-	}
-	if err != nil {
-		return config, fmt.Errorf("read %s: %w", configFileName, err)
-	}
-	root, err := decodeJSONObject(data, configFileName)
-	if err != nil {
+	web, file, err := readWebSection(stateDir)
+	if err != nil || web == nil {
 		return config, err
-	}
-	web, present, err := objectField(root, "web", configFileName)
-	if err != nil {
-		return config, err
-	}
-	if !present {
-		return config, nil
 	}
 	if raw, exists := web["search"]; exists {
 		section, ok := raw.(map[string]any)
 		if !ok {
-			return config, fmt.Errorf("%s: web.search must be a JSON object", configFileName)
+			return config, fmt.Errorf("%s: web.search must be a JSON object", file)
 		}
-		if config.Search.Enabled, err = boolField(section, "enabled", configFileName+": web.search.enabled"); err != nil {
+		if config.Search.Enabled, err = boolFieldDefault(section, "enabled", true, file+": web.search.enabled"); err != nil {
 			return config, err
 		}
-		config.Search.Backend, err = stringField(section, "backend", configFileName+": web.search.backend")
+		backend, err := stringField(section, "backend", file+": web.search.backend")
 		if err != nil {
 			return config, err
+		}
+		if backend != "" {
+			if !supportedBackend(backend) {
+				return config, fmt.Errorf("%s: web.search.backend %q is not supported; supported backends are: %s",
+					file, backend, strings.Join(SupportedBackends, ", "))
+			}
+			config.Search.Backend = backend
 		}
 	}
 	if raw, exists := web["fetch"]; exists {
 		section, ok := raw.(map[string]any)
 		if !ok {
-			return config, fmt.Errorf("%s: web.fetch must be a JSON object", configFileName)
+			return config, fmt.Errorf("%s: web.fetch must be a JSON object", file)
 		}
-		if config.Fetch.Enabled, err = boolField(section, "enabled", configFileName+": web.fetch.enabled"); err != nil {
+		if config.Fetch.Enabled, err = boolFieldDefault(section, "enabled", true, file+": web.fetch.enabled"); err != nil {
 			return config, err
 		}
 	}
-	if config.Search.Backend == "" {
-		if config.Search.Enabled {
-			// Search works without a key unless the user opts into a keyed
-			// backend: an enabled section with no backend means DuckDuckGo.
-			config.Search.Backend = DefaultBackend
-		}
-	} else if !supportedBackend(config.Search.Backend) {
-		return config, fmt.Errorf("%s: web.search.backend %q is not supported; supported backends are: %s",
-			configFileName, config.Search.Backend, strings.Join(SupportedBackends, ", "))
-	}
 	return config, nil
+}
+
+// readWebSection returns the "web" object and the file it came from:
+// config.json when it has a "web" key, otherwise a legacy tools.json. A nil
+// object with a nil error means nothing is configured.
+func readWebSection(stateDir string) (map[string]any, string, error) {
+	for _, file := range []string{configFileName, legacyConfigFileName} {
+		data, err := os.ReadFile(filepath.Join(stateDir, file))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, file, fmt.Errorf("read %s: %w", file, err)
+		}
+		root, err := decodeJSONObject(data, file)
+		if err != nil {
+			return nil, file, err
+		}
+		web, present, err := objectField(root, "web", file)
+		if err != nil {
+			return nil, file, err
+		}
+		if present {
+			return web, file, nil
+		}
+	}
+	return nil, "", nil
+}
+
+// LegacyWebSection reads the "web" object of a legacy <stateDir>/tools.json
+// as raw JSON for folding into config.json. It returns nil with a nil error
+// when the file is absent or has no "web" key, and an error when the file
+// is unreadable or malformed (it is then left in place and LoadConfig keeps
+// reporting the problem).
+func LegacyWebSection(stateDir string) (json.RawMessage, error) {
+	data, err := os.ReadFile(filepath.Join(stateDir, legacyConfigFileName))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", legacyConfigFileName, err)
+	}
+	root, err := decodeJSONObject(data, legacyConfigFileName)
+	if err != nil {
+		return nil, err
+	}
+	if _, present, err := objectField(root, "web", legacyConfigFileName); err != nil || !present {
+		return nil, err
+	}
+	var raw struct {
+		Web json.RawMessage `json:"web"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("%s must contain one JSON object", legacyConfigFileName)
+	}
+	return raw.Web, nil
+}
+
+// LegacyConfigPath is the legacy tools.json path, removed after its "web"
+// section is folded into config.json.
+func LegacyConfigPath(stateDir string) string {
+	return filepath.Join(stateDir, legacyConfigFileName)
 }
 
 // searchKeyEnv maps each key-bearing search backend to the environment
@@ -241,6 +304,15 @@ func boolField(object map[string]any, name, path string) (bool, error) {
 		return false, fmt.Errorf("%s must be a JSON boolean", path)
 	}
 	return value, nil
+}
+
+// boolFieldDefault reads an optional boolean, returning fallback when the
+// field is absent.
+func boolFieldDefault(object map[string]any, name string, fallback bool, path string) (bool, error) {
+	if _, exists := object[name]; !exists {
+		return fallback, nil
+	}
+	return boolField(object, name, path)
 }
 
 func stringField(object map[string]any, name, path string) (string, error) {

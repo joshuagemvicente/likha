@@ -42,6 +42,10 @@ type StoredProviderConfig struct {
 	// checks the user trusted and their fingerprints at that time
 	// (specs/command-permissions). It is never read from a repository.
 	CommandTrust map[string]StoredCommandTrust `json:"command_trust,omitempty"`
+	// Web holds the web-tool settings (specs/web-tools) verbatim. webtools
+	// owns their meaning and reads them straight from the file; this field
+	// exists so saving a theme or model never drops them.
+	Web json.RawMessage `json:"web,omitempty"`
 }
 
 // StoredCommandTrust maps a check key ("script:test", "go", "make") to the

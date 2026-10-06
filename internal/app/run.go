@@ -67,7 +67,7 @@ key; the login is stored for later runs.
 
 Environment: LIKHA_MODEL, LIKHA_ENDPOINT, LIKHA_PROVIDER, LIKHA_API_KEY,
 LIKHA_DEBUG_MODELS, LIKHA_ASCII, LIKHA_STATE_DIR (private storage directory;
-default is the OS user configuration directory's "likha" child). Each provider
+default is $XDG_CONFIG_HOME/likha or ~/.config/likha, including on macOS). Each provider
 also accepts its own LIKHA_<NAME>_API_KEY (see the provider list above).
 
 Examples:
@@ -190,14 +190,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "likha: %v\n", err)
 		return 2
 	}
-	stateDir := os.Getenv("LIKHA_STATE_DIR")
-	if stateDir == "" {
-		configDir, err := os.UserConfigDir()
-		if err != nil {
-			fmt.Fprintf(stderr, "likha: locate local session storage: %v\n", err)
-			return 2
-		}
-		stateDir = filepath.Join(configDir, "likha")
+	stateDir, err := resolveStateDir(stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "likha: locate local session storage: %v\n", err)
+		return 2
 	}
 	store, err := session.Open(stateDir, root)
 	if err != nil {
@@ -205,6 +201,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	defer store.Close()
+	migrateToolsConfig(stateDir, stderr)
 	if *listSessions {
 		summaries, err := store.List()
 		if err != nil {

@@ -49,7 +49,7 @@ func WebSearchTool(search func(ctx context.Context, req webtools.SearchRequest) 
 		Interactive:  false,
 	}
 	if search == nil {
-		tool.UnavailableReason = "Web search is off or its configured backend is missing a key; set web.search.enabled in tools.json (DuckDuckGo needs no key) and see the transcript for the exact reason."
+		tool.UnavailableReason = "Web search is turned off (web.search.enabled is false in config.json), its web settings are invalid, or the configured keyed backend has no key; DuckDuckGo, the default, needs none. See the transcript for the exact reason."
 		return tool
 	}
 	tool.Run = func(ctx context.Context, input json.RawMessage) (Result, error) {
