@@ -118,7 +118,7 @@ Reasoning models accept an effort level that trades speed and tokens for deeper 
   --yes             With --probe-effort: confirm the spend without a prompt.
 ```
 
-The provider and model must come from these flags or `LIKHA_PROVIDER`/`LIKHA_MODEL`; the provider stored by first-run setup is never probed. `--api-key` works as usual but is never stored by a probe. `--endpoint` (or `LIKHA_ENDPOINT`) may point the named provider elsewhere, and the result is then labelled `endpoint override`; nothing is sent there before you confirm, so the levels come from the bundled catalog or `--probe-levels`. Exit codes: 0 when the probe ran to the end and wrote its report, 1 when you declined, Default failed, the provider rejected the credentials, or the report could not be written, 2 for a usage error (nothing was sent), and 130 for Ctrl+C.
+The provider and model must come from these flags or `LIKHA_PROVIDER`/`LIKHA_MODEL`; the provider stored by first-run setup is never probed. `--api-key` works as usual but is never stored by a probe. `--endpoint` (or `LIKHA_ENDPOINT`) may point the named provider elsewhere, and the result is then labelled `endpoint override`; nothing is sent there before you confirm, so the levels come from the bundled catalog or `--probe-levels`. `claude` refuses `--endpoint`, since only its own endpoint speaks the native Messages API that carries effort, and refuses `--probe-wire`, since it has one shape. Exit codes: 0 when the probe ran to the end and wrote its report, 1 when you declined, Default failed, the provider rejected the credentials, or the report could not be written, 2 for a usage error (nothing was sent), and 130 for Ctrl+C.
 
 ## Conversation compaction (`/compact`)
 

@@ -98,7 +98,13 @@ func runFake(t *testing.T, provider, modelID string, opts Options, behave behavi
 	return runPlan(t, client, plan, fake)
 }
 
-func runPlan(t *testing.T, client *model.Client, plan Plan, fake *fakeProvider) probeRun {
+// postRecorder is a fake provider that lists the effort field of every POST
+// it received, in order.
+type postRecorder interface {
+	recorded() []string
+}
+
+func runPlan(t *testing.T, client *model.Client, plan Plan, fake postRecorder) probeRun {
 	t.Helper()
 	providers := slices.Clone(model.Providers)
 	var progress, table bytes.Buffer

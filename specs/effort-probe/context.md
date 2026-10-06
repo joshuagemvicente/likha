@@ -132,8 +132,11 @@ expectations to check, not results.
 | mistral | `reasoning_effort` | inconclusive until chunk-list content parses |
 | opencode-zen, opencode-go, dialagram | both | unknown; the control tells which shape is read |
 | chatgpt | Responses `reasoning.effort` | unknown; catalog rows publish no levels, so `--probe-levels` is needed |
-| claude (compat) | `reasoning_effort` | ignored-suspected (documented as ignored); `completion_tokens_details` is documented as always empty, so completion is the signal |
-| claude (native, [claude-native](../claude-native/spec.md)) | `output_config.effort` (`EffortAnthropic`) | accepted; reasoning count probably not reported, so completion is the signal; requests carry `max_tokens` |
+| claude | `output_config.effort` (`EffortAnthropic`, native Messages API, [claude-native](../claude-native/spec.md)) | accepted; reasoning count probably not reported, so completion is the signal; requests carry `max_tokens` |
+
+The probe no longer reaches Anthropic's OpenAI-compatible endpoint, which
+documents `reasoning_effort` as ignored: `claude` speaks only the native
+API, and an endpoint override on `claude` is refused (spec point 5).
 
 ## Specs and docs
 

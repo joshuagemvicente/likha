@@ -164,6 +164,11 @@ func prepareProbe(cfg probeConfig, stderr io.Writer) (effortprobe.Plan, *model.C
 	if err != nil {
 		return fail("%v", err)
 	}
+	// Checked before the client exists, so a refused override never gets
+	// the endpoint-override notice about a model list it will not fetch.
+	if err := effortprobe.CheckEndpoint(selected, res.Endpoint); err != nil {
+		return fail("%v", err)
+	}
 	client, live, err := probeClient(selected, res, modelID, stateDir, stderr)
 	if err != nil {
 		return fail("%v", err)

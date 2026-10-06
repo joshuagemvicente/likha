@@ -35,8 +35,8 @@ Before M1: the coordinator amends FR-40 into `v1-spec.md`.
       wire with `SetEffort` on its own fork, and resolves levels by calling
       `EffortLevels` with a local copy of the provider whose `Effort` is set
       to the shape under test. `model.Providers` is never written. Claude's
-      native shape uses claude-native's `EffortAnthropic` wire kind once
-      that lands; the probe adds none of its own.
+      native shape uses claude-native's `EffortAnthropic` wire kind; the
+      probe adds none of its own.
       *Verify:* T9's "provider table unchanged" assertion.
 
 ## M2 — Probe engine (`internal/effortprobe`, new package)
@@ -55,9 +55,9 @@ Imports only `model` and `model/catalog`. No `providers`, `tui` or
       [support matrix](../model-effort/context.md#provider-support-matrix):
       `openai, gemini, xai, deepseek, groq, cerebras, together, mistral,
       bedrock` → top level; `openrouter` → object; `chatgpt` → Responses
-      object; `opencode-zen, opencode-go, dialagram` → both; `claude` → top
-      level on the compatibility endpoint (expected ignored), or
-      `EffortAnthropic` on the native route. An empty provider name is an
+      object; `opencode-zen, opencode-go, dialagram` → both; `claude` →
+      `output_config.effort` (`EffortAnthropic`) on the native route, its
+      one shape, with an endpoint override refused. An empty provider name is an
       error (custom endpoints are out of scope). `Requests()` returns the
       ordered request list (spec point 8); more than 17 is an error.
       *Verify:* table test over documented, relay, `--probe-wire` override,
@@ -222,12 +222,33 @@ Imports only `model` and `model/catalog`. No `providers`, `tui` or
 
 claude-native merged after this feature: `claude` now uses the native
 Messages API, and its client sends effort only under
-`model.EffortAnthropic` (`output_config.effort`). `documentedShapes` still
-maps `claude` to `shapeTop` and prints `claudeCompatNote`, so a probe on
-`claude` sends no effort field on any row and its verdicts are not
-evidence. Open follow-up: add the native `output_config` shape for
-`claude` (spec point 5's native-route case) and drop the compat note on
-the native route.
+`model.EffortAnthropic` (`output_config.effort`). At the merge
+`documentedShapes` still mapped `claude` to `shapeTop` and printed
+`claudeCompatNote`, so a probe on `claude` sent no effort field on any row.
+
+Resolved (2026-10-07, `followup/probe-claude`, implemented (local)):
+
+- `documentedShapes` maps `claude` to `shapeAnthropic`
+  (`output_config.effort`, `EffortAnthropic`), a single shape like
+  ChatGPT's Responses one (`Shape.onlyShape`), so `--probe-wire` on
+  `claude` is a usage error naming that shape.
+- `claudeCompatNote` and the then-unused `Plan.Notes` are gone; the plan
+  prints the field as `"output_config": {"effort": "<level>"}`.
+- `CheckEndpoint` refuses an endpoint override on `claude`, in `NewPlan`
+  and in `app` before the client is built: the native wire is chosen only
+  at the row's exact base URL, so an override would post chat completions
+  carrying no effort. Custom endpoints without a provider stay refused.
+- `firsttoken.go` recognises Messages API events (`content_block_delta`
+  with text, thinking or tool input; a `tool_use` block start), so Claude
+  rows record time to first token.
+- *Verify:* `claude_probe_test.go` runs a whole plan through a native
+  `claude` client (the row's base URL, rerouted to an `httptest` Messages
+  API fake) and asserts each POST carries `output_config.effort` per level
+  then `likha-probe-invalid`, no chat-completions effort field, identical
+  bodies apart from `output_config`, `validated` on the 400 control, and
+  `Eligible to enable output_config.effort for claude: yes`. Plan, output,
+  first-token and app usage tests cover the rest. No live Claude probe has
+  run; T16 is still the user's.
 
 ## Implementation notes (2026-10-06)
 
@@ -254,11 +275,10 @@ reports the user produces. Where the result differs from the plan:
   recorder wraps each 2xx response body and marks the first SSE event that
   carries text, reasoning or a tool call (`firsttoken.go`). The model's
   text and reasoning callbacks missed a reply that is only a tool call.
-- **T3/T4, Claude native.** `EffortAnthropic` does not exist on this branch,
-  so `claude` is probed on the OpenAI-compatible endpoint with
-  `reasoning_effort` and the spec point 5 note. Probing `output_config:
-  {effort}` is a follow-up once claude-native lands; `--probe-wire` stays
-  allowed on `claude` until then, since the compat route is chat completions.
+- **T3/T4, Claude native.** `EffortAnthropic` did not exist on this branch,
+  so `claude` was probed on the OpenAI-compatible endpoint with
+  `reasoning_effort` and the spec point 5 note. Superseded by the merge
+  note above: `claude` now probes `output_config: {effort}` only.
 - **T8, control and Default.** A control answered with 400/422 is
   `validated` only when Default succeeded; otherwise it is inconclusive,
   since the model's own default may be what the provider refused. A level's

@@ -16,9 +16,6 @@ import (
 // estimate and caps.
 func WritePlan(w io.Writer, plan Plan, estimate CostEstimate) error {
 	p := &printer{w: w}
-	for _, note := range plan.Notes {
-		p.line(note)
-	}
 	p.line("Effort probe plan")
 	p.line("  Provider: %s", plan.Provider.Name)
 	p.line("  Model:    %s", plan.Model)
@@ -44,8 +41,11 @@ func WritePlan(w io.Writer, plan Plan, estimate CostEstimate) error {
 
 // shapeField names the exact body field a shape writes.
 func shapeField(s Shape) string {
-	if s.Wire == model.EffortTopLevel {
+	switch s.Wire {
+	case model.EffortTopLevel:
 		return `"reasoning_effort": "<level>"`
+	case model.EffortAnthropic:
+		return `"output_config": {"effort": "<level>"}`
 	}
 	return `"reasoning": {"effort": "<level>"}`
 }

@@ -101,9 +101,11 @@ func TestWritePlanNamesEverythingBeforeConsent(t *testing.T) {
 	}
 }
 
-func TestWritePlanClaudeCompatNoteComesFirst(t *testing.T) {
+// Claude's native route names its own field and carries no note about the
+// OpenAI-compatible endpoint it no longer uses (spec point 5).
+func TestWritePlanClaudeNativeShape(t *testing.T) {
 	p, _ := model.LookupProvider("claude")
-	plan, err := NewPlan(p, "claude-opus-5-5", nil, Options{})
+	plan, err := NewPlan(p, claudeModel, nil, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +113,13 @@ func TestWritePlanClaudeCompatNoteComesFirst(t *testing.T) {
 	if err := WritePlan(&out, plan, Estimate(plan)); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out.String(), claudeCompatNote+"\n") {
-		t.Fatalf("plan does not start with the compatibility note:\n%s", out.String())
+	if !strings.HasPrefix(out.String(), "Effort probe plan\n") {
+		t.Fatalf("plan does not start with its heading:\n%s", out.String())
+	}
+	if want := `Wire shape: output_config.effort (field "output_config": {"effort": "<level>"})`; !strings.Contains(out.String(), want) {
+		t.Fatalf("plan lacks %q:\n%s", want, out.String())
+	}
+	if strings.Contains(out.String(), "OpenAI-compatible") {
+		t.Fatalf("plan still mentions the compatibility endpoint:\n%s", out.String())
 	}
 }
