@@ -41,10 +41,12 @@ func (m *ui) refreshStatusSessionTitle() {
 	m.statusTitle = statusSessionTitle(snapshot)
 }
 
-// statusState marks the status state with the opted-in Nerd Font marker
-// (FR-15, themes spec): icons appear only as status and review markers and
-// only under --nerd-fonts; plain output stays identical without the flag.
+// statusState replaces the live model-wait state with a compact spinner.
+// Other status/review icons retain the Nerd Font opt-in (FR-15, themes spec).
 func (m *ui) statusState() string {
+	if m.statusWorking() {
+		return m.statusSpinner() + " " + workingLabel
+	}
 	state := m.status
 	if !m.conn.Nerd || m.pending != nil {
 		return state
@@ -122,6 +124,9 @@ func (m *ui) statusHints(page, pages int, narrow bool) []string {
 			if n := len(m.queue); n > 0 {
 				queued = fmt.Sprintf("%dQ ", n)
 			}
+			if m.statusWorking() {
+				return []string{state + " " + queued + position + " PgUp/PgDn ^C", state + " " + queued + position + " ^C"}
+			}
 			return []string{state + " " + queued + position + " PgUp/PgDn ^C", position + " PgUp/PgDn ^C"}
 		}
 		held := ""
@@ -137,6 +142,11 @@ func (m *ui) statusHints(page, pages int, narrow bool) []string {
 		}
 		if m.cancelling {
 			return []string{state + " · " + queued + position + " · Esc again to force stop", state + " · " + queued + position + " · Esc force stop", position + " · Esc force stop"}
+		}
+		if m.statusWorking() {
+			// Keep the running indicator and cancel/page/queue controls even
+			// when identity or usage requires a more compact hint.
+			return []string{state + " · " + queued + position + " · PgUp/PgDn · Ctrl+C cancel", state + " · " + queued + position + " · PgUp/PgDn ^C", state + " · " + queued + position + " · ^C", state + " " + queued + position + " ^C"}
 		}
 		return []string{state + " · " + queued + position + " · PgUp/PgDn · Ctrl+C cancel", state + " · " + queued + position + " · PgUp/PgDn ^C", position + " · PgUp/PgDn ^C"}
 	}
@@ -434,6 +444,7 @@ func (m *ui) renderStatusCells(left []statusSegment, right string, warning bool)
 	if warning {
 		rightStyle = m.theme.Warning
 	}
+	renderedRight := m.renderStatusHint(right, rightStyle)
 	// The Likha mark lives at the far right END of the row, after the page or
 	// mode hint (spec tui-layout 1a.3). It renders only at 70 columns and up
 	// and retires first under width pressure: callers already reserve its
@@ -444,7 +455,7 @@ func (m *ui) renderStatusCells(left []statusSegment, right string, warning bool)
 		if space > 0 {
 			b.WriteString(strings.Repeat(" ", space))
 			if right != "" {
-				b.WriteString(rightStyle.Render(right))
+				b.WriteString(renderedRight)
 			}
 			b.WriteString(strings.Repeat(" ", 2))
 			b.WriteString(m.theme.Title.Render("Likha"))
@@ -456,7 +467,7 @@ func (m *ui) renderStatusCells(left []statusSegment, right string, warning bool)
 		b.WriteString(strings.Repeat(" ", space))
 	}
 	if right != "" {
-		b.WriteString(rightStyle.Render(right))
+		b.WriteString(renderedRight)
 	}
 	return b.String()
 }
@@ -502,7 +513,7 @@ func (m *ui) statusLineRows(page, pages int) []string {
 		}
 	} else {
 		// Without a rate window, retain the most informative hint that fits
-		// the full identity — the state text (Waiting for model, Cancelling,
+		// the full identity — the state text (Working…, Cancelling,
 		// Ready) is the footer's status string and must not be pinned to the
 		// shortest variant just because optional segments share the row.
 		for _, hint := range hints {

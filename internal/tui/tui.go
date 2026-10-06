@@ -387,11 +387,11 @@ func (m *ui) activityTickCmd() tea.Cmd {
 	return activityTick(m.runID, m.activityGeneration)
 }
 
-// armActivityTick starts the activity tick for running tool dots unless a
-// tick for the current generation is already in flight. hideActivity bumps
-// the generation, so the Working row's retired clock never counts.
+// armActivityTick starts the clock for tool dots or model status unless a tick
+// for the current generation is already in flight. hideActivity bumps the
+// generation, so the Working row's retired clock never counts.
 func (m *ui) armActivityTick() tea.Cmd {
-	if m.activityArmed == m.activityGeneration+1 || !m.toolBlinking() {
+	if !m.working || m.pending != nil || m.activityArmed == m.activityGeneration+1 || !m.toolBlinking() && !m.statusWorking() {
 		return nil
 	}
 	return m.activityTickCmd()
@@ -1111,7 +1111,9 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// branch can strand the run's channel: an open question, a dropped
 		// delta, or a cancel all keep draining until the terminal event.
 		if m.working && v.RunID == m.runID {
-			cmd = tea.Batch(cmd, waitEvent(m.events))
+			// A transcript handoff retires its old clock, but the model's
+			// bottom status keeps animating throughout streamed output.
+			cmd = tea.Batch(cmd, m.armActivityTick(), waitEvent(m.events))
 		}
 		return m, cmd
 	case tea.MouseMsg:
@@ -1192,7 +1194,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case activityTickMsg:
 		// Ticks are scoped to both the run and the current activity interval.
 		// Handoffs, re-arms, cancellation, and reviews invalidate old clocks.
-		if v.runID != m.runID || v.generation != m.activityGeneration || !m.working || m.pending != nil || !m.hasActivity() && !m.toolBlinking() {
+		if v.runID != m.runID || v.generation != m.activityGeneration || !m.working || m.pending != nil || !m.hasActivity() && !m.toolBlinking() && !m.statusWorking() {
 			if m.activityArmed == v.generation+1 {
 				m.activityArmed = 0 // this clock stopped; a later handoff may re-arm
 			}
