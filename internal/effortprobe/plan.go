@@ -39,8 +39,8 @@ func DefaultCaps() Caps {
 
 // Shape is one way of carrying the effort field on the wire.
 type Shape struct {
-	// Name is the field as the report shows it: "reasoning_effort" or
-	// "reasoning.effort".
+	// Name is the field as the report shows it: "reasoning_effort",
+	// "reasoning.effort" or "output_config.effort".
 	Name string
 	Wire model.EffortWire
 	// Responses marks the ChatGPT Responses body rather than chat completions.
@@ -55,29 +55,33 @@ func (s Shape) Label() string {
 	return s.Name
 }
 
+// onlyShape reports a shape that is its provider's one way of carrying
+// effort, so --probe-wire has nothing to choose (spec point 3). The two
+// chat-completions shapes can both be sent to one endpoint; the Responses
+// API and Claude's native Messages API each accept only their own field.
+func (s Shape) onlyShape() bool {
+	return s.Responses || s.Wire == model.EffortAnthropic
+}
+
 var (
 	shapeTop       = Shape{Name: "reasoning_effort", Wire: model.EffortTopLevel}
 	shapeObject    = Shape{Name: "reasoning.effort", Wire: model.EffortObject}
 	shapeResponses = Shape{Name: "reasoning.effort", Wire: model.EffortObject, Responses: true}
+	shapeAnthropic = Shape{Name: "output_config.effort", Wire: model.EffortAnthropic}
 )
 
 // documentedShapes is the provider support matrix of
 // specs/model-effort/context.md: the shape each provider documents. A
 // provider missing here (the relays, or a row added later) documents none
-// and is probed with both chat-completions shapes. Claude is listed with the
-// OpenAI-compatible endpoint's documented field, which that endpoint
-// ignores; its native output_config shape arrives with claude-native.
+// and is probed with both chat-completions shapes.
 var documentedShapes = map[string]Shape{
 	"openai": shapeTop, "gemini": shapeTop, "xai": shapeTop, "deepseek": shapeTop,
 	"groq": shapeTop, "cerebras": shapeTop, "together": shapeTop, "mistral": shapeTop,
-	"bedrock": shapeTop, "claude": shapeTop,
+	"bedrock":    shapeTop,
 	"openrouter": shapeObject,
 	"chatgpt":    shapeResponses,
+	"claude":     shapeAnthropic,
 }
-
-// claudeCompatNote is printed first on claude while it uses the
-// OpenAI-compatible endpoint (spec point 5).
-const claudeCompatNote = "Anthropic's OpenAI-compatible endpoint ignores effort; expect ignored-suspected."
 
 // Level is one effort level the plan sends.
 type Level struct {
@@ -126,7 +130,6 @@ type Plan struct {
 	// Eligibility needs each of them probed and accepted (spec point 20).
 	Published    []string
 	Caps         Caps
-	Notes        []string
 	LikhaVersion string
 
 	secrets []string
@@ -149,6 +152,9 @@ func NewPlan(p model.Provider, modelID string, live []string, opts Options) (Pla
 	if err != nil {
 		return Plan{}, err
 	}
+	if err := CheckEndpoint(p, opts.Endpoint); err != nil {
+		return Plan{}, err
+	}
 	published := publishedLevels(p, modelID, live)
 	levels, source, err := planLevels(published, modelID, p.Name, len(live) > 0, opts.Levels)
 	if err != nil {
@@ -163,9 +169,6 @@ func NewPlan(p model.Provider, modelID string, live []string, opts Options) (Pla
 		Shapes: shapes, Documented: documented, Levels: levels, LevelSource: source,
 		Published: published, Caps: DefaultCaps(), LikhaVersion: opts.LikhaVersion, secrets: nonEmpty(opts.Secrets),
 	}
-	if p.Name == "claude" {
-		plan.Notes = append(plan.Notes, claudeCompatNote)
-	}
 	if n := len(plan.Requests()); n > plan.Caps.MaxRequests {
 		return Plan{}, fmt.Errorf("the plan needs %d requests, above the cap of %d; probe fewer levels or one wire shape", n, plan.Caps.MaxRequests)
 	}
@@ -179,12 +182,26 @@ func CheckWire(provider, wire string) error {
 	return err
 }
 
+// CheckEndpoint refuses an endpoint override on a provider whose documented
+// shape exists only at its own base URL, so the CLI can refuse it as a usage
+// error before anything is sent. Likha's client speaks Claude's native
+// Messages API only at the claude row's exact base URL; an override posts
+// chat completions, which never carry output_config.effort, so every row
+// would test nothing (spec point 5).
+func CheckEndpoint(p model.Provider, endpoint string) error {
+	shape, ok := documentedShapes[p.Name]
+	if !ok || shape.Wire != model.EffortAnthropic || !EndpointOverridden(p, endpoint) {
+		return nil
+	}
+	return fmt.Errorf("an endpoint override on %s cannot be probed: only %s speaks the native Messages API that carries output_config.effort", p.Name, p.BaseURL)
+}
+
 // planShapes picks the shapes to probe (spec decision 3).
 func planShapes(provider, wire string) ([]Shape, *Shape, error) {
 	documented, known := documentedShapes[provider]
-	if documented.Responses {
+	if known && documented.onlyShape() {
 		if wire != "" {
-			return nil, nil, fmt.Errorf("--probe-wire does not apply to %s: it has one shape, Responses reasoning.effort", provider)
+			return nil, nil, fmt.Errorf("--probe-wire does not apply to %s: it has one shape, %s", provider, documented.Label())
 		}
 		return []Shape{documented}, &documented, nil
 	}

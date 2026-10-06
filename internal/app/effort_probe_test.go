@@ -121,6 +121,7 @@ func TestProbeUsageErrors(t *testing.T) {
 		{"missing model", []string{"--probe-effort", "--provider", "openai"}, "needs --model or LIKHA_MODEL"},
 		{"unknown provider", []string{"--probe-effort", "--provider", "nope", "--model", "m"}, `unknown provider "nope"`},
 		{"probe-wire on chatgpt", []string{"--probe-effort", "--provider", "chatgpt", "--model", "gpt-5.5", "--probe-wire", "both"}, "--probe-wire does not apply to chatgpt"},
+		{"probe-wire on claude", []string{"--probe-effort", "--provider", "claude", "--model", "claude-opus-5-5", "--probe-wire", "top"}, "--probe-wire does not apply to claude: it has one shape, output_config.effort"},
 		{"bad probe-wire", []string{"--probe-effort", "--provider", "openai", "--model", "gpt-5.5", "--probe-wire", "sideways"}, "top, object or both"},
 		{"empty probe level", []string{"--probe-effort", "--provider", "openai", "--model", "gpt-5.5", "--probe-levels", "low,,high"}, "empty level"},
 		{"missing credential", []string{"--probe-effort", "--provider", "openai", "--model", "gpt-5.5"}, "requires an API key"},
@@ -140,6 +141,24 @@ func TestProbeUsageErrors(t *testing.T) {
 				t.Fatal("a refused probe changed stored configuration")
 			}
 		})
+	}
+}
+
+// An override on claude would post chat completions, which never carry
+// output_config.effort, so the probe refuses it before contacting it.
+func TestProbeRefusesClaudeEndpointOverride(t *testing.T) {
+	probeEnv(t)
+	server := newProbeServer(t, 0)
+	var stdout, stderr bytes.Buffer
+	args := []string{"--probe-effort", "--provider", "claude", "--model", "claude-opus-5-5", "--endpoint", server.endpoint(), "--api-key", probeTestKey, "--yes"}
+	if code := Run(args, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit = %d, want 2; stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "an endpoint override on claude cannot be probed") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	if server.posts.Load() != 0 || server.gets.Load() != 0 || stdout.Len() != 0 {
+		t.Fatalf("POSTs = %d, GETs = %d, stdout = %q", server.posts.Load(), server.gets.Load(), stdout.String())
 	}
 }
 

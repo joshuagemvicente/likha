@@ -1,8 +1,9 @@
 # Feature: Effort probe (live evidence for enabling reasoning effort)
 
 **Status:** implemented (local) 2026-10-06, review fixes 2026-10-07 —
-automated suite green; live probe outstanding (user-run, tasks T16), and
-Claude's native `output_config` shape waits for claude-native. Decisions recorded 2026-10-06 (user delegated
+automated suite green; live probe outstanding (user-run, tasks T16).
+Claude's native `output_config` shape implemented (local) 2026-10-07 after
+claude-native merged. Decisions recorded 2026-10-06 (user delegated
 defaults). Requirement: [v1-spec FR-40](../v1-spec.md).
 Gates [model-effort](../model-effort/spec.md) task T20 and the effort wire of
 [claude-native](../claude-native/spec.md) (FR-38, decision 8).
@@ -37,9 +38,8 @@ change that cites a report.
 
 In scope: a non-interactive `likha --probe-effort` mode for every named
 API-key provider (chat completions), for ChatGPT sign-in (Responses), and
-for Claude on whichever route the build uses (the OpenAI-compatible endpoint
-today, the native Messages API once [claude-native](../claude-native/spec.md)
-ships); the cost preview and confirmation; the stdout table; the JSON report
+for Claude on its native Messages API
+([claude-native](../claude-native/spec.md)); the cost preview and confirmation; the stdout table; the JSON report
 in the private state directory; and the steps that turn a report into a
 recorded probe result.
 
@@ -165,7 +165,9 @@ Each was an open choice; the recommended option was taken.
     but the report then says `endpoint override`, and the summary says the
     run is not evidence for the provider's own endpoint. Reason: effort is
     enabled per provider row, so evidence must come from that row's
-    endpoint or a documented alternative of it.
+    endpoint or a documented alternative of it. `claude` refuses an
+    override (point 5): elsewhere its client speaks chat completions, so no
+    request would carry the native effort field.
 
 ## Functional changes
 
@@ -195,10 +197,15 @@ Each was an open choice; the recommended option was taken.
    with no levels and no `--probe-levels` exits 2 with
    `<model> publishes no effort levels on <provider>; nothing to probe (use
    --probe-levels to test candidate levels)`, before any model request.
-5. On `claude` while it uses the OpenAI-compatible endpoint, the probe
-   prints first: `Anthropic's OpenAI-compatible endpoint ignores effort;
-   expect ignored-suspected.` Once Claude uses the native route, the probe
-   sends `output_config: {effort}` there instead.
+5. On `claude` the probe uses the native Messages API and sends
+   `output_config: {effort}`, the only shape that route carries; the plan
+   names it `output_config.effort`. No note about the OpenAI-compatible
+   endpoint is printed, since the probe no longer uses it. Only the `claude`
+   row's own endpoint (`https://api.anthropic.com/v1`) speaks the native
+   API, so an endpoint override on `claude` exits 2 with `an endpoint
+   override on claude cannot be probed: only https://api.anthropic.com/v1
+   speaks the native Messages API that carries output_config.effort`
+   before anything is sent, the model list included.
 
 ### Plan, cost and consent
 

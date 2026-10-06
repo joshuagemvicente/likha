@@ -25,7 +25,7 @@ rules in [specs/README.md](../README.md).
       followed by the `likha-probe-invalid` control.
 - [x] Each request carries the probe task and its one tool, and the only
       difference between requests is the effort field.
-- [ ] Documented providers are probed with their documented shape; relays
+- [x] Documented providers are probed with their documented shape; relays
       with both shapes; ChatGPT with Responses `reasoning: {effort}`; Claude
       on its native route with `output_config: {effort}`.
 - [ ] No row is retried, including by FR-36's automatic retries (the
@@ -72,7 +72,7 @@ rules in [specs/README.md](../README.md).
 - [ ] Every level a report shows `rejected` is removed by a cited catalog
       override before its provider is enabled.
 
-Open items as of 2026-10-06: Claude's native `output_config` shape (waits for
-claude-native), FR-36's retry opt-out (model-recovery has not landed; no
-retry exists today), a real Ctrl+C walkthrough, and every item that depends
-on a user-run report.
+Open items as of 2026-10-07: FR-36's retry opt-out (model-recovery has not
+landed; no retry exists today), a real Ctrl+C walkthrough, and every item
+that depends on a user-run report. Claude's native `output_config` shape
+landed 2026-10-07 (automated checks only; tasks.md merge note).

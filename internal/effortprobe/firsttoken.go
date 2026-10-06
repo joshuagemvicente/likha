@@ -70,8 +70,8 @@ func (w *tokenWatch) field(line []byte) {
 }
 
 // carriesOutput reports whether one SSE event holds model output, on the
-// chat-completions or the Responses wire. Role-only chunks, usage, [DONE]
-// and lifecycle events hold none.
+// chat-completions, Responses or Anthropic Messages wire. Role-only chunks,
+// usage, [DONE], signatures and lifecycle events hold none.
 func carriesOutput(event string, data []byte) bool {
 	var payload struct {
 		Type  string          `json:"type"`
@@ -79,6 +79,9 @@ func carriesOutput(event string, data []byte) bool {
 		Item  *struct {
 			Type string `json:"type"`
 		} `json:"item"`
+		ContentBlock *struct {
+			Type string `json:"type"`
+		} `json:"content_block"`
 		Choices []struct {
 			Delta struct {
 				Content          json.RawMessage `json:"content"`
@@ -103,6 +106,14 @@ func carriesOutput(event string, data []byte) bool {
 		}
 		return false
 	}
+	switch event {
+	case "content_block_start":
+		// A tool_use block opens with its name: the Messages API's
+		// counterpart of Responses' function_call item.
+		return payload.ContentBlock != nil && payload.ContentBlock.Type == "tool_use"
+	case "content_block_delta":
+		return anthropicDeltaCarriesOutput(payload.Delta)
+	}
 	for _, choice := range payload.Choices {
 		d := choice.Delta
 		if hasValue(d.Content) || hasValue(d.Reasoning) || hasValue(d.ReasoningContent) || hasValue(d.ToolCalls) {
@@ -110,6 +121,20 @@ func carriesOutput(event string, data []byte) bool {
 		}
 	}
 	return false
+}
+
+// anthropicDeltaCarriesOutput reports a Messages API content delta holding
+// text, thinking or tool input. A signature_delta is not output.
+func anthropicDeltaCarriesOutput(raw json.RawMessage) bool {
+	var delta struct {
+		Text        string `json:"text"`
+		Thinking    string `json:"thinking"`
+		PartialJSON string `json:"partial_json"`
+	}
+	if json.Unmarshal(raw, &delta) != nil {
+		return false
+	}
+	return delta.Text != "" || delta.Thinking != "" || delta.PartialJSON != ""
 }
 
 // hasValue reports a JSON value that is present and not empty.

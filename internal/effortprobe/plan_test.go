@@ -92,6 +92,27 @@ func TestNewPlan(t *testing.T) {
 			wantLevels: []string{"low*", "high*"}, wantSource: SourceFlag, wantRequests: 4,
 		},
 		{
+			name: "claude probes the native output_config shape", provider: provider(t, "claude"), model: claudeModel,
+			wantShapes: []string{"output_config.effort"}, wantDoc: "output_config.effort",
+			wantLevels: claudeLevels, wantSource: SourceCatalog, wantRequests: 7,
+		},
+		{
+			name: "claude has one shape", provider: provider(t, "claude"), model: claudeModel,
+			opts:    Options{Wire: "both"},
+			wantErr: "--probe-wire does not apply to claude: it has one shape, output_config.effort",
+		},
+		{
+			name: "claude refuses an endpoint override", provider: provider(t, "claude"), model: claudeModel,
+			opts:    Options{Endpoint: "http://127.0.0.1:9/v1"},
+			wantErr: "an endpoint override on claude cannot be probed: only https://api.anthropic.com/v1 speaks the native Messages API",
+		},
+		{
+			name: "claude's own endpoint is no override", provider: provider(t, "claude"), model: claudeModel,
+			opts:       Options{Endpoint: "https://api.anthropic.com/v1/"},
+			wantShapes: []string{"output_config.effort"}, wantDoc: "output_config.effort",
+			wantLevels: claudeLevels, wantSource: SourceCatalog, wantRequests: 7,
+		},
+		{
 			name: "probe-levels keeps published order and puts unpublished last", provider: provider(t, "openai"), model: "gpt-5.5",
 			opts:       Options{Levels: []string{"max", "high", "low"}},
 			wantShapes: []string{"reasoning_effort"}, wantDoc: "reasoning_effort",
