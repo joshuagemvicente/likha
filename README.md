@@ -1,324 +1,257 @@
-# Likha
-
-Likha is a terminal coding agent for one repository at a time. It streams responses from a hosted model provider on the predefined list, using your own API key (BYOK) — Likha hosts no models and bundles no local inference server. It reads repository files and asks permission before editing a file or running a shell command. Conversations are stored in local SQLite so you can resume them. The full-screen interface scrolls its transcript continuously, like a browser, rather than using terminal scrollback or fixed pages.
-
-**Release status:** Local scripts build macOS and Linux archives; no release has been published. A local macOS ARM64 archive passed the documented checksum/install checks and an interactive workflow against a protocol server. `opencode-go` is **live-verified** (user session on 2026-09-29: setup flow, connection check, streaming, and agent tool usage with a real key); repeat the full probe before release after provider-facing request changes. `opencode-zen` and every provider marked pending-probe below await live verification, including ChatGPT (no live probe with a real Plus/Pro account has run). See the [v1 specification](specs/v1-spec.md), [feature test plan](specs/feature-test-plan.md), [setup plan](specs/setup-plan.md), and [unreleased changes](CHANGELOG.md).
-
-## Requirements and model providers
-
-- Go 1.24 or later to build from source or produce local release archives; macOS or Linux. A downloaded, prebuilt archive does not require Go.
-- An interactive terminal (Likha does not run its TUI through a pipe).
-- A hosted provider from the predefined list and your API key. The model must support SSE streaming **and structured tool calls**. Providers marked pending-probe have not yet passed Likha's full compatibility check. Likha hosts no models and bundles no local inference server.
-
-### Predefined providers
-
-| Provider | `--provider` name | API key | Base URL (default) | Default model | Probe status |
-| --- | --- | --- | --- | --- | --- |
-| OpenAI | `openai` | `LIKHA_OPENAI_API_KEY` | `https://api.openai.com/v1` | `gpt-4o-mini` | pending-probe |
-| OpenRouter | `openrouter` | `LIKHA_OPENROUTER_API_KEY` | `https://openrouter.ai/api/v1` | `openai/gpt-4o-mini` | pending-probe |
-| Amazon Bedrock | `bedrock` | `LIKHA_BEDROCK_API_KEY` | `https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1` (other regions via `--endpoint`) | `anthropic.claude-3-5-haiku-20241022-v1:0` | pending-probe |
-| Dialagram | `dialagram` | `LIKHA_DIALAGRAM_API_KEY` | `https://dialagram.me/router/v1` | none — pass `--model` | pending-probe |
-| Opencode Zen | `opencode-zen` | `LIKHA_OPENCODE_ZEN_API_KEY` | `https://opencode.ai/zen/v1` | `gpt-5.3-codex` | pending-probe |
-| Opencode Go | `opencode-go` | `LIKHA_OPENCODEGO_API_KEY` | `https://opencode.ai/zen/go/v1` | `glm-5.3-flash` | live-verified* |
-| ChatGPT (Plus/Pro) | `chatgpt` | none — ChatGPT browser sign-in | `https://chatgpt.com/backend-api/codex` | `gpt-5.5` | pending-probe |
-| Groq | `groq` | `LIKHA_GROQ_API_KEY` | `https://api.groq.com/openai/v1` | none — pass `--model` | pending-probe |
-| xAI | `xai` | `LIKHA_XAI_API_KEY` | `https://api.x.ai/v1` | none — pass `--model` | pending-probe |
-| Together AI | `together` | `LIKHA_TOGETHER_API_KEY` | `https://api.together.ai/v1` | none — pass `--model` | pending-probe |
-| Mistral AI | `mistral` | `LIKHA_MISTRAL_API_KEY` | `https://api.mistral.ai/v1` | none — pass `--model` | pending-probe |
-| Cerebras | `cerebras` | `LIKHA_CEREBRAS_API_KEY` | `https://api.cerebras.ai/v1` | none — pass `--model` | pending-probe |
-| Anthropic Claude | `claude` | `LIKHA_CLAUDE_API_KEY` | `https://api.anthropic.com/v1` (OpenAI SDK compatibility layer) | `claude-opus-5-5` | pending-probe |
-| DeepSeek | `deepseek` | `LIKHA_DEEPSEEK_API_KEY` | `https://api.deepseek.com/v1` | `deepseek-flash` | pending-probe |
-| Google Gemini | `gemini` | `LIKHA_GEMINI_API_KEY` | `https://generativelanguage.googleapis.com/v1beta/openai` (OpenAI compatibility endpoint) | `gemini-2.5-flash` | pending-probe |
-
-`live-verified*` means a user-run probe passed on 2026-09-29; repeat the full probe after provider-facing request changes before release. A pending-probe row's default model is the shipped code default, not a probed choice. Pending-probe means endpoint docs or route compatibility are not a substitute for Likha's full live checks (streamed text, structured tool calls, cancellation, and revoked-key handling).
-
-Key resolution order: `--api-key`, then `LIKHA_API_KEY`, then the provider's own `LIKHA_<NAME>_API_KEY`, then the private state directory (`providers.json`, mode 0600). Passing `--api-key` once stores the key for later runs. Keys are never read from the selected repository and never stored in the session database. `chatgpt` is the exception: it has no API key and signs in through your browser instead — see [Sign in with ChatGPT (Plus/Pro)](#sign-in-with-chatgpt-pluspro). Endpoint URLs may not contain credentials, query strings, or fragments; plain HTTP is accepted only for loopback hosts.
-
-Likha checks the connection when it starts and again before each agent run; a dead or revoked key is reported before any prompt is sent. An endpoint outside the list runs with a visible **unverified** warning in the interface. `opencode-go` is live-verified; the remaining providers, including ChatGPT, are **not yet probed** against their live services — see `specs/predefined-providers/`.
-
-Likha identifies itself to providers with `User-Agent: likha/<version>`. The Opencode providers additionally receive your stable conversation ID in `x-opencode-session`, which they require for routing and prompt caching. ChatGPT requests go to the OpenAI Responses wire at `<base>/responses` with a `ChatGPT-Account-Id` header and the same stable conversation ID in `session-id`.
-
-Run without a model name: Likha uses the provider's documented default (listed above); a listed provider with `none — pass --model` requires `LIKHA_MODEL` or `--model`. For an endpoint outside the list, Likha uses the first model that endpoint reports. `likha --help` prints every option, provider, environment variable, and example.
-
-### First-run setup (no flags needed)
-
-Run `likha` with no provider configured and the TUI walks you through setup:
-
-1. **Choose a provider** — ↑/↓ and Enter over the predefined list.
-2. **Paste your API key** — masked input; the key is checked against the provider before anything else happens. Selecting `chatgpt` skips this stage entirely: instead of a key, Likha shows a "Press Enter to open the browser" login stage that signs in through your ChatGPT account.
-3. **Choose a model** — picked from the models the provider reports; a single model auto-selects. ChatGPT has no model-list route, so setup offers its curated list (`gpt-5.5`, the default, first).
-
-The choice is stored in the private state directory (`config.json`, `providers.json`, both mode 0600), so the next launch goes straight to the conversation. Explicit flags or environment variables skip setup and override the stored choice. On a non-interactive terminal, unconfigured invocations fail with a clear error instead of starting setup.
-
-For example, using the stored key from setup:
-
-```sh
-go run ./cmd/likha /path/to/repository
+```
+ ____   ___  __ ___ __ __  _____
+/  _/  /___\|  |  //  |  \/  _  \
+|  |---|   ||  _ < |  _  ||  _  |
+\_____/\___/|__|__\\__|__/\__|__/
 ```
 
-Or explicitly for one run:
+<div align="center">
 
-```sh
-export LIKHA_API_KEY="sk-..."
-go run ./cmd/likha --provider opencode-go /path/to/repository
-```
+**A terminal coding agent for one repository at a time. Bring your own key or ChatGPT plan.**
 
-A stored configuration is used on every launch. `--model` and `--endpoint` override the stored choice and the provider defaults. A provider outside the list cannot be selected with `--provider`; use `--endpoint` to point at another OpenAI-compatible base URL (runs unverified). The provider must emit structured tool calls, not just write tool instructions as prose. Likha reports connection, revoked-key, or incompatible-protocol errors in the conversation and keeps the UI open.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go 1.24+](https://img.shields.io/badge/go-1.24%2B-00ADD8.svg)](go.mod)
+![Platforms: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)
+![Status: pre-release](https://img.shields.io/badge/status-pre--release-orange.svg)
 
-Omit the repository argument to use the current directory. Put options before the repository path, for example `go run ./cmd/likha --provider opencode-go /path/to/repository`. `--help` prints usage and `--version` prints the build version without entering the TUI.
+[Install](#install) · [Quick start](#quick-start) · [Providers](#providers) · [Usage](#usage) · [Docs](#documentation) · [Development](#development)
 
-### Sign in with ChatGPT (Plus/Pro)
+</div>
 
-The `chatgpt` provider is keyless: it uses your ChatGPT subscription through OpenAI's Codex backend instead of an API key. First-run setup shows it as "ChatGPT (Plus/Pro)" and selecting it never asks for a key.
+Likha runs in your terminal, reads your repository, and works through it with a model you choose. It talks directly to a hosted provider with your own API key, or uses eligible shared ChatGPT Plus/Pro allowance after your explicit sign-in and consent. Likha hosts no models, needs no service of its own, and bundles no local inference.
 
-**Browser sign-in (interactive).** After choosing ChatGPT, setup shows a **Press Enter to open the browser** stage. Likha starts an OAuth 2 loopback listener on `http://localhost:1455` (OpenAI's public Codex CLI PKCE client; the login screen identifies it as such), opens your browser to sign in with your ChatGPT account, and completes the flow from the callback. After sign-in the model stage offers the curated ChatGPT list — `gpt-5.5` (the default), `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`, `gpt-6-sol`, `gpt-6-luna` — and no model is fetched from the backend. No API key is ever asked for or entered.
+Every file edit and every risky shell command is shown to you as an exact diff or command before it runs. Conversations are stored locally in SQLite so you can resume them.
 
-**Headless sign-in (no TTY):** `likha --provider chatgpt --device-login` runs the device-code flow without an interactive terminal or a repository. It prints the verification URL (`https://auth.openai.com/codex/device`) and a code, waits for you to approve it in a browser elsewhere, then stores the login — the whole wait is bounded at ten minutes and Ctrl+C aborts:
+> [!NOTE]
+> **Pre-release.** No release has been published yet; build from source for now. `opencode-go` is live-verified (2026-09-29). Other providers await live probes. The official Sign in with ChatGPT migration is **in progress**; no real account/browser probe has run, and fixture tests do not establish Plus/Pro sign-in success. Many interactive surfaces await a manual walkthrough. The [CHANGELOG](CHANGELOG.md) records the verification status of each change.
 
-```sh
-go run ./cmd/likha --provider chatgpt --device-login
-```
+## Features
 
-**What is stored:** the login's refresh token, access token, expiry, and ChatGPT account ID persist only in the private state directory's `providers.json` (mode 0600) under the `chatgpt` row — never in the repository or the session database. The file is schema v2, where every entry is a typed object (`"api"` key or `"oauth"` login); files written by older versions hold a plain map of API keys and are migrated in memory on read.
-
-**Requests and refreshes:** conversation turns go to the OpenAI Responses wire at `https://chatgpt.com/backend-api/codex/responses` with a `ChatGPT-Account-Id` header and the current conversation's ID in `session-id`. Access tokens expire; Likha refreshes them automatically (concurrent turns share one in-flight refresh) and re-persists the fresh token set. If a refresh fails, Likha reports "chatgpt login expired; sign in again" — the fix is another browser sign-in or `--device-login`, never a new key.
-
-**Usage display:** when the backend reports it, the main view's footer shows your plan's five-hour rate-window usage (used percent and window from the response's `x-codex-primary-*` headers). ChatGPT plans' usage windows — five hours and seven days — apply to Likha turns exactly as they do in ChatGPT.
-
-**Privacy and terms:** conversation content goes to OpenAI's ChatGPT consumer backend, so its privacy policy governs what it receives. The browser login screen shows OpenAI's public Codex CLI client, not a Likha-issued one. Using a ChatGPT subscription through a third-party harness is subject to OpenAI's consumer terms. Because your plan pays, there is no per-token cost: the status bar's spend segment renders a known `$0.00` on ChatGPT models rather than hiding.
-
-Note that ChatGPT sign-in ships pending a live probe: Likha's implementation is tested locally against fixtures, but a live probe with a real ChatGPT Plus account has not run yet, so treat the provider as not yet live-verified.
-
-## Work in the terminal
-
-### Agent tools, modes, and profiles
-
-Beyond answering, the model works through a permission-gated tool set: `glob`, `read`, and `grep` inspect the repository; `edit`/`edit_file` and `run_command` propose a full diff or an exact command for your explicit approval before anything executes; MCP tools appear per configured server with first-use trust; and private output artifacts keep oversized tool results inspectable via `/tools` and **Ctrl+O**; retained output is not added to the model context automatically, and only pages you or the model explicitly request reach the provider (output caps, pagination, and resume await an interactive walkthrough). After a crash mid edit batch, recovery inspection matched the private journal and disk with no automatic replay (headless kill -9 drill, 2026-10-04); a known gap is that the recovery view's `Unresolved` line stays empty after such a crash.
-
-The model can also **delegate**: the `task` tool spawns bounded, read-only child agents (`explore`, `review`, and any profile you author) that investigate the repository in fresh contexts and return findings — never edits. Shared limits keep delegation predictable (four executing children, sixteen per run, five minutes and 32 model requests per child), and `/agents` shows the live task tree with per-child transcripts, usage, `wait Xs · active Ys` timing per task (narrow widths show only the active figure; records saved before this release show `not recorded` with elapsed time), and branch cancellation (tree and `/agents` profile listing user-verified 2026-10-04; transcripts, usage, timing, and branch cancellation await an interactive walkthrough). Headless drills on 2026-10-04 confirmed that a child stops at the 32-request limit with status `limited` and partial findings, and that a kill -9 mid nested run resumes children as `interrupted` with repaired parent history and no replay. Running profiles is headless-tested; interactive and live-provider runs are pending. Author your own profiles as Markdown files in Likha's private state directory (`agents/<name>/AGENT.md` with a name, description, and optional tool allowlist); see `specs/user-agents/user-guide.md`.
-
-Three supporting workflows round out the surface (headless-tested; interactive walkthrough pending unless noted): `ask_user` lets the model ask you one question mid-run (choices or free text, skippable, never a permission grant); `plan_update` maintains a checklist you can inspect with `/todo`; and `/plan` toggles a read-only planning mode where every edit, command, and MCP call is refused until you toggle it off (edit and command refusal user-verified 2026-10-04; MCP refusal headless-probed with a real stdio server, which received no `tools/call`; the structured result source carries the server and tool, the readable text shows the possibly truncated qualified name, and a legacy alias call resolves to `unknown_tool` without identity). MCP tools with unsafe schemas (`$dynamicRef`, remote `$ref`, non-portable regex) stay unavailable with a named reason (headless-probed). `/skills` lists instruction files you author under `skills/<name>/SKILL.md`, and `/skill <name> [request]` loads one into a turn. Optional web tools (`web_search` and `web_fetch` for public HTTPS pages) stay unavailable until you configure them, and the first use per search backend or per fetch origin asks for consent; the grant lasts only the current conversation (consent dialogs await an interactive walkthrough). `web_fetch`'s policy was live-probed on 2026-10-04 through the real fetcher: public HTTPS pages fetched as Markdown, while plain HTTP, non-443 ports, loopback, private, and link-local addresses were refused with a named reason before connecting, and `https://localhost` plus a DNS-rebinding name were rejected at the dialer before connect (inferred from the error path; no listener was bindable on :443), while the `http://localhost` refusal was confirmed with 0 listener accepts. `web_search` uses exactly one backend, set in `tools.json`: `brave`, `tavily`, `exa`, or the keyless `duckduckgo`, which is the default when search is enabled without naming a backend, so no key is needed unless you opt into a keyed backend. There is no fallback to another vendor. DuckDuckGo is live-verified (headless call through the real adapter; consent dialog walkthrough pending), but it runs on an unofficial HTML endpoint that can change or block automated use at any time. For Brave, Tavily, and Exa, the bad-key path was live-verified on 2026-10-04 (each reports the key as rejected), but a successful search against the real APIs has not been verified yet.
-
-Likha opens with no top header at all on terminals at least 56 columns wide — the ASCII logo renders once as the first transcript block and there is no additional chrome — so identity (repository, branch, provider, model) is carried by the status bar instead. Fresh sessions show the logo where it scrolls away naturally as the conversation grows; resumed sessions never redraw or persist it. On narrower terminals the logo block is skipped and a single compact line, `Likha · <repository basename>`, is the only header, so identity survives on the smallest screens.
-
-The alternate-screen UI shows the repository, model, status, and scroll position. It does not scroll the terminal or a pane. Type a request and press **Enter**. The transcript scrolls **continuously, like a browser**: the **mouse wheel** moves the view a few lines per notch (not a page at a time), **PgUp/PgDn** (or **Ctrl+P/Ctrl+N**) step one viewport, **Home** jumps to the very top, and **End** jumps back to the newest content. A **scrollbar on the right edge** shows the position — click or drag it to move anywhere. The draft stays in the composer while you browse. While the view sits at the bottom it follows new content like a chat; scrolling up anchors it until you return. Resize to at least 40 columns by 12 rows if prompted; unsafe-size screens cannot accept a prompt or approve a review. **Ctrl+C** cancels an active run and drains completed tool results into the session before showing cancellation; **Esc** does the same when no text selection is active (otherwise it clears selection first). **Ctrl+C** while idle or **Ctrl+D** exits. The terminal screen is restored on exit.
-
-Conversation text wraps to a **content width**: the viewport minus two padding columns, at every terminal size — no capped measure, so lines reach the right edge instead of stopping short of it. No horizontal scrolling is ever needed — every rendered path (transcript, reviews, dialogs, composer, popups) is pinned by tests to stay within the viewport, and resizing re-wraps the transcript immediately. The status bar, composer, and popups still use the full terminal width.
-
-Transcript blocks carry no role labels; each starts with a glyph in a two-cell gutter, and prose wraps at word boundaries with continuation rows hanging under the text (a token wider than the line breaks by cell width). Your prompts start with `>` on a full-width tinted band with one padding row above and below (queued prompts keep the band in `Muted` text with the word `queued`); assistant text starts with `⏺`; errors with `✗` in the error color; Likha notices with `ℹ`; reasoning with `✻`. Each tool call is **one item** from start to finish: a header such as `⏺ Grep(LAYOUT_BLOCKS in src)` whose dot blinks while the call runs, then turns the theme's success color on success or its error color on failure, refusal, cancellation, or a limited result, then a `⎿` line stating the outcome in words (`Found 3 matches in 2 files`, `Exit 0`, `Failed: exit status 2`, `Refused: …`, `Interrupted`), and for reads, commands, fetches, searches, and MCP tools up to three preview lines followed by `… +N lines (ctrl+o to expand)`. **Tab**/**Shift+Tab** focus one tool item at a time (selection tint, `›` in the gutter) and **Enter** or **Ctrl+O** open the inspector with the raw arguments, provenance, warnings, and full output. Sessions saved by earlier versions still load: their separate request and result entries merge into one item. Glyphs and outcome words stay under limited color profiles; color only reinforces them.
-
-Assistant text renders as **Markdown**, the streaming answer included: headings in bold `Title` color with the `#` markers hidden (`#`/`##` also underlined), terminal bold, italic, and strikethrough, `inline code` in `Accent` on a code tint, `•`/`1.` lists (nested lists indented two cells per level, numbers right-aligned so item text lines up), `│` blockquotes in `Muted`, link text underlined with ` (url)` after it in `Muted`, `─` rules, images as `[image: alt]`, aligned tables with `│`/`─` rules (plain pipe text when they do not fit), and raw HTML as literal text. Fenced and indented code renders in a panel on the `BgCode` tint across the text column; it never word-wraps (long lines break by cell width), and a fence that names a language (`go`, `python`, `ts`, `sh`, `json`, `yaml`, …) is syntax-highlighted in theme colors: keywords in `Accent`, strings in `Warning`, comments in italic `Muted`, everything else (function names, types, numbers) `Normal` (the `default` theme uses the terminal's 16 ANSI colors instead). The language comes only from the fence; unknown or missing languages render plain. While an answer streams, an unclosed fence shows as an open code panel until it closes. Model text is untrusted: control and zero-width characters show escaped (`\u001B`), and no escape sequence from content ever reaches the terminal. Inline color swatches still work in prose, but not inside code panels. Under `--ascii` the bullets, quote bars, rules, and table borders use `-`, `|`, and `+`. Notices stay plain text.
-
-The transcript also shows work as it happens. An applied edit's item states the change (`Updated a.go with 2 additions and 1 removal`, `Created b.go (3 lines)`, `Updated 3 files with …`) and shows up to 10 numbered `+`/`-` lines of the diff you approved on green and red tints, then `… +N lines (ctrl+o to expand)` and the names of the other files; a file-creating `edit_file` reads `Create(path)`. Declined, failed, and cancelled edits show no diff. The approved diff is saved with the session, so it reappears on resume; sessions saved by earlier versions rebuild the lines from the edit arguments, without line numbers. A `task` item shows its subagent's latest activity on the `⎿` line while it runs (`Queued`, `Read path`, `Waiting for 2 subtasks`), then settles to `Done · N tool uses · wait Xs · active Ys` or the outcome (`Failed: …`, `Cancelled`, `Limited: …`, `Interrupted`); the transcript no longer prints `Agent:` lines, and `/agents` keeps the full task tree. Model reasoning streams as `✻ Thinking…` followed by its last three lines in muted italics, then collapses to `✻ Thought for Ns`. **Tab** focuses a collapsed marker like a tool item, and **Enter** expands or collapses it in place, showing the full reasoning as Markdown in muted italics; expansion lasts only for the current view. Every finished turn (completed, cancelled, or failed) ends with a muted footer such as `✻ nexum-router · 12.3s · 3 tools` (`· cancelled` when cancelled; narrow terminals drop segments from the right). Footers and reasoning durations are saved with the session and come back on resume, but they are never sent to the model. The interactive walkthrough for these surfaces is pending.
-
-The composer defaults to `rounded` (a rounded box around the input with a `> ` prompt glyph). While idle, press **Ctrl+G** to choose `minimal` (a rule above the input), `bordered` (a rounded box without the prompt glyph), `borderless` (just the input), or `chatter` (an inline `You ›` prefix). **↑/↓** navigate, typing filters, **Enter** applies, and **Esc** cancels. The choice is stored as `composer.style` in the private `config.json` and restored on launch. At 40 columns, `rounded`, `bordered`, and `chatter` render as `minimal` without changing the stored choice; a saved choice from an earlier version is kept. Page navigation stays in the status line beneath the composer; a pending review replaces the composer with its Approve/Decline decision bar.
-
-### Highlight and copy
-
-The user-approved first slice (2026-10-04) uses built-in selection in the **main composer and main conversation**, including visible tool-output previews. Drag with the **left mouse button**, without a modifier, to highlight text; press **Alt+C** to copy the selection to the system clipboard. Selecting does not copy on its own, and **Ctrl+C** keeps its cancel/quit behavior. Mouse-wheel scrolling and the clickable/draggable scrollbar remain available. Setup, API-key fields, and inspection overlays are outside this slice.
-
-In the composer, **Shift+Left/Right/Up/Down** extends selection where the terminal sends those chords; ordinary arrows collapse it. Typing or pasting replaces selected input; **Backspace/Delete** removes it. **Esc** clears selection first without clearing the draft or cancelling a run. A subsequent Esc performs its usual draft-clear/cancel action.
-
-Selecting conversation output pauses transcript rendering and bottom-follow on the selected snapshot while the agent continues ingesting the stream. Clearing selection restores the fresh transcript view. Resize, session changes, and screen changes clear stale selection. Selection is ephemeral UI state: Likha does not persist it or add it to model context.
-
-Composer copies use the original input buffer. Conversation copies use the visible rendered text with newlines between wrapped rows, not raw Markdown or hidden tool output. Copies exclude renderer-added ANSI styling, synthetic carets, composer borders, scrollbar, and layout padding; characters that are part of the original draft are preserved.
-
-Your terminal must send **Alt+C** to Likha. On macOS, configure the terminal's Option key to send Alt sequences; the terminal's native Cmd+C does not copy Likha's built-in highlight.
-
-Clipboard writes use **`pbcopy` on macOS**, **`wl-copy` on Linux/Wayland**, or **`xclip`/`xsel` on Linux/X11**. A missing helper or a failed write reports a visible error; no new application dependencies or SSH/OSC52 clipboard support are part of this slice. Automated checks, including race tests and terminal key/mouse decoding, pass; the real-terminal walkthrough is pending. Image attachments remain planned separately in [the prompt-editor specification](specs/prompt-editor/spec.md).
-
-### Editing keys
-
-The draft is a readline-style editor with a visible block caret. Word keys treat a run of spaces, tabs, or newlines as one boundary:
-
-- **Ctrl+W / Ctrl+Backspace / Alt+Backspace** delete the previous word together with the spaces in front of it; **Ctrl+Delete** and **Alt+D** delete the next word (Ctrl+Delete needs a terminal that sends the chord — most don't, Alt+D always works).
-- **Alt+B / Alt+F** move the caret one word back/forward.
-- **Ctrl+U** kills to the start of the draft, **Ctrl+K** to the end, and **Ctrl+Y** yanks the most recent kill (a repeat cycles through the last eight kills); an edit ends the cycle.
-- **Ctrl+T** transposes the two characters before the caret.
-- **Alt+Return** (or **Ctrl+Return / Shift+Return** where the terminal sends them; **Ctrl+J** always works) inserts a newline into the draft. Bare **Enter** still sends, flattening the newlines to spaces; pasted text (bracketed paste) inserts at the caret with newlines flattened too.
-- **Esc** clears an idle draft when no selection is active; with a selection it only clears the highlight first. A Return arriving right after Esc (within ~50 ms) is the Alt+Return encoding and inserts a newline instead.
-
-While a run streams, the input stays live: type a draft and press **Enter** to queue it as a steering prompt. The queued row appears in the conversation muted, the status line names the count (`2 queued`, or `2Q` on the narrow layout), and each queued message is delivered to the model inside the same run as soon as the current tool calls settle — or, if the run ends with messages still queued (cancellation, error, or a finished compaction), they are held — rows stay queued and nothing auto-starts. `/` commands stay inactive while a run is active and are refused with a visible message; `//` still queues literal text. **Esc** cancels the run when no selection is active; with messages held, **Enter** on an empty draft sends the whole batch and a bare **Esc** clears it when no selection is active. **Ctrl+D** exits without sending. While an approval is pending, editing is inert, the caret is hidden, and a pinned decision bar replaces the composer with **Approve** and **Decline** buttons — **←/→** or **Tab**/**Shift+Tab** move focus, **Enter** confirms, and **Esc**/Ctrl+C still cancel the run. Approve is available only after the review has been scrolled to its end; Decline rejects without executing and lets the model continue. The transcript styles render tool activity and model reasoning in the theme's muted role.
-
-### Status line
-
-The status line renders as one row wide and two rows below 70 columns so review keys and page navigation remain visible. It opens with the active provider · model (the model shown under its display name — `GPT-4o`, not `gpt-4o` — where the curated map has one, the slug otherwise; an endpoint outside the accepted list carries a visible `Custom endpoint (unverified)` marker), context usage, then the enabled optional segments in the order folder, branch, ahead/behind arrows, staged and changed file counts, untracked count (shown whenever `changes` is), MCP servers, session, environment (`macOS arm64`), minutes, tokens, spend, version, and update. The environment and spend segments have no toggles — they always render when width allows. A small `Likha` mark closes the row at the far right end at width ≥ 70, and it is the first thing dropped under width pressure (the page controls and mode hints never lose their right-hand slot).
-
-**Context usage:** the footer shows the latest request's input tokens, not a session total. Before sending, Likha estimates from the conversation and tool definitions (`~` marks this); when available, the provider's reported prompt-token count replaces the estimate. At normal widths the segment looks like `ctx 68k/200k · 34%` and changes to a warning color at 80%. Below 70 columns it keeps the used/limit pair but omits the percentage. If the usage count is known but the model limit is not, it shows `ctx 68k/?`; if there is no usable count yet, it shows `ctx —`. With `tokens` enabled, `tokens <n>` separately shows cumulative prompt+completion tokens across completed turns; with `minutes`, `minutes <n>m` shows elapsed session time. The ChatGPT plan's rate-window summary stays separate and is never labeled `ctx`.
-
-**Model metadata diagnostics:** run `likha --debug-models /path/to/repository` or set `LIKHA_DEBUG_MODELS=1` to write model IDs and any reported context-window metadata to `model-metadata.log` in Likha's private state directory. For providers with a `/models` endpoint, startup and first-run setup log its model list; opening `/models` in the TUI logs configured providers' model lists. Each model entry records the context-window value and which supported field supplied it (`context_window`, `context_length`, `contextWindow`, or `limit.context`), or marks it unknown. The log is recreated for each debug launch and restricted to user-only permissions; it does not record API keys, request headers, prompts, or raw responses. OAuth providers without a `/models` endpoint are identified as using a curated list instead.
-
-**Session spend:** once a completed turn carries cost the bar accumulates it as `$0.42` (two decimals always). The amount comes from a curated per-million-token price table maintained beside the context-window table; the ChatGPT subscription models render the known `$0.00` (your plan pays, not tokens). A model with no documented pricing keeps the segment hidden — no cost is ever estimated.
-
-Two optional segments are on by default now: `folder` (working repository path with the home directory abbreviated as `~`) and `branch` (current Git branch, hidden outside one or outside a git repository). The remaining optional segments are off by default. To enable them on the next launch, add `"status_line": {"changes": true, "staged": true, "mcp": true, "session": true, "minutes": true, "tokens": true, "version": true, "update": true}` to the existing private `config.json` beside your stored provider/model settings; set individual fields to `false` or omit them to hide them (an absent `folder`/`branch` key means on; an explicit `false` turns them off). One bounded 3-second `git status --porcelain -b` — read at session start and refreshed after each tool result — feeds all git segments: `branch`, a compact `↓<n>↑<m>` ahead/behind-vs-upstream pair (hidden when in sync or with no upstream; the short SHA renders when HEAD is detached), `changes` and `staged` dirty and staged file counts (a zero count hides the segment), and an untracked-file count; any git failure silently hides the git segments. `mcp` shows a condensed `mcp <running>/<configured>` count of configured servers and hides itself when none are configured; `session` shows the session title — a short model-generated name once the first turn completes (see below), or the first user prompt before it exists; the environment segment shows the operating system and architecture (e.g. `macOS arm64`) and is not separately gated; `version` shows the build version.
-
-With `update` enabled, the line also shows `update → vX` when the throttled startup check finds a newer published release. The check runs at most once per 24 hours per state directory (`update_check.json`, mode 0600), serves silently on every failure, never notifies development builds, can be pointed at another endpoint with `LIKHA_UPDATE_API`, and can be turned off entirely with `LIKHA_UPDATE_CHECK=0`.
-
-### Slash commands
-
-A prompt starting with `/` is a command, acting on the application and **never sent to the model**:
-
-| Command | Action |
+| | |
 | --- | --- |
-| `/sessions` | List saved sessions for the repository (newest first). |
-| `/sessions <n>` | Resume that session in place — no relaunch needed. |
-| `/sessions`, then **Ctrl+D** | Delete the highlighted session after a second confirmation: removes its plan, task, and journal records, and its private tool-output directory when that cleanup succeeds (if cleanup fails, the session is still deleted and the leftover is reported as an error). Refused while a run or review is active; deleting the current session continues in a fresh one. (Checks pass; interactive walkthrough pending.) |
-| `/models` | Open a dialog of every configured provider's models, grouped under one section header per provider (active provider first); ↑/↓ navigate, type to filter, Enter applies. Enter on another provider's model moves the session to that provider+model and stores the pair. |
-| `/providers` | Open a dialog to switch the provider for this session (not-configured rows prompt for the API key inline; stored config untouched). The keyless `chatgpt` row cannot be switched to mid-session — sign in through first-run setup or `--device-login` instead. |
-| `/compact [focus]` | Summarize the conversation so far into one compact brief and continue from it — the summarized turns are replaced, the session stays resumable. |
-| `/quit` | Exit, same as Ctrl+D. |
-| `/help` | Print the command list in the conversation. |
+| **Bring your own key or plan** | 15 predefined providers (OpenAI, Anthropic, Gemini, OpenRouter, Bedrock, Groq, xAI, Mistral, DeepSeek, and more), any OpenAI-compatible endpoint, or eligible ChatGPT Plus/Pro allowance through official browser sign-in. |
+| **Review before anything changes** | Edits show a full diff and commands show the exact shell line. You approve only after scrolling through the whole proposal. Stale edits are refused rather than overwriting newer changes. |
+| **Command approvals** | Read-only commands run without asking. Test, lint, and build checks can be trusted per repository. Destructive commands always ask, and catastrophic ones are refused. |
+| **Read-only subagents** | The model can delegate investigation to bounded `explore` and `review` child agents, or to profiles you write in Markdown. |
+| **Plan mode** | `/plan` makes the session read-only: every edit, command, and MCP call is refused until you turn it off. |
+| **MCP servers** | Use stdio MCP servers with a Claude Desktop–style `mcp.json`. Each server needs your approval the first time it is used. |
+| **Web tools (opt-in)** | `web_fetch` for public HTTPS pages and `web_search` (keyless DuckDuckGo, or Brave, Tavily, or Exa with a key), each needing consent before first use. |
+| **Skills** | Global Markdown instruction files that you load into a turn with `/skill <name>`. |
+| **Resumable sessions** | Local SQLite history per repository, auto-generated session names, and `/compact` to summarize long conversations. |
+| **Spend and context tracking** | The status line shows context usage, tokens, and session spend from provider-reported costs or a bundled price catalog. It never guesses a price for an unknown model. |
+| **A polished TUI** | Markdown and syntax-highlighted answers, inline diffs, collapsible reasoning, smooth scrolling, built-in copy, 22 themes, and Nerd Font or plain-ASCII glyph modes. |
 
-Unknown `/commands` show an error and are never sent to the model; the draft is restored. To send a literal slash to the model, start with two: `//what is /quit`. Commands do not interrupt an active run or a pending review.
+## Install
 
-**Command popup.** Typing `/` at the start of the prompt opens a popup listing the reserved commands with one-line descriptions; keep typing to filter (case-insensitive substring match), **↑/↓** to move, **Tab** to complete, and **Esc** to dismiss. **Enter** completes the highlighted command unless the draft is already an exact command name — a fully typed `/compact` plus Enter sends it, while `/comp` plus Enter completes to `/compact ` first. The popup closes the moment a space is typed (arguments begin) and never coexists with the `@` file popup; both popups show the hint `↑/↓ select  Tab complete  Esc dismiss`.
+**Requirements:** macOS or Linux, an interactive terminal, and an API key for a [supported provider](#providers) or eligible ChatGPT Plus/Pro access with browser consent. ChatGPT sign-in needs a browser that can reach the local callback on the machine running Likha. Building from source needs Go 1.24 or later.
 
-### Conversation compaction (`/compact`)
-
-Long sessions resend their entire history to the provider every turn, and eventually that exceeds the model's context window. `/compact` is the escape hatch: Likha makes **one** summarize model call over the conversation so far — preserving your goal, the decisions made, files changed and how, pending next steps, and open questions — and replaces the summarized turns with that brief, so the task continues without the transcript. Anything after `/compact` (for example `/compact focus on the approval flow refactor`) steers what the summary emphasizes without being stored as conversation content.
-
-The compacted session shows a visible marker entry ("Conversation compacted. Summary of earlier turns:") and the summary stays fully readable through normal paging; the brief travels as the conversation context on every later turn, and the session persists and resumes in its compacted state. `/compact` is **manual-only** — there is no automatic compaction near the context limit. It is refused with a visible message while a review is pending, on an empty session ("Nothing to compact yet."), and without a configured model; a failing or cancelled summarize (Esc cancels it) leaves the history untouched with a visible error, and you can retry.
-
-### File references (`@`)
-
-Type `@` in the prompt to open a file popup listing the repository's files **and folders**; keep typing to filter, ↑/↓ to move, **Enter** or **Tab** to complete, **Esc** to close. An `@path` reference in a submitted prompt — for example `explain @internal/agent/agent.go` — inlines that file's content into what the model receives, so it works with the context immediately instead of spending tool rounds reading it. A **folder reference** (`@src`, `@internal/`) inlines the folder's tree instead: one path per line, so the model sees structure and reads individual files on demand. (Package layout: see `ARCHITECTURE.md`.)
-
-The listing and the popup **never include** paths excluded by the repository's `.gitignore` files (root and per-directory rules are honored), `node_modules`, hidden directories like `.git`, or symlinks. Unresolvable references stay literal so typos are visible. Referenced content is per-turn (not persisted in the session); files are capped at 16 / 64 KiB per prompt and folder listings at 200 entries — larger files should still go through the read tool.
-
-### Themes
-
-Likha ships a small set of named color themes that map onto its style roles (headings, cursor, hints, warnings, errors) plus full-surface conversation bands, and adapt to your terminal's light or dark background at render time:
-
-`default` · `catppuccin` · `habamax` · `gruvbox` · `tokyonight` · `nord` · `dracula` · `solarized` · `rose-pine` · `kanagawa` · `everforest` · `one-dark` · `ayu` · `flexoki` · `oxocarbon` · `night-owl` · `github` · `monokai` · `material` · `nightfox` · `iceberg` · `horizon`
-
-Pick one four ways:
-
-- **First-run setup** offers a theme stage right after model selection; **↑/↓** previews each family immediately.
-- **`/themes`** opens a selection dialog: **↑/↓** (and PgUp/PgDn) preview the highlighted family at once — dialog chrome plus the dimmed conversation behind it — **Enter** commits the highlight and stores it in `config.json` (appending a "Theme set to …" entry), **Esc** restores the committed theme with no write and no entry. The `(current)` marker always names the Esc target. The dialog opens on the currently applied theme.
-- **`/themes <n-or-name>`** applies directly without the dialog.
-- **`--theme <name>` or `LIKHA_THEME`** pre-selects it at launch (explicit settings beat stored config).
-
-Only your own prompts carry a background: they read `Normal` on the user band, while assistant text, tool items, notices, and reasoning sit on the base canvas (a focused tool item takes the selection tint), and errors signal by foreground. Block glyphs, not backgrounds, identify each block. The status bar, composer, scrollbar, and dialogs sit on the base canvas (typed input `Normal`, placeholder `Muted`). The `default` family stays close to the plain terminal look with one exception: a faint neutral user band derived from the terminal background. Under limited color profiles (ANSI, no-color) bands collapse to legible plain text: glyphs, outcome words, and content stay intact, and backgrounds never carry meaning alone.
-
-Color literals preview inline: `#4493f8`, `#abc`, `rgb(68, 147, 248)`, and `hsl(210, 80%, 60%)` (alpha ignored) render on their own color background with a contrast-picked foreground, so the model can show a color, not just name it. Text, widths, and copy are untouched — decoration only.
-
-### Nerd Font markers (opt-in)
-If your terminal uses a patched **Nerd Font**, run Likha with `--nerd-fonts` or `LIKHA_NERD=1` and the status/review markers become icon glyphs (clock while waiting, check when done, cross on errors, pencil during reviews). Likha cannot detect a patched font reliably, so this is strictly opt-in: without it, output stays plain ASCII and always legible. Conversation prose, the transcript block glyphs, and the logo are never replaced by icons.
-
-### Plain ASCII glyphs (opt-in)
-If your terminal or font cannot draw the Unicode block glyphs, run Likha with `--ascii` or `LIKHA_ASCII=1`. Block glyphs switch to plain ASCII (`*` for assistant text and tool headers, `L` for result lines, `x` errors, `i` notices, `~` reasoning, `>` focus, `...` truncation), and the composer box draws with `+`, `-`, and `|`. Like `--nerd-fonts`, it applies to the launch it is given on and is not stored in config.
-
-### Repository tools and reviews
-
-Likha offers `glob`, `read`, and `grep` for repository text: `glob` matches file paths by pattern (`*`, `?`, `[...]` within a segment, a bare `**` spanning directories; files only), `read` returns a file's UTF-8 text (up to 1 MiB), and `grep` searches files with a regular expression (Go regexp syntax, per line, case-sensitive unless the pattern uses `(?i)`). These tools reject traversal and symlink escapes; size and result limits can return errors. To request a change, try: “Use edit_file to change notes.txt from old to new.” The model must actually request the tool. `edit_file` proposes replacement content or a new file and shows the affected path and a diff **before** writing. Review to the end with PgDn/Ctrl+N (and PgUp/Ctrl+P to revisit); the decision bar's **Approve** becomes available once the whole proposal has been seen, and **Decline** rejects immediately. If the file changes after review starts, the stale edit is refused rather than overwriting it.
-
-### MCP servers
-
-Likha can use tools from **MCP servers** (Model Context Protocol) you configure — the same ecosystem OpenCode/Claude Desktop use. Configure them in `mcp.json` inside Likha's private state directory (`~/.config/likha/` on Linux, `~/Library/Application Support/likha/` on macOS), same shape as Claude Desktop so configs can be pasted verbatim:
-
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/some/dir"],
-      "env": { "SOME_KEY": "value" }
-    }
-  }
-}
-```
-
-- **stdio only for v1** — each server is launched as a child process, handshaken (MCP 2025-03-26), and killed when Likha exits. HTTP transports are deferred.
-- **Trust-on-first-use per server:** the first tool call from a server shows the server name, tool, and arguments, and requires explicit approval; once approved, that server's tools run for the rest of the session. Trust resets on relaunch.
-- A crashed server produces a clear failed tool result and stays dead until relaunch (see `/mcp`); the TUI stays usable.
-- **`/mcp`** lists configured servers, their state, and their tools.
-- Invalid `mcp.json` fails loudly at startup; the file is 0600 in private state, never in the repository.
-
-To check work, try: “Use run_command to run `git status --short`.” The review shows the **exact shell command** and canonical repository working directory. Commands containing invisible or control characters, including tabs and line breaks, are rejected before review; control characters in other review text are escaped visibly. Again, **Approve** is available only after the whole review has been seen; **Decline** rejects without execution. An approved command runs via `sh -c` in that directory; its output and exit status appear in the conversation (long output is paged, and output above the command limit is marked truncated). **The working directory is not a sandbox. An approved command can read or change files outside the repository, access the network, and spawn detached processes that outlive cancellation.** Cancellation stops later agent actions, but it cannot guarantee that every process spawned by an approved command has terminated. Inspect the whole command before approving. Esc/Ctrl+C cancels a pending review without approving it. There is no blanket permission for edits or commands.
-
-### Session names
-
-A fresh session starts with a derived title (its first prompt, verbatim) and, right after the **first completed turn**, Likha makes one background model call — the configured provider and model, not a second configuration — to generate a short session name (2–6 words, surrounding quotes and a trailing period stripped) such as `Fix Parser Bug`. The name replaces the derived title everywhere the session is shown: the status bar's `session` segment, `/sessions`, the resume dialogs, and `--sessions` listings. Generation is fire-and-forget: it never blocks the next prompt, writes no transcript entry, and a failure (or exiting before it completes) silently keeps the derived prompt-based title. Exactly one name is generated per session; resumed sessions never re-generate, and later renames remain manual (a `/title` command is future work).
-
-## Local sessions and privacy
-
-New launches create a session automatically. To find a prior session and continue it for the **same repository**:
+### From source (current path)
 
 ```sh
-go run ./cmd/likha --sessions /path/to/repository
-go run ./cmd/likha --resume SESSION_ID /path/to/repository
+git clone https://github.com/joshuagemvicente/likha.git
+cd likha
+go build -o bin/likha ./cmd/likha
+./bin/likha --version
 ```
 
-Replace `SESSION_ID` with an ID from the listing; `--sessions` lists the ID, local update time, and title without needing a model or TUI — a fresh session shows the title derived from its first prompt until the auto-generated name replaces it (see [Session names](#session-names)). A session from another repository is not listed or loadable here. Resuming restores saved conversation and completed tool outcomes, **not** a pending approval or permission to replay an unfinished action. The repository path is canonicalized, so equivalent symlink paths select the same repository.
+You can also skip the build and run it with `go run ./cmd/likha` from the project root. Put `bin/likha` on your `PATH` to run `likha` from any repository.
 
-Likha stores session history in `sessions.sqlite` under the operating system's user configuration directory's `likha` child (normally `~/Library/Application Support/likha` on macOS, `$XDG_CONFIG_HOME/likha` on Linux when set, otherwise `~/.config/likha`). Set `LIKHA_STATE_DIR` to choose another private local directory, for example `export LIKHA_STATE_DIR="$HOME/.local/state/likha"` **before** starting or listing sessions. Likha creates the state directory with user-only permissions and the database with user-only permissions; SQLite may create `-wal` and `-shm` files beside it. State is not stored in the selected repository. Session history can include prompts, repository text, proposed changes, and command output; treat backups as sensitive. Use SQLite's `.backup` operation for a consistent backup, not a plain copy of `sessions.sqlite` while its WAL may hold recent changes.
-
-Likha sends prompts, prior conversation, and tool results to the configured provider. That provider can see this content; its privacy policy governs what it receives. API keys are stored only in the private state directory. Repository read tools are confined to the repository, but approved shell commands are not.
-
-## Install a published release with curl
-
-When a release is published for [gem/likha](https://github.com/gem/likha), a developer on macOS or Linux can install it without cloning this repository:
+### Install script (once a release is published)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gem/likha/main/scripts/install.sh | sh
 ```
 
-The installer detects your OS and architecture (darwin/linux × amd64/arm64), downloads that release's archive and its SHA-256 checksum manifest, refuses any archive whose checksum does not match the manifest, checks that the binary reports the release version, and installs it to `~/.local/bin/likha` without sudo. Pin a version for CI or reproducibility:
+The script detects your OS and architecture, checks the archive against its SHA-256 manifest, and installs to `~/.local/bin/likha` without sudo. To pin a version, append `| sh -s -- v1.2.3`. For overrides, local release archives, and what the checksum does and does not prove, see [docs/install.md](docs/install.md).
+
+## Quick start
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/gem/likha/main/scripts/install.sh | sh -s -- v1.2.3
+cd ~/projects/my-app
+likha
 ```
 
-Optional overrides: `LIKHA_VERSION` (same as the pinned argument; conflicting values are refused), `LIKHA_INSTALL_DIR` (default `$HOME/.local/bin`), and, for self-hosted mirrors or tests, `LIKHA_RELEASE_BASE` (each release lives under `<BASE>/<VERSION>/`; plain HTTP is accepted only for loopback hosts) and `LIKHA_RELEASE_API` (latest-release lookup URL). If `~/.local/bin` is not on your `PATH`, the installer prints the `export PATH=...` line to add.
+On the first launch, pick a **provider**, connect, choose a **model**, and pick a **theme**. API-key providers ask for a masked key and check it. Selecting **ChatGPT** opens your system browser automatically for OpenAI sign-in and plan-sharing consent, then fetches eligible models for that account. No code or second browser-launch keypress is needed; Likha shows a manual URL only if browser launch fails. Your choice is saved for later launches.
 
-What this does **not** prove: the checksum manifest comes from the same host as the archive, so verification protects against corrupted or truncated downloads, not against a compromised release host. Latest-release resolution uses the GitHub API, which is rate-limited; if the lookup fails, pin a version.
-
-This has been exercised locally against a served release on macOS ARM64 (checksum mismatch, unknown version, and success paths), and on 2026-10-04 a `curl | sh` install over loopback with `LIKHA_RELEASE_BASE` passed checksum, tamper, and version guards plus an installed-binary smoke check. That was a headless approximation, and no real release has been published yet; the [published-binary walkthrough](#manual-tui-release-walkthrough-still-required) remains the release gate before relying on it.
-
-## Build, verify, and install a local archive
-
-From the Likha project root, `release.sh` builds four versioned archives (`darwin`/`linux` × `amd64`/`arm64`) in `dist/`, each containing `likha`, `README.md`, and `LICENSE`, plus a SHA-256 manifest. It **does not publish** them:
+To skip setup, pass a provider and key on the command line or set them in the environment:
 
 ```sh
-./scripts/release.sh v1.2.3
+export LIKHA_OPENAI_API_KEY="sk-..."
+likha --provider openai ~/projects/my-app
+
+# ChatGPT Plus/Pro: the same browser sign-in outside the TUI, then launch
+likha --provider chatgpt --login
+likha --provider chatgpt ~/projects/my-app
 ```
 
-Select the archive matching your machine, for example `darwin_arm64` on Apple Silicon, `darwin_amd64` on Intel macOS, `linux_amd64` on x86-64 Linux, or `linux_arm64` on ARM64 Linux. Verify the locally generated files **before extraction** (the manifest checks all four archives, so keep them together in `dist/`):
+ChatGPT uses shared plan allowance, not unlimited or free inference. Optional
+credits follow your explicit opt-in in [ChatGPT settings](https://chatgpt.com/settings/usage).
+Likha does not fall back to separately billed OpenAI API-key use. Legacy Codex
+logins need a fresh sign-in; `--device-login` is deprecated and unsupported.
+
+Then ask for something, such as *"find where we parse the config and add a timeout option"*, and press **Enter**. Type `@` to attach a file or folder, `/` to see the slash commands, and press **Ctrl+D** to exit.
+
+## Providers
+
+| Provider | `--provider` | Key variable | Default model | Probe status |
+| --- | --- | --- | --- | --- |
+| OpenAI | `openai` | `LIKHA_OPENAI_API_KEY` | `gpt-4o-mini` | pending-probe |
+| Anthropic Claude | `claude` | `LIKHA_CLAUDE_API_KEY` | `claude-opus-5-5` | pending-probe |
+| Google Gemini | `gemini` | `LIKHA_GEMINI_API_KEY` | `gemini-2.5-flash` | pending-probe |
+| ChatGPT (Plus/Pro) | `chatgpt` | none — browser sign-in | from eligible account models | pending-probe |
+| OpenRouter | `openrouter` | `LIKHA_OPENROUTER_API_KEY` | `openai/gpt-4o-mini` | pending-probe |
+| Amazon Bedrock | `bedrock` | `LIKHA_BEDROCK_API_KEY` | `anthropic.claude-3-5-haiku-20241022-v1:0` | pending-probe |
+| Opencode Go | `opencode-go` | `LIKHA_OPENCODEGO_API_KEY` | `glm-5.3-flash` | live-verified* |
+| Opencode Zen | `opencode-zen` | `LIKHA_OPENCODE_ZEN_API_KEY` | `gpt-5.3-codex` | pending-probe |
+| DeepSeek | `deepseek` | `LIKHA_DEEPSEEK_API_KEY` | `deepseek-flash` | pending-probe |
+| Groq | `groq` | `LIKHA_GROQ_API_KEY` | pass `--model` | pending-probe |
+| xAI | `xai` | `LIKHA_XAI_API_KEY` | pass `--model` | pending-probe |
+| Mistral AI | `mistral` | `LIKHA_MISTRAL_API_KEY` | pass `--model` | pending-probe |
+| Together AI | `together` | `LIKHA_TOGETHER_API_KEY` | pass `--model` | pending-probe |
+| Cerebras | `cerebras` | `LIKHA_CEREBRAS_API_KEY` | pass `--model` | pending-probe |
+| Dialagram | `dialagram` | `LIKHA_DIALAGRAM_API_KEY` | pass `--model` | pending-probe |
+
+\* A user-run probe passed on 2026-09-29; repeat it after provider-facing request changes. *Pending-probe* means the provider has not yet passed Likha's full live check (streamed text, structured tool calls, cancellation, and revoked-key handling). The model must support SSE streaming **and structured tool calls**.
+
+For API-key providers, Likha looks for a key in this order: `--api-key`, `LIKHA_API_KEY`, the provider's own `LIKHA_<NAME>_API_KEY`, and finally the private `providers.json`. ChatGPT uses its own saved account/workspace registration and tokens instead. Both model discovery and ChatGPT Responses requests use the documented public `https://api.openai.com/v1` API; OpenAI API-key billing remains separate. Use `--endpoint URL` for any other OpenAI-compatible endpoint; it runs with a visible **unverified** marker. See [docs/providers.md](docs/providers.md) for setup, account management, sign-out, and [SIWC terms](https://openai.com/policies/sign-in-with-chatgpt-terms/).
+
+## Usage
+
+```text
+likha [options] [repository]       # repository defaults to the current directory
+likha --sessions [repository]      # list saved sessions (no model needed)
+likha --resume ID [repository]     # resume one
+```
+
+Put options before the repository path. `likha --help` lists every option, provider, and environment variable.
+
+### Keys
+
+| Key | Action |
+| --- | --- |
+| **Enter** | Send the prompt. During a run, it queues the prompt as a steering message instead. |
+| **Ctrl+Enter** | During a run, steer now: stop the response being written and deliver the draft (and any queued messages) at once. Shift+Enter and Ctrl+J do the same, since terminals send them as one key. |
+| **Alt+Return** / **Ctrl+J** | Insert a newline (while idle; during a run, use Alt+Return). |
+| **Esc** / **Ctrl+C** | Cancel the active run (Esc clears a selection first). |
+| **Ctrl+D** | Exit. |
+| **PgUp/PgDn**, **Home/End**, mouse wheel | Scroll the transcript. |
+| **Tab** / **Shift+Tab** | Focus a tool call or reasoning block. |
+| **Enter** / **Ctrl+O** on a focused item | Inspect full tool output, or expand reasoning. |
+| Mouse drag, then **Alt+C** | Copy highlighted text to the clipboard. |
+| **Ctrl+G** | Change the composer style. |
+| **Ctrl+W, Ctrl+U/K/Y, Alt+B/F, …** | Readline-style editing. |
+
+### Slash commands
+
+| Command | Action |
+| --- | --- |
+| `/models` | Switch the provider and model for this session. |
+| `/providers` | Manage stored keys or ChatGPT accounts; an unconnected ChatGPT selection opens the browser. |
+| `/sessions [n]` | List, resume, or delete (**Ctrl+D**) saved sessions. |
+| `/compact [focus]` | Summarize the conversation so far into a brief and continue from it. |
+| `/plan` | Toggle read-only plan mode. |
+| `/init [guidance]` | Survey the repository and propose a root `AGENTS.md` for review. |
+| `/install <request>` | Interview you about an install, show a plan, then run each step with approval. |
+| `/todo` | Show the model's plan checklist. |
+| `/agents` | Inspect subagent profiles, the task tree, and child transcripts. |
+| `/tools` | Inspect available tools, their permissions, and retained output. |
+| `/mcp` | Show MCP servers and their tools. |
+| `/skills`, `/skill <name> [request]` | List skills, or load one into a turn. |
+| `/themes [name]` | Preview and pick a color theme. |
+| `/help`, `/quit` | List commands, or exit. |
+
+Slash commands are never sent to the model. Start a prompt with `//` to send a literal slash. [docs/usage.md](docs/usage.md) covers the full interface, including the transcript, status line segments, file references, compaction, themes, and copy and paste.
+
+## Command approvals
+
+Likha sorts every shell command the model requests before deciding whether to ask you:
+
+| Class | Examples | What happens |
+| --- | --- | --- |
+| **Refused** | `rm -rf /`, `mkfs`, `dd` onto a device, `curl … \| sh` | It never runs. The model is told you can run it yourself. |
+| **Always ask** | `rm`, `git push`, `git reset --hard`, `--force`, `sudo`, deploys, secrets, paths outside the repository | Only **Approve** or **Decline** is offered. |
+| **Ask** | Installs, scripts, `mv`/`cp`, redirects, `git commit`, network tools | **Approve always** is also offered: it covers the command's prefix (`go test …`, `npm run lint …`) for the session, or the exact string for interpreters, executors like `npx`, and network tools. |
+| **Checks** | `go test`, `npm test`, `cargo check`, `pytest`, `make lint`, … | **Trust repo checks** is also offered; trust is reset if those scripts change. |
+| **Read-only** | `git status`, `git diff`, `ls`, `cat`, `<tool> --version` | Runs without asking. |
+
+Only a single plain command can skip the prompt. Chains, pipes, substitutions, and redirects always ask. Edit and MCP reviews offer **Approve always** too: for an edit, every later repository edit in the session applies without a review (its diff still shows in the transcript, marked `auto-approved`, and the status line shows `AUTO-EDIT`); for an MCP tool, plain **Approve** runs that one call and **Approve always** trusts the server for the session. Every Approve always grant lives in memory only and ends when you switch or delete the session or relaunch Likha. **Approval is not a sandbox:** an approved command can reach outside the repository and the network. Every command runs with Likha's API key variables removed from its environment. See [docs/tools.md](docs/tools.md) for the tool set, subagents, MCP, and web tools.
+
+## Configuration and data
+
+Everything Likha stores lives in a private state directory with user-only permissions. Nothing is written to your repository. The default location is `$XDG_CONFIG_HOME/likha` (or `~/.config/likha`) on macOS and Linux; set `LIKHA_STATE_DIR` to override it. Older macOS builds used `~/Library/Application Support/likha`; Likha moves that directory to the new location on first launch (if both exist, it uses the new one and leaves the old one alone).
+
+| File | Contents |
+| --- | --- |
+| `config.json` | Provider, model, theme, composer style, status line segments, command trust, web tool settings (`web`) |
+| `providers.json` | API keys, separate ChatGPT registrations/tokens, and active account choice (mode 0600) |
+| `sessions.sqlite` | Conversation history — treat it, and any backups, as sensitive |
+| `mcp.json` | MCP server definitions |
+| `tool-keys.json` | Keys for keyed web search backends (Brave, Tavily, Exa) |
+| `agents/<name>/AGENT.md` | Your subagent profiles |
+| `skills/<name>/SKILL.md` | Your skills |
+
+| Environment variable | Purpose |
+| --- | --- |
+| `LIKHA_PROVIDER`, `LIKHA_MODEL`, `LIKHA_ENDPOINT` | Same as `--provider`, `--model`, `--endpoint` |
+| `LIKHA_API_KEY`, `LIKHA_<NAME>_API_KEY` | API keys |
+| `LIKHA_STATE_DIR` | Private state directory |
+| `LIKHA_THEME`, `LIKHA_ASCII=1`, `LIKHA_NERD=1` | Theme and glyph set |
+| `LIKHA_DEBUG_MODELS=1` | Log model IDs and context metadata to `model-metadata.log` |
+| `LIKHA_UPDATE_CHECK=0` | Disable the daily update check |
+
+**Privacy:** prompts, conversation history, and tool results go to the provider you configure, and that provider's privacy policy applies. Likha identifies itself with `User-Agent: likha/<version>`.
+
+ChatGPT credentials stay in protected local files with atomic writes and locked
+token rotation. Host identity and registrations survive sign-out; Likha attempts
+remote revocation and clears local tokens, warning if remote revocation was not
+confirmed. ChatGPT usage/cost remain unknown unless OpenAI reports them. See the
+[sign-in guide](docs/providers.md#sign-in-with-chatgpt-pluspro) before migrating.
+
+## Documentation
+
+| Guide | Covers |
+| --- | --- |
+| [Providers and sign-in](docs/providers.md) | Provider table, key resolution, first-run setup, official ChatGPT browser sign-in, accounts, allowance, and sign-out |
+| [Using Likha](docs/usage.md) | Transcript, composer and editing keys, selection and copy, status line, spend, slash commands, compaction, `@` references, themes, sessions |
+| [Tools and permissions](docs/tools.md) | Repository tools, edit and command reviews, command approvals, subagents, plan mode, skills, web tools, MCP |
+| [Installing and releasing](docs/install.md) | Install script, local release archives, checksum verification, the manual release walkthrough |
+| [Architecture](ARCHITECTURE.md) | Package map, import rules, and where each kind of change goes |
+| [Specifications](specs/README.md) | The [v1 product contract](specs/v1-spec.md) and one folder per feature |
+| [Changelog](CHANGELOG.md) | Unreleased changes and what has been verified |
+
+## Development
 
 ```sh
-cd dist
-shasum -a 256 -c likha_v1.2.3_checksums.txt  # macOS
-# or: sha256sum -c likha_v1.2.3_checksums.txt # Linux
-cd ..
+go build -o bin/likha ./cmd/likha   # build
+go test ./...                       # the full test suite
+go vet ./...
+go run ./cmd/likha --debug-models . # run against this repository, logging model metadata
 ```
 
-Then run the local installation smoke script. Its interface is `./scripts/smoke-release.sh dist/likha_v1.2.3_<host>_<arch>.tar.gz v1.2.3`, with `<host>`/`<arch>` replaced by the selected target. For example, on Apple Silicon:
+| Path | What lives there |
+| --- | --- |
+| `cmd/likha` | Entry point (calls `app.Run`) |
+| `internal/app` | CLI flags and wiring |
+| `internal/tui` | The Bubble Tea interface: setup, dialogs, status line, composer |
+| `internal/agent` | The turn loop, tool registry, compaction, session naming |
+| `internal/providers`, `internal/model` | Provider identity, credentials, the streaming client, pricing |
+| `internal/model/catalog` | Bundled model prices and context windows (`go generate ./internal/model/catalog`) |
+| `internal/actions`, `internal/cmdpolicy` | Edit and command execution, command classification |
+| `internal/mcp`, `internal/webtools`, `internal/explore` | MCP client, web tools, subagents |
+| `specs/` | Feature specs, tasks, and checklists |
+| `scripts/` | `install.sh`, `release.sh`, `smoke-release.sh` |
 
-```sh
-./scripts/smoke-release.sh dist/likha_v1.2.3_darwin_arm64.tar.gz v1.2.3
-```
+[ARCHITECTURE.md](ARCHITECTURE.md) has the dependency diagram and import rules. Release archives are built with `./scripts/release.sh v1.2.3`, which writes them to `dist/` and does not publish anything; see [docs/install.md](docs/install.md#build-verify-and-install-a-local-archive).
 
-This extracts into a temporary directory and checks `--version` and `--help`, **not** model connectivity. To install the verified archive locally, substitute the same filename below:
+### Contributing
 
-```sh
-archive=dist/likha_v1.2.3_darwin_arm64.tar.gz  # example: replace for your host
-tmp=$(mktemp -d)
-tar -xzf "$archive" -C "$tmp"
-mkdir -p "$HOME/.local/bin"
-install -m 755 "$tmp/likha" "$HOME/.local/bin/likha"
-rm -rf "$tmp"
-"$HOME/.local/bin/likha" --version
-```
+Likha is developed spec-first. Before you change behavior:
 
-Ensure `$HOME/.local/bin` is on your `PATH`, or invoke the binary by its full path. The archive's README and LICENSE are available by extracting them alongside the binary. For an ordinary source build instead, run `go build -o bin/likha ./cmd/likha`.
+1. Find or create the feature folder under [`specs/`](specs/README.md) (`spec.md`, `tasks.md`, `checklist.md`, `context.md`). The [v1 spec](specs/v1-spec.md) is the overarching contract.
+2. Keep `go test ./...` passing. Skipped, always-passing, or mock-only tests can't be used to claim a feature works.
+3. Add an entry under **Unreleased** in [CHANGELOG.md](CHANGELOG.md), and state honestly what was verified: automated checks, a headless probe, a live probe, or an interactive walkthrough.
+4. Report status using only the words in the spec conventions: *planned*, *in progress*, *implemented (local)*, *verified (release)*.
 
-### Manual TUI release walkthrough (still required)
+## License
 
-This is a **procedure to perform**, not a claim that it passed on any published archive or provider:
-
-1. On each supported host/architecture, verify the checksum, install its local archive, check `--version` and `--help`, and run `"$HOME/.local/bin/likha" /path/to/test-repository` in an interactive terminal. Complete the first-run setup with a hosted provider (`--provider opencode-go` with a key skips setup) and confirm the connection check reports **Connected** before prompting.
-2. Ask Likha to use `read` or `grep`; check the returned repository content. Ask it to use `edit_file` on a disposable file. Inspect the diff, choose **Decline**, and confirm the file did not change. Ask again, review to the end, choose **Approve**, and confirm the displayed change was applied. Try a multi-page diff and a narrow viewport.
-3. Ask it to use `run_command` for a harmless check such as `git status --short`. Inspect the exact command and working directory; decline once, then request it again, review to the end, approve, and inspect the actual output and exit status. Test cancellation without granting permission.
-4. Exit with Ctrl+D, run `"$HOME/.local/bin/likha" --sessions /path/to/test-repository`, and resume its ID with `--resume SESSION_ID`. Confirm completed conversation and tool results return, but an interrupted pending review never executes after relaunch. Check that another repository cannot list or resume that session.
-
-Release publication and provider compatibility remain unverified until this walkthrough succeeds on the intended targets with a live-verified provider. For source checks, run `go test ./...` from the Likha project root.
+[MIT](LICENSE) © 2026 Likha contributors
