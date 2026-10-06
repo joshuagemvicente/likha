@@ -128,5 +128,5 @@ spec. Decisions live in [spec.md](spec.md); sources in
 | `chatgpt` | none | — | encrypted reasoning recommended, not required | n/a |
 | `xai` | none | — | encrypted reasoning on Responses only, optional | n/a |
 | `groq`, `cerebras` | none | — | `reasoning` field; no replay requirement documented | n/a |
-| `mistral` | none (chunked-content M2) | — | thinking chunks recommended; no error documented | n/a |
+| `mistral` | none until reasoning-replay T12 (thinking chunk built, chunked-content M2/T10) | endpoint + model | thinking chunks recommended; no error documented | n/a |
 | `together`, `bedrock`, `dialagram`, `opencode-zen`, `opencode-go` | none | — | **unverified**; hosted DeepSeek/Kimi/GLM models may need `reasoning_content` | candidate |

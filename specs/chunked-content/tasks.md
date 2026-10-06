@@ -200,12 +200,38 @@ any other provider's bytes (reasoning-replay point 6).
       matrix. Agents never record this probe as passed on the user's
       behalf.
       *Verify:* the user's report, quoted with its date in research.md.
+- [ ] **T10. Turn the `mistral` row's replay on.** *(Added 2026-10-06 by
+      review: T7 built the capture and T8 the wire, but the row keeps
+      `ReplayNone` because FR-39's rejection path does not exist yet.)*
+      Only after reasoning-replay T12 lands `ReplayRejectedError` and the
+      TUI's `/compact` hint, in one change:
+      - set `Replay: ReplayThinkingChunk` on the `mistral` row, and make
+        T12's `Sent` count include assistant messages `contentFor` encoded
+        with a thinking chunk (`replaySentText` already returns the
+        thinking for this wire);
+      - decide, by amending reasoning-replay decision 8 if needed, whether
+        compaction and session naming leave Mistral thinking out, so that
+        `/compact` still works when Mistral rejects the replayed shape;
+      - reword the child-detail label in `internal/tui/agent_detail.go`
+        ("display only; never sent to the provider"), which becomes untrue
+        for Mistral children once their thinking is replayed;
+      - amend v1-spec FR-39 to name Mistral thinking chunks (same endpoint
+        and model), set the `mistral` row of the
+        [reasoning-replay matrix](../reasoning-replay/context.md#provider-matrix)
+        to the thinking-chunk wire, and update the `replyHook` comment in
+        `internal/agent/turn_execution.go` and the CHANGELOG.
+      *Verify:* an httptest 400 on a request carrying Mistral thinking gives
+      `errors.As(err, *ReplayRejectedError)` with `Sent > 0`; the TUI shows
+      the `/compact` hint once; a compaction request after a chunked reply
+      holds what the amended decision 8 says.
 
 ## Implementation notes (2026-10-06, local)
 
-M1 and M2 landed on `feat/chunked-content`; automated suite green
-(`go test ./...`, `go vet ./...`, `gofmt`). T9 (live probe) is the user's
-and stays open; nothing records Mistral as working. Deviations and choices:
+M1 and M2's capture (T7) and wire (T8) landed on `feat/chunked-content`;
+automated suite green (`go test ./...`, `go vet ./...`, `gofmt`). T10
+(turning the `mistral` row's replay on) waits for reasoning-replay T12.
+T9 (live probe) is the user's and stays open; nothing records Mistral as
+working. Deviations and choices:
 
 - **Files.** The decoder lives in `internal/model/stream_content.go`
   (`streamContent`, `errMalformedContent`, `errUnshowableContent`); Mistral
@@ -217,9 +243,12 @@ and stays open; nothing records Mistral as working. Deviations and choices:
   interpreted. A list element inside `thinking` that is not an object
   (for example a bare string) is treated as malformed, the same rule as a
   top-level list item; the spec names only top-level items, so this is a
-  stricter reading. Items skipped inside `thinking` do not count as
-  skipped chunks for the only-unshowable-content error (the task records
-  only top-level skipped types). The decoder records `thinking` presence
+  stricter reading. Items skipped inside `thinking` (`reference`,
+  `tool_reference`, unknown or type-less items) are recorded as skipped
+  pieces too, so a reply made only of them ends with the
+  only-unshowable-content error naming the first such type, as spec
+  decision 3 requires (fixed in review; the first version let it end as a
+  silent empty answer). The decoder records `thinking` presence
   and the `signature` from M1 onward, because M2 landed in the same branch.
 - **T2.** The only-unshowable-content error is
   `model reply held only content Likha cannot show (type "…")`, wrapping
@@ -231,7 +260,13 @@ and stays open; nothing records Mistral as working. Deviations and choices:
   answer and reasoning pieces from chunks set it; skipped chunks do not)
   and adds the `consumeStream` test.
 - **T7.** New wire `ReplayThinkingChunk` (appended after
-  `ReplayAnthropicBlocks`) on the `mistral` row only. Replay state gains
+  `ReplayAnthropicBlocks`). **Deviation:** the `mistral` row does not set
+  it yet. Review found that turning it on before reasoning-replay T12
+  would ship replay without FR-39's rejection hint, so a 400 against the
+  replayed shape would repeat on every later turn as a bare error; the
+  flag moves to the new T10. Until then no shipped row captures or sends
+  Mistral thinking, and tests enable the wire with `setReplayWire`
+  (`TestMistralRowKeepsReplayOff` guards the row). Replay state gains
   `Thinking *string` (nil: no thinking chunk; `""`: a chunk without text)
   and `ThinkingSignature string`, filled from thinking chunks alone, so
   `reasoning`/`reasoning_content` field text stays out of the replay copy.
@@ -244,7 +279,8 @@ and stays open; nothing records Mistral as working. Deviations and choices:
   drops thinking that carried a signature, like the other signed forms.
 - **T8.** `requestMessage.Content` is now a `requestContent` whose
   `MarshalJSON` writes the plain string unless Mistral thinking goes back;
-  a test proves it encodes byte for byte like the old string field
-  (HTML escapes, U+2028, invalid UTF-8 included). The replayed message
+  `TestRequestContentEncodesLikeAString` proves it encodes byte for byte
+  like the old string field (HTML escapes, control bytes, U+2028/U+2029
+  and invalid UTF-8 included). The replayed message
   holds one leading thinking chunk, then a text chunk only when `Content`
   is non-empty, then `tool_calls` unchanged.
