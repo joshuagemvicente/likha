@@ -424,7 +424,7 @@ func TestPartialAssistantKeepsOnlyUnsignedReasoning(t *testing.T) {
 }
 
 func TestShippedProviderReplayWires(t *testing.T) {
-	want := map[string]ReplayWire{"deepseek": ReplayReasoningContent, "gemini": ReplayThoughtSignature, "claude": ReplayAnthropicBlocks}
+	want := map[string]ReplayWire{"deepseek": ReplayReasoningContent, "gemini": ReplayThoughtSignature, "claude": ReplayAnthropicBlocks, "mistral": ReplayThinkingChunk}
 	for _, p := range Providers {
 		if p.Replay != want[p.Name] {
 			t.Errorf("%s replay = %d, want %d", p.Name, p.Replay, want[p.Name])

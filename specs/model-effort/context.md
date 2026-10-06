@@ -96,7 +96,7 @@ of one model and records accepted, rejected or ignored.
 | groq | `reasoning_effort` | pending-probe | |
 | cerebras | `reasoning_effort` | pending-probe | |
 | together | `reasoning_effort` | pending-probe | |
-| mistral | `reasoning_effort` | pending-probe | chunk content parses (chunked-content); probe high with tools; enable only after chunked-content M2 (thinking replay) |
+| mistral | `reasoning_effort` | pending-probe | chunk content parses (chunked-content); probe high with tools; thinking replay on since chunked-content T10 (2026-10-07), so effort waits only for the probe |
 | bedrock | `reasoning_effort` | pending-probe | no `/models`; catalog only |
 | chatgpt | `reasoning: {effort}` (Responses) | pending-probe | revise `BuildCodexRequest` contract |
 | opencode-zen, opencode-go, dialagram | unknown | pending-probe | relays; behavior undocumented |

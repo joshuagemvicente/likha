@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -24,9 +25,9 @@ import (
 type replayRequest struct {
 	raw      string
 	Messages []struct {
-		Role             string  `json:"role"`
-		Content          string  `json:"content"`
-		ReasoningContent *string `json:"reasoning_content"`
+		Role             string      `json:"role"`
+		Content          wireContent `json:"content"`
+		ReasoningContent *string     `json:"reasoning_content"`
 		ToolCalls        []struct {
 			ID           string `json:"id"`
 			ExtraContent *struct {
@@ -42,11 +43,49 @@ type replayRequest struct {
 // which tells a child's requests from the parent's.
 func (r replayRequest) prompted(content string) bool {
 	for _, m := range r.Messages {
-		if m.Role == "user" && strings.Contains(m.Content, content) {
+		if m.Role == "user" && strings.Contains(m.Content.text, content) {
 			return true
 		}
 	}
 	return false
+}
+
+// wireContent is a request message's content: a plain string, or the chunk
+// list Mistral replay sends (a leading thinking chunk, then a text chunk).
+type wireContent struct {
+	text     string   // the string, or the text chunks joined
+	thinking []string // each thinking chunk's text, in order
+}
+
+func (c *wireContent) UnmarshalJSON(data []byte) error {
+	if err := json.Unmarshal(data, &c.text); err == nil {
+		return nil
+	}
+	var chunks []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		Thinking []struct {
+			Text string `json:"text"`
+		} `json:"thinking"`
+	}
+	if err := json.Unmarshal(data, &chunks); err != nil {
+		return fmt.Errorf("content is neither a string nor a chunk list: %w", err)
+	}
+	for _, chunk := range chunks {
+		switch chunk.Type {
+		case "text":
+			c.text += chunk.Text
+		case "thinking":
+			var trace strings.Builder
+			for _, item := range chunk.Thinking {
+				trace.WriteString(item.Text)
+			}
+			c.thinking = append(c.thinking, trace.String())
+		default:
+			return fmt.Errorf("unexpected content chunk type %q", chunk.Type)
+		}
+	}
+	return nil
 }
 
 // providerServer plays the shipped provider row named provider: the row's
@@ -168,6 +207,52 @@ func TestMainLoopReplaysDeepSeekReasoning(t *testing.T) {
 	}
 }
 
+// A Mistral tool loop through the real main loop and the shipped mistral row
+// (specs/chunked-content T10): the second request carries the first reply's
+// thinking as one leading thinking chunk, and Mistral rejecting that request
+// is a ReplayRejectedError counting it as sent, which the interface turns
+// into the /compact hint.
+func TestMainLoopReplaysMistralThinkingAndTypesItsRejection(t *testing.T) {
+	const trace = "read known.txt first"
+	repo, root := steerRepo(t)
+	client := providerServer(t, "mistral", func(n int, request replayRequest, w http.ResponseWriter, _ *http.Request) {
+		switch n {
+		case 1:
+			sendFrame(w, `{"choices":[{"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"`+trace+`"}]}]}}]}`)
+			sendFrame(w, `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"read","arguments":"{\"path\":\"known.txt\"}"}}]}}]}`)
+			sendFrame(w, `[DONE]`)
+		case 2:
+			assistant := request.Messages[len(request.Messages)-2]
+			if assistant.Role != "assistant" || len(assistant.Content.thinking) != 1 || assistant.Content.thinking[0] != trace {
+				t.Errorf("second request assistant = %+v, want one leading thinking chunk holding %q", assistant, trace)
+			}
+			if got := strings.Count(request.raw, trace); got != 1 {
+				t.Errorf("thinking appears %d times in the second request, want once: %s", got, request.raw)
+			}
+			http.Error(w, `{"error":{"message":"invalid thinking chunk"}}`, http.StatusBadRequest)
+		default:
+			t.Errorf("unexpected model request %d", n)
+		}
+	})
+	var final *TurnEvent
+	RunTurnWithOptions(context.Background(), client, repo, root, nil, "start", nil, nil, RunOptions{}, func(ev TurnEvent) {
+		if ev.Kind == "done" || ev.Kind == "error" {
+			final = &ev
+		}
+	})
+	if final == nil || final.Kind != "error" {
+		t.Fatalf("final event = %+v, want the rejection", final)
+	}
+	var rejected *model.ReplayRejectedError
+	if !errors.As(final.Err, &rejected) || rejected.Sent != 1 || rejected.Missing != 0 {
+		t.Fatalf("error = %v (%+v), want a ReplayRejectedError with one turn sent", final.Err, rejected)
+	}
+	first := final.History[len(final.History)-2]
+	if first.Replay == nil || first.Replay.Thinking == nil || *first.Replay.Thinking != trace || first.Replay.Source != client.ReplaySource() {
+		t.Fatalf("history keeps replay %+v, want the thinking from %+v", first.Replay, client.ReplaySource())
+	}
+}
+
 // A malformed batch is dropped from the main loop's history. The assistant
 // message keeps its unsigned DeepSeek text, so a later tool request still
 // carries it, and no signed Gemini state for calls it no longer has.
@@ -241,8 +326,8 @@ func TestChildLoopReplaysOwnStateAndDropsSignedStateWhenClipped(t *testing.T) {
 				t.Run(agentName+" "+delta.provider+" "+size.name, func(t *testing.T) {
 					second := runChildTask(t, agentName, delta, size.content)
 					reply := second.Messages[len(second.Messages)-2]
-					if reply.Role != "assistant" || len(reply.Content) != exploreStreamBytes || len(reply.ToolCalls) != 1 {
-						t.Fatalf("second request's reply = %d bytes, %d calls; want the clipped reply with its call", len(reply.Content), len(reply.ToolCalls))
+					if reply.Role != "assistant" || len(reply.Content.text) != exploreStreamBytes || len(reply.ToolCalls) != 1 {
+						t.Fatalf("second request's reply = %d bytes, %d calls; want the clipped reply with its call", len(reply.Content.text), len(reply.ToolCalls))
 					}
 					signature := ""
 					if extra := reply.ToolCalls[0].ExtraContent; extra != nil {
@@ -409,7 +494,7 @@ func TestBackgroundRequestsSendNoReplay(t *testing.T) {
 			return err
 		}},
 	}
-	for _, provider := range []string{"deepseek", "gemini"} {
+	for _, provider := range []string{"deepseek", "gemini", "mistral"} {
 		for _, request := range requests {
 			t.Run(provider+" "+request.name, func(t *testing.T) {
 				var mu sync.Mutex
@@ -442,7 +527,7 @@ func TestBackgroundRequestsSendNoReplay(t *testing.T) {
 				mu.Lock()
 				defer mu.Unlock()
 				for _, body := range bodies {
-					for _, field := range []string{"reasoning_content", "extra_content", "thought_signature"} {
+					for _, field := range []string{"reasoning_content", "extra_content", "thought_signature", `"thinking"`, earlierThinking} {
 						if strings.Contains(body, field) {
 							t.Fatalf("%s request sends %s: %s", request.name, field, body)
 						}
@@ -453,22 +538,30 @@ func TestBackgroundRequestsSendNoReplay(t *testing.T) {
 	}
 }
 
+// earlierThinking is the Mistral thinking ownReplayHistory records.
+const earlierThinking = "earlier thinking"
+
 // ownReplayHistory is one finished tool turn that client issued, carrying
 // the provider's own replay state: reasoning text on DeepSeek, a thought
-// signature on Gemini.
+// signature on Gemini, a thinking chunk's text on Mistral.
 func ownReplayHistory(t *testing.T, client *model.Client, provider string) []model.Message {
 	t.Helper()
 	var reasoning *string
 	signature := ""
-	if provider == "deepseek" {
+	switch provider {
+	case "deepseek":
 		text := "earlier reasoning"
 		reasoning = &text
-	} else {
+	case "gemini":
 		signature = "sig"
 	}
 	replay, err := model.NewReasoningReplay(client.ReplaySource(), reasoning, nil, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if provider == "mistral" {
+		thinking := earlierThinking
+		replay.Thinking = &thinking
 	}
 	return []model.Message{
 		{Role: "user", Content: "go"},
@@ -554,7 +647,7 @@ func TestSteerNowKeepsOnlyUnsignedPartialReasoning(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			resent := second.Messages[len(second.Messages)-2]
-			if resent.Role != "assistant" || resent.Content != tc.text {
+			if resent.Role != "assistant" || resent.Content.text != tc.text {
 				t.Fatalf("resent message = %+v, want the partial assistant text", resent)
 			}
 			got := resent.ReasoningContent

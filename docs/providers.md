@@ -120,7 +120,7 @@ Some providers want their own reasoning state back on later requests and reject 
 | `gemini` | each tool call's thought signature; a current-turn call another model issued gets Google's skip value | pending-probe |
 | `claude` | thinking blocks, unchanged, only to the same model (native Messages API; see [Anthropic Claude](#anthropic-claude)) | pending-probe |
 | `openrouter` | nothing yet: `reasoning_details` replay is built but stays off until its probe passes | pending-probe |
-| `mistral` | nothing yet: thinking-chunk replay is built but stays off | — |
+| `mistral` | each earlier reply's thinking, as one leading `thinking` chunk before its answer text, only to the same model | pending-probe |
 | every other provider | nothing; requests are unchanged | — |
 
 If a provider rejects a request whose earlier turns lack this state or carry it, the error adds a hint: `/compact` continues from a summary without it. The summarize request (and automatic session naming) sends no reasoning state, so it is not rejected for it.

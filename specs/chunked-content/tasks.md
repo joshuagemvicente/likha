@@ -200,7 +200,8 @@ any other provider's bytes (reasoning-replay point 6).
       matrix. Agents never record this probe as passed on the user's
       behalf.
       *Verify:* the user's report, quoted with its date in research.md.
-- [ ] **T10. Turn the `mistral` row's replay on.** *(Added 2026-10-06 by
+- [x] **T10. Turn the `mistral` row's replay on.** *(Landed 2026-10-07,
+      local; see "T10 notes" below. The live probe, T9, stays open.)* *(Added 2026-10-06 by
       review: T7 built the capture and T8 the wire, but the row keeps
       `ReplayNone` because FR-39's rejection path does not exist yet.)*
       Only after reasoning-replay T12 lands `ReplayRejectedError` and the
@@ -225,6 +226,42 @@ any other provider's bytes (reasoning-replay point 6).
       the `/compact` hint once; a compaction request after a chunked reply
       holds what the amended decision 8 says.
 
+## T10 notes (2026-10-07, local)
+
+Automated suite green (`go test ./...`, `go vet ./...`, `gofmt`). No live
+Mistral request was sent; T9 is the user's.
+
+- **Row.** `internal/model/provider.go`'s `mistral` row sets
+  `Replay: ReplayThinkingChunk`. `TestMistralRowKeepsReplayOff` became
+  `TestMistralRowReplaysThinking` (the shipped base resolves the wire; a
+  relay and a custom endpoint still resolve `ReplayNone`; effort stays
+  unsupported), and `TestShippedProviderReplayWires` lists `mistral`.
+- **Decision 8.** No code change: `backgroundClient` already forks with
+  `WithoutReplay`, so compaction and naming send Mistral messages as plain
+  strings. Reasoning-replay decision 8 is amended to say so, and
+  `TestBackgroundRequestsSendNoReplay` now runs on the `mistral` row too
+  (no `"thinking"` key and no thinking text in either body; a 400 is a
+  plain error without the hint).
+- **Rejection.** `TestMainLoopReplaysMistralThinkingAndTypesItsRejection`
+  runs the real main loop on the `mistral` row: the second request carries
+  one leading thinking chunk with the first reply's text, exactly once, and
+  a 400 on it is a `ReplayRejectedError` with `Sent == 1`.
+  `TestMistralThinkingRejectionShowsCompactHint` (TUI) gets that error from
+  a real client on the row and shows the `/compact` hint once.
+- **Child-detail label.** It said "display only; never sent to the
+  provider", which became untrue once Mistral children replay their
+  thinking (and was already loose for DeepSeek). It now reads "display
+  copy; a provider that needs reasoning back got the child's own copy
+  during its run".
+- **`replyHook`.** The task names a `replyHook` comment in
+  `internal/agent/turn_execution.go`; no such identifier exists on main,
+  and no comment there says Mistral thinking is not sent, so nothing
+  changed. The `WithoutReplay` and `ReplayThinkingChunk` doc comments in
+  `internal/model/replay.go` were updated instead.
+- **Agent test helper.** `replayRequest` in `internal/agent/replay_test.go`
+  decodes `content` through a small `wireContent` type (string or chunk
+  list), since a Mistral replay request no longer decodes into a string.
+
 ## Merge with reasoning-replay (2026-10-07)
 
 Both branches added replay capture to `consumeStream`. The merge keeps one
@@ -238,14 +275,15 @@ path for each direction and deletes `thinking_replay.go`:
   `replayEncoder` fills the leading thinking chunk through
   `fillReplayFields`, so `contentFor` is gone and a 400 on a request
   carrying Mistral thinking is a `ReplayRejectedError` with `Sent > 0`
-  (tested with the wire enabled in-process). The row stays `ReplayNone`
-  until T10.
+  (tested with the wire enabled in-process). The row stayed `ReplayNone`
+  until T10 (landed 2026-10-07).
 
 ## Implementation notes (2026-10-06, local)
 
 M1 and M2's capture (T7) and wire (T8) landed on `feat/chunked-content`;
 automated suite green (`go test ./...`, `go vet ./...`, `gofmt`). T10
-(turning the `mistral` row's replay on) waits for reasoning-replay T12.
+(turning the `mistral` row's replay on) waited for reasoning-replay T12
+and landed 2026-10-07.
 T9 (live probe) is the user's and stays open; nothing records Mistral as
 working. Deviations and choices:
 
