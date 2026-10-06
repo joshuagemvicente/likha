@@ -61,7 +61,7 @@ was authorized during the specification interview.
 | Sign in with ChatGPT (Plus/Pro) | [chatgpt-plus/](chatgpt-plus/spec.md) | in progress — official SIWC/browser-first migration; live account/browser probe outstanding |
 | Prompt line editor, native selection, image attachments | [prompt-editor/](prompt-editor/spec.md) | planned |
 | Conversation compaction (/compact) | [conversation-compaction/](conversation-compaction/spec.md) | implemented (local) |
-| Thinking control (/think) | [thinking-control/](thinking-control/spec.md) | draft |
+| Model effort (per-model reasoning levels; effort step in `/models`, `/effort`) | [model-effort/](model-effort/spec.md) | in progress — implemented (local) 2026-10-06, automated suite green; no provider enabled until live probes pass; real-TUI walkthrough outstanding |
 | Repo context file (/init → AGENTS.md; one read-only survey turn, root AGENTS.md edit only, reviewed diff, 32 KiB warning) | [repo-init/](repo-init/spec.md) | implemented (local) — automated suite green; real-terminal walkthrough pending |
 | Plan mode (/plan read-only) | [plan-mode/](plan-mode/spec.md) | planned — Phase 3; all edit/shell/MCP blocked |
 | Custom slash command templates | [custom-commands/](custom-commands/spec.md) | planned — deferred; distinct from Markdown skills |
