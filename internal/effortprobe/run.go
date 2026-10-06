@@ -179,7 +179,7 @@ func (r runner) send(ctx context.Context, index int, req Request) Row {
 	rec := &recorder{}
 	fork, err := r.client.ForkWithTransport(rec.wrap)
 	if err != nil {
-		row.Outcome, row.Error = OutcomeConnection, redact(err.Error(), r.secrets...)
+		row.Outcome, row.Error = OutcomeConnection, Redact(err.Error(), r.secrets...)
 		if errors.Is(err, model.ErrUnauthorized) {
 			row.Outcome = OutcomeUnauthorized
 		}
@@ -210,7 +210,7 @@ func (r runner) send(ctx context.Context, index int, req Request) Row {
 	}
 	if err != nil {
 		row.Outcome = classify(ctx, reqCtx, err, obs)
-		row.Error = redact(err.Error(), r.secrets...)
+		row.Error = Redact(err.Error(), r.secrets...)
 	} else {
 		row.Outcome = OutcomeOK
 		r.recordAnswer(&row, reply, usage, usageOK)

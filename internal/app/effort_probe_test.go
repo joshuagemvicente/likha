@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,10 +10,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"likha/internal/model"
 	"likha/internal/providers"
 )
 
@@ -347,5 +350,86 @@ func TestProbeEndpointOverrideGetsNothingBeforeConsent(t *testing.T) {
 				t.Fatalf("plan = %s", stdout.String())
 			}
 		})
+	}
+}
+
+// A provider may echo the key in the model-list error before consent; the
+// printed note must not carry it (spec decision 14).
+func TestProbeModelListErrorIsRedacted(t *testing.T) {
+	probeEnv(t)
+	withModelDetailsFunc(t, func(context.Context, string, string) ([]model.ModelDetails, error) {
+		return nil, fmt.Errorf("model HTTP 400 Bad Request: invalid x-api-key %s", probeTestKey)
+	})
+	args := []string{"--probe-effort", "--provider", "claude", "--model", "claude-opus-5-5", "--api-key", probeTestKey}
+	var stdout, stderr bytes.Buffer
+	if code := Run(args, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit = %d, want 2 (no --yes, no terminal); stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "model list unavailable") {
+		t.Fatalf("stderr = %q, want the model-list note", stderr.String())
+	}
+	if strings.Contains(stdout.String()+stderr.String(), probeTestKey) {
+		t.Fatalf("the key leaked before consent: stderr = %q", stderr.String())
+	}
+}
+
+// ChatGPT discovery may refresh the stored tokens before the plan exists. A
+// discovery error echoing the old or the rotated tokens must not print them.
+func TestProbeOAuthDiscoveryErrorIsRedacted(t *testing.T) {
+	state := probeEnv(t)
+	old := appOAuthCredentials(t, state, "probe-client")
+	if err := providers.StoreOAuth(state, "chatgpt", old); err != nil {
+		t.Fatal(err)
+	}
+	rotated := old
+	rotated.Access, rotated.Refresh, rotated.IDToken = "rotated-access-5e1f", "rotated-refresh-9a2c", "rotated-id-7b3d"
+	stubAppOAuthModels(t, func(context.Context, *model.Client) ([]model.ModelDetails, error) {
+		// The refresher saves the rotated pair before the GET is retried.
+		if err := providers.StoreOAuth(state, "chatgpt", rotated); err != nil {
+			t.Fatal(err)
+		}
+		return nil, fmt.Errorf(`model HTTP 400: {"echo":%q,"old":%q,"id":%q}`, rotated.Access, old.Access, rotated.IDToken)
+	})
+	args := []string{"--probe-effort", "--provider", "chatgpt", "--model", "gpt-5.5"}
+	var stdout, stderr bytes.Buffer
+	if code := Run(args, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit = %d, want 2; stderr = %s", code, stderr.String())
+	}
+	out := stdout.String() + stderr.String()
+	for _, secret := range []string{old.Access, rotated.Access, rotated.IDToken} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("token %q leaked: stderr = %q", secret, stderr.String())
+		}
+	}
+	if !strings.Contains(stderr.String(), "model HTTP 400") {
+		t.Fatalf("stderr = %q, want the discovery error", stderr.String())
+	}
+}
+
+// The plan's secret list must hold the tokens the client uses after
+// discovery, not only the ones loaded before it.
+func TestProbeSecretsIncludeTokensRotatedDuringDiscovery(t *testing.T) {
+	state := probeEnv(t)
+	old := appOAuthCredentials(t, state, "probe-client")
+	if err := providers.StoreOAuth(state, "chatgpt", old); err != nil {
+		t.Fatal(err)
+	}
+	res, err := providers.ResolveProvider("chatgpt", "", "", false, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated := old
+	rotated.Access, rotated.Refresh, rotated.IDToken = "rotated-access-5e1f", "rotated-refresh-9a2c", "rotated-id-7b3d"
+	if err := providers.StoreOAuth(state, "chatgpt", rotated); err != nil {
+		t.Fatal(err)
+	}
+	secrets, err := probeSecrets("chatgpt", res, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{old.Access, old.Refresh, old.IDToken, rotated.Access, rotated.Refresh, rotated.IDToken} {
+		if !slices.Contains(secrets, want) {
+			t.Fatalf("secrets %q miss %q", secrets, want)
+		}
 	}
 }

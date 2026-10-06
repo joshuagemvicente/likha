@@ -169,18 +169,40 @@ func prepareProbe(cfg probeConfig, stderr io.Writer) (effortprobe.Plan, *model.C
 	if err := effortprobe.CheckEndpoint(selected, res.Endpoint); err != nil {
 		return fail("%v", err)
 	}
-	client, live, err := probeClient(selected, res, modelID, stateDir, stderr)
+	client, live, clientErr := probeClient(selected, res, modelID, stateDir, stderr)
+	// Collected after discovery, which may have rotated the OAuth tokens.
+	secrets, err := probeSecrets(selected.Name, res, stateDir)
 	if err != nil {
 		return fail("%v", err)
 	}
+	if clientErr != nil {
+		// Discovery errors can carry the provider's response body.
+		return fail("%s", effortprobe.Redact(clientErr.Error(), secrets...))
+	}
 	plan, err := effortprobe.NewPlan(selected, modelID, live, effortprobe.Options{
 		Wire: cfg.wire, Levels: levels, Endpoint: res.Endpoint, LikhaVersion: tui.Version,
-		Secrets: []string{res.Key, res.Creds.Access, res.Creds.Refresh, res.Creds.IDToken},
+		Secrets: secrets,
 	})
 	if err != nil {
 		return fail("%v", err)
 	}
 	return plan, client, stateDir, probeExitOK
+}
+
+// probeSecrets lists the credentials the probe must keep out of its output:
+// the ones resolved at start plus, for a sign-in, the ones stored now. The
+// unbilled discovery request may refresh an expired token, and every probe
+// request then sends the rotated one.
+func probeSecrets(provider string, res providers.ResolvedProvider, stateDir string) ([]string, error) {
+	secrets := []string{res.Key, res.Creds.Access, res.Creds.Refresh, res.Creds.IDToken}
+	if !res.OAuth {
+		return secrets, nil
+	}
+	current, _, err := providers.StoredOAuth(stateDir, provider)
+	if err != nil {
+		return nil, fmt.Errorf("reload %s sign-in after model discovery: %w", provider, err)
+	}
+	return append(secrets, current.Access, current.Refresh, current.IDToken), nil
 }
 
 // parseProbeLevels splits --probe-levels; the probe validates the names.
@@ -239,7 +261,8 @@ func probeClient(p model.Provider, res providers.ResolvedProvider, modelID, stat
 	}
 	details, err := listModelDetailsFunc(ctx, res.Endpoint, res.Key)
 	if err != nil {
-		fmt.Fprintf(stderr, "likha: model list unavailable (%v); using the bundled catalog's levels\n", err)
+		// The error may quote the provider's response, which can echo the key.
+		fmt.Fprintf(stderr, "likha: model list unavailable (%s); using the bundled catalog's levels\n", effortprobe.Redact(err.Error(), res.Key))
 		return client, nil, nil
 	}
 	return client, liveLevels(details, modelID), nil

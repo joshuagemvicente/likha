@@ -140,7 +140,7 @@ func TestRedact(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := redact(tc.text, key)
+			got := Redact(tc.text, key)
 			if strings.Contains(got, key) || strings.Contains(got, "sk-test%2Fsecret") || strings.Contains(got, "abc.def-ghi") {
 				t.Fatalf("redact left a credential: %q", got)
 			}
@@ -153,7 +153,7 @@ func TestRedact(t *testing.T) {
 
 func TestRedactTruncatesOnCharacterBoundary(t *testing.T) {
 	long := strings.Repeat("é", 1000) // 2,000 bytes
-	got := redact(long)
+	got := Redact(long)
 	if len(got) > maxErrorText || !strings.HasPrefix(long, got) || len(got) < maxErrorText-1 {
 		t.Fatalf("truncated to %d bytes", len(got))
 	}

@@ -299,8 +299,11 @@ reports the user produces. Where the result differs from the plan:
   `not reported` fits at 80 columns.
 - **T11.** Redaction also replaces URL- and JSON-escaped forms of each
   secret and any `Bearer <token>` value. OAuth tokens known when the probe
-  starts are redacted; a token rotated mid-run is caught only by the bearer
-  pattern.
+  starts are redacted, and so are tokens the unbilled model discovery
+  refreshed before the plan, read back from storage after it; a token
+  rotated during the billed requests is caught only by the bearer pattern.
+  Errors printed before consent (the model-list note and discovery
+  failures) pass through the same `effortprobe.Redact`.
 - **T12/T13.** `effortprobe.CheckWire` lets the CLI refuse `--probe-wire` on
   ChatGPT before resolving credentials. `LIKHA_ENDPOINT` applies to a named
   provider in a probe (spec decision 16), although a normal run ignores it

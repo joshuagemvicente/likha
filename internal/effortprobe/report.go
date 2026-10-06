@@ -92,10 +92,11 @@ func (r Report) Sent() int {
 // bearerPattern finds an authorization value a provider may echo.
 var bearerPattern = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=-]+`)
 
-// redact removes every secret from text, in its raw, URL-escaped and
+// Redact removes every secret from text, in its raw, URL-escaped and
 // JSON-escaped forms, plus any bearer authorization value, then cuts the
-// result to 1 KiB on a character boundary (tasks T11).
-func redact(text string, secrets ...string) string {
+// result to 1 KiB on a character boundary (tasks T11). It is exported so
+// provider errors printed before consent are cleaned the same way as rows.
+func Redact(text string, secrets ...string) string {
 	for _, secret := range secrets {
 		if secret == "" {
 			continue
