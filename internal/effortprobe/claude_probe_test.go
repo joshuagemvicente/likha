@@ -35,6 +35,10 @@ type fakeMessagesAPI struct {
 	t      *testing.T
 	server *httptest.Server
 
+	// reportThinking adds output_tokens_details.thinking_tokens to the final
+	// usage, as Anthropic documents for the thinking-token-count beta.
+	reportThinking bool
+
 	mu    sync.Mutex
 	posts []string // "output_config.effort=<level>" or "none"
 	rests []string // each body with output_config removed
@@ -87,7 +91,11 @@ func (f *fakeMessagesAPI) serve(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"type":"error","error":{"type":"invalid_request_error","message":"output_config.effort: Input should be 'low', 'medium', 'high', 'xhigh' or 'max', got %q"}}`, effort)
 		return
 	}
-	writeMessagesStream(w, tokens+40)
+	thinking := int64(-1)
+	if f.reportThinking {
+		thinking = tokens
+	}
+	writeMessagesStream(w, tokens+40, thinking)
 }
 
 // readOutputConfig returns the effort a body carries, its label, and the body
@@ -122,8 +130,13 @@ func (f *fakeMessagesAPI) readOutputConfig(raw []byte) (effort, label, rest stri
 	return effort, label, string(encoded)
 }
 
-// writeMessagesStream answers with thinking, then the record_answer call.
-func writeMessagesStream(w http.ResponseWriter, outputTokens int64) {
+// writeMessagesStream answers with thinking, then the record_answer call. A
+// negative thinkingTokens leaves output_tokens_details out of the usage.
+func writeMessagesStream(w http.ResponseWriter, outputTokens, thinkingTokens int64) {
+	usage := fmt.Sprintf(`{"output_tokens":%d}`, outputTokens)
+	if thinkingTokens >= 0 {
+		usage = fmt.Sprintf(`{"output_tokens":%d,"output_tokens_details":{"thinking_tokens":%d}}`, outputTokens, thinkingTokens)
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("request-id", "req_probe")
 	events := []string{
@@ -136,7 +149,7 @@ func writeMessagesStream(w http.ResponseWriter, outputTokens int64) {
 		`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"record_answer","input":{}}}`,
 		`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"answer\":440}"}}`,
 		`{"type":"content_block_stop","index":1}`,
-		fmt.Sprintf(`{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_details":null},"usage":{"output_tokens":%d}}`, outputTokens),
+		fmt.Sprintf(`{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_details":null},"usage":%s}`, usage),
 		`{"type":"message_stop"}`,
 	}
 	for _, event := range events {
@@ -226,5 +239,31 @@ func TestRunClaudeSendsOutputConfigEffort(t *testing.T) {
 	line := "Eligible to enable output_config.effort for claude: yes"
 	if !strings.Contains(run.table, line) || strings.Contains(run.table, "endpoint override") {
 		t.Fatalf("table lacks %q or claims an override:\n%s", line, run.table)
+	}
+}
+
+// TestRunClaudeRecordsReportedThinkingTokens covers the other case: when the
+// Messages API reports thinking_tokens, each row records them and the shape
+// uses reasoning tokens as its signal (spec points 11 and 12).
+func TestRunClaudeRecordsReportedThinkingTokens(t *testing.T) {
+	fake := newFakeMessagesAPI(t)
+	fake.reportThinking = true
+	plan, err := NewPlan(provider(t, "claude"), claudeModel, nil, Options{Secrets: []string{testKey}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := runPlan(t, claudeClient(t, fake), plan, fake)
+
+	levels := append([]string{""}, claudeLevels...)
+	for i, level := range levels {
+		row := run.report.Rows[i]
+		want := claudeOutputTokens[level]
+		if row.ReasoningTokens == nil || *row.ReasoningTokens != want {
+			t.Fatalf("row %d (%q) reasoning tokens = %v, want %d", row.Index, level, row.ReasoningTokens, want)
+		}
+	}
+	shape := run.report.Summary.Shapes[0]
+	if shape.Signal != SignalReasoning || !shape.Eligible {
+		t.Fatalf("summary = %+v, want an eligible shape on the reasoning signal", shape)
 	}
 }
