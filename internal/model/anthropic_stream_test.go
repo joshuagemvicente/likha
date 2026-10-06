@@ -310,7 +310,27 @@ func TestAnthropicUsageReport(t *testing.T) {
 				`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":12,"cache_read_input_tokens":100,"cache_creation_input_tokens":null,"output_tokens":40,"output_tokens_details":{"thinking_tokens":25}}}`,
 				evMessageStop,
 			},
-			want: RequestUsage{Prompt: 112, Completion: 40, PromptSeen: true, CompletionSeen: true, CacheRead: 100, Reasoning: 25},
+			want: RequestUsage{Prompt: 112, Completion: 40, PromptSeen: true, CompletionSeen: true, CacheRead: 100, Reasoning: 25, ReasoningSeen: true},
+			ok:   true,
+		},
+		{
+			name: "reported zero thinking tokens still count as seen",
+			events: []string{
+				`{"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":1}}}`,
+				`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5,"output_tokens_details":{"thinking_tokens":0}}}`,
+				evMessageStop,
+			},
+			want: RequestUsage{Prompt: 10, Completion: 5, PromptSeen: true, CompletionSeen: true, ReasoningSeen: true},
+			ok:   true,
+		},
+		{
+			name: "absent thinking tokens are not reported",
+			events: []string{
+				`{"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":1}}}`,
+				`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5,"output_tokens_details":{}}}`,
+				evMessageStop,
+			},
+			want: RequestUsage{Prompt: 10, Completion: 5, PromptSeen: true, CompletionSeen: true},
 			ok:   true,
 		},
 		{

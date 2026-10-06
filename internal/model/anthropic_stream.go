@@ -400,7 +400,8 @@ func refusalError(raw json.RawMessage) *RefusalError {
 // input_tokens counts only tokens after the last cache breakpoint, so cache
 // reads and writes are added to make the prompt the whole input (spec
 // decision 11). thinking_tokens is a documented subset of output_tokens, so
-// no additive-reasoning fold applies.
+// no additive-reasoning fold applies; it is marked seen only when present,
+// because Anthropic may omit it (research.md: thinking-token-count beta).
 func anthropicUsageReport(fields map[string]json.RawMessage) usageReport {
 	count := func(raw json.RawMessage) (int64, bool) {
 		var n int64
@@ -427,7 +428,7 @@ func anthropicUsageReport(fields map[string]json.RawMessage) usageReport {
 	}
 	var details map[string]json.RawMessage
 	if json.Unmarshal(fields["output_tokens_details"], &details) == nil {
-		report.detail.reasoning, _ = count(details["thinking_tokens"])
+		report.detail.reasoning, report.detail.reasoningSeen = count(details["thinking_tokens"])
 	}
 	return report
 }

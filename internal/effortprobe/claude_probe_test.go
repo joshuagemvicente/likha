@@ -22,8 +22,9 @@ const claudeModel = "claude-opus-5-5"
 var claudeLevels = []string{"low", "medium", "high", "xhigh", "max"}
 
 // claudeOutputTokens scales output with the level, as a model that honors
-// output_config.effort would. The Messages API reports no separate
-// reasoning count, so output is the probe's signal.
+// output_config.effort would. The fake omits
+// output_tokens_details.thinking_tokens, as Anthropic may without the
+// thinking-token-count beta, so output is the probe's signal.
 var claudeOutputTokens = map[string]int64{"": 1500, "low": 300, "medium": 900, "high": 2400, "xhigh": 4800, "max": 7000}
 
 // fakeMessagesAPI plays Anthropic's Messages API: it answers POST
