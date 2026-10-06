@@ -12,7 +12,7 @@ and `go vet ./...` green and can land on its own.
 
 ## M1 — Parse chunked content (`internal/model`)
 
-- [ ] **T1. A content type that accepts string or list.** Replace
+- [x] **T1. A content type that accepts string or list.** Replace
       `Delta.Content *string` with a small type, for example
       `streamContent`, that has its own `UnmarshalJSON`:
       - JSON `null` or absent: no pieces.
@@ -53,7 +53,7 @@ and `go vet ./...` green and can land on its own.
         `encoding/json` returns a custom `UnmarshalJSON` error unwrapped
         in a `*json.UnmarshalTypeError`, so `errors.As` on that type would
         not match.
-- [ ] **T2. Emit pieces in order in `consumeStream`.** For each piece in
+- [x] **T2. Emit pieces in order in `consumeStream`.** For each piece in
       the delta's content, in order:
       - answer: write to `text`, and call `onText` when non-empty;
       - reasoning: write to `reasoning`, and call `onReasoning` when
@@ -86,13 +86,13 @@ and `go vet ./...` green and can land on its own.
         and no error;
       - a stream of empty string deltas plus `[DONE]` still returns an
         empty assistant message, as today.
-- [ ] **T3. Regression guard.** Run every existing `client_test.go`,
+- [x] **T3. Regression guard.** Run every existing `client_test.go`,
       `usage_detail_test.go` and `context_usage_stream_test.go` stream test
       unchanged. Add one byte-for-byte request-body assertion: a
       conversation that contains a reply parsed from chunks is re-sent with
       string assistant content and no thinking (spec point 10).
       *Verify:* `go test ./internal/model/`.
-- [ ] **T4. Recovery coordination.** With
+- [ ] **T4. Recovery coordination.** *(Landed first: model-recovery T3 has no `OutputSeen` on main yet, so it applies this rule and adds the test; see notes.)* With
       [model-recovery](../model-recovery/tasks.md) T3 (`OutputSeen`):
       - non-empty answer and reasoning pieces from chunks set it;
       - skipped chunks do not.
@@ -103,13 +103,13 @@ and `go vet ./...` green and can land on its own.
       in which a list delta holding only an `image_url` chunk leaves
       `OutputSeen` false and a list delta holding a `thinking` chunk sets
       it.
-- [ ] **T5. Compaction and naming read answer text only.** No code change
+- [x] **T5. Compaction and naming read answer text only.** No code change
       is expected: `compaction.go` and `sessionname.go` pass a nil
       reasoning callback and use `Content`.
       *Verify:* an agent test with an httptest server whose compaction
       reply holds a `thinking` chunk and a `text` chunk; the summary equals
       the text alone.
-- [ ] **T6. Docs and matrix.**
+- [x] **T6. Docs and matrix.**
       - In [model-effort/context.md](../model-effort/context.md):
         - set the `mistral` matrix row to `pending-probe`, with the note
           "chunk content parses (chunked-content); probe high with tools;
@@ -144,7 +144,7 @@ the foundation's request message cannot carry list `content`, add that
 here as the smallest change to the foundation's encoder, without changing
 any other provider's bytes (reasoning-replay point 6).
 
-- [ ] **T7. Fill the replay state from thinking chunks.** Set the
+- [x] **T7. Fill the replay state from thinking chunks.** Set the
       `mistral` row's replay flag in `internal/model/provider.go` in the
       foundation's form. Only a row with that flag records state, so a
       relay that passes Mistral chunks through records none
@@ -167,7 +167,7 @@ any other provider's bytes (reasoning-replay point 6).
       stream on a row without the flag carries none. Joining one reply's
       thinking fragments is not "merging with another message's state"
       (reasoning-replay point 2); the state is still that one message's.
-- [ ] **T8. Wire shape on resend (Mistral case).** With the `mistral` row's
+- [x] **T8. Wire shape on resend (Mistral case).** With the `mistral` row's
       replay flag set (reasoning-replay decision 4), and sent
       to the same endpoint and model, an assistant message with Mistral
       replay state encodes `content` as a list:
@@ -200,3 +200,51 @@ any other provider's bytes (reasoning-replay point 6).
       matrix. Agents never record this probe as passed on the user's
       behalf.
       *Verify:* the user's report, quoted with its date in research.md.
+
+## Implementation notes (2026-10-06, local)
+
+M1 and M2 landed on `feat/chunked-content`; automated suite green
+(`go test ./...`, `go vet ./...`, `gofmt`). T9 (live probe) is the user's
+and stays open; nothing records Mistral as working. Deviations and choices:
+
+- **Files.** The decoder lives in `internal/model/stream_content.go`
+  (`streamContent`, `errMalformedContent`, `errUnshowableContent`); Mistral
+  capture and request encoding live in `internal/model/thinking_replay.go`.
+  `client.go` changes only the `Delta.Content` type, the piece loop in
+  `consumeStream`, the end-of-stream checks, and two lines in `stream`.
+- **T1.** Each chunk decodes once into a struct of `json.RawMessage`
+  fields, so a skipped chunk's payload is captured raw and never
+  interpreted. A list element inside `thinking` that is not an object
+  (for example a bare string) is treated as malformed, the same rule as a
+  top-level list item; the spec names only top-level items, so this is a
+  stricter reading. Items skipped inside `thinking` do not count as
+  skipped chunks for the only-unshowable-content error (the task records
+  only top-level skipped types). The decoder records `thinking` presence
+  and the `signature` from M1 onward, because M2 landed in the same branch.
+- **T2.** The only-unshowable-content error is
+  `model reply held only content Likha cannot show (type "…")`, wrapping
+  the `errUnshowableContent` sentinel; tests match it with `errors.Is`.
+  Model-recovery has not landed, so there is no retryable classification
+  to set.
+- **T4 not done.** `OutputSeen` (model-recovery T3) does not exist on main.
+  This task landed first, so model-recovery T3 applies the rule (non-empty
+  answer and reasoning pieces from chunks set it; skipped chunks do not)
+  and adds the `consumeStream` test.
+- **T7.** New wire `ReplayThinkingChunk` (appended after
+  `ReplayAnthropicBlocks`) on the `mistral` row only. Replay state gains
+  `Thinking *string` (nil: no thinking chunk; `""`: a chunk without text)
+  and `ThinkingSignature string`, filled from thinking chunks alone, so
+  `reasoning`/`reasoning_content` field text stays out of the replay copy.
+  Following reasoning-replay decision 9, every completed `mistral` reply
+  carries `Replay{Source}` even without thinking; "no Mistral replay
+  state" therefore means `Thinking == nil`. `consumeStream` takes the
+  `replayCapture{wire, source}` value from reasoning-replay T4.
+  `Equal` compares the new fields, the context estimate counts the sent
+  thinking and signature, and `UnsignedOnly` keeps unsigned thinking but
+  drops thinking that carried a signature, like the other signed forms.
+- **T8.** `requestMessage.Content` is now a `requestContent` whose
+  `MarshalJSON` writes the plain string unless Mistral thinking goes back;
+  a test proves it encodes byte for byte like the old string field
+  (HTML escapes, U+2028, invalid UTF-8 included). The replayed message
+  holds one leading thinking chunk, then a text chunk only when `Content`
+  is non-empty, then `tool_calls` unchanged.

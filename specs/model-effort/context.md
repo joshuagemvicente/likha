@@ -15,8 +15,9 @@ spec. All decisions live in [spec.md](spec.md); sources in
     (`model`, `messages`, `tools`, `stream`, `stream_options`). It has no
     effort field. The `attempt` loop's only retry drops `stream_options`
     (`streamUsageOptionRejected`).
-  - `streamChunk.Delta.Content` is `*string`. Mistral's chunk-list content at
-    `high` would fail to decode (see "Known gaps").
+  - `streamChunk.Delta.Content` reads string and chunk-list content.
+    Mistral's chunk lists at `high` parse since
+    [chunked-content](../chunked-content/spec.md) M1 (resolved).
   - `ModelDetails` and `decodeModelDetails` parse `id` and context-window
     fields only. OpenRouter's `reasoning.supported_efforts` and
     `default_effort` would be added here.
@@ -95,7 +96,7 @@ of one model and records accepted, rejected or ignored.
 | groq | `reasoning_effort` | pending-probe | |
 | cerebras | `reasoning_effort` | pending-probe | |
 | together | `reasoning_effort` | pending-probe | |
-| mistral | `reasoning_effort` | blocked | chunk-list content must parse first |
+| mistral | `reasoning_effort` | pending-probe | chunk content parses (chunked-content); probe high with tools; enable only after chunked-content M2 (thinking replay) |
 | bedrock | `reasoning_effort` | pending-probe | no `/models`; catalog only |
 | chatgpt | `reasoning: {effort}` (Responses) | pending-probe | revise `BuildCodexRequest` contract |
 | opencode-zen, opencode-go, dialagram | unknown | pending-probe | relays; behavior undocumented |
@@ -108,8 +109,10 @@ of one model and records accepted, rejected or ignored.
   requires thought signatures on tool calls. Likha never sends reasoning back
   (FR-15). These failures can happen today at default effort, independent of
   this feature. They need their own spec.
-- **Mistral chunk content.** `message.content` as a list of chunks fails
-  Likha's string decoder.
+- **Mistral chunk content.** Resolved by
+  [chunked-content](../chunked-content/spec.md): chunk lists parse (M1) and
+  Mistral thinking is replayed to its issuer (M2). Enabling effort still
+  waits for the user-run probe.
 - **Native Claude client.** Needed for Claude effort, visible thinking and
   prompt caching.
 

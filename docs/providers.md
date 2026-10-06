@@ -88,7 +88,7 @@ Likha sends a reasoning-effort level only to providers whose live probe shows th
 | `xai`, `deepseek`, `groq`, `cerebras`, `together`, `bedrock` | `reasoning_effort` | pending-probe |
 | `chatgpt` | `reasoning: {effort}` (Responses) | pending-probe |
 | `opencode-zen`, `opencode-go`, `dialagram` | unknown | pending-probe |
-| `mistral` | `reasoning_effort` | blocked: chunked reasoning replies do not parse yet |
+| `mistral` | `reasoning_effort` | pending-probe |
 | `claude` | — | not supported: Anthropic's OpenAI-compatible endpoint ignores effort |
 
 A probe sends one tool-bearing request at each published level of one model and records whether each was accepted, rejected, or ignored.

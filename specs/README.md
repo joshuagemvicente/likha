@@ -64,7 +64,7 @@ was authorized during the specification interview.
 | Model effort (per-model reasoning levels; effort step in `/models`, `/effort`) | [model-effort/](model-effort/spec.md) | in progress — implemented (local) 2026-10-06, automated suite green; no provider enabled until live probes pass; real-TUI walkthrough outstanding |
 | Native Claude client (Anthropic Messages API, adaptive thinking, effort via `output_config.effort`) | [claude-native/](claude-native/spec.md) | planned — decisions recorded 2026-10-06 (FR-38); live admission probe outstanding |
 | Reasoning replay (send provider-issued reasoning state back to its issuer; amends FR-15) | [reasoning-replay/](reasoning-replay/spec.md) | in progress — foundation (data model, send gate, persistence) implemented (local) 2026-10-06; capture/encode and live probes outstanding (FR-39) |
-| Chunked message content (Mistral thinking/text chunk lists) | [chunked-content/](chunked-content/spec.md) | planned — decisions recorded 2026-10-06; no new FR |
+| Chunked message content (Mistral thinking/text chunk lists) | [chunked-content/](chunked-content/spec.md) | implemented (local) 2026-10-06 — automated suite green; live Mistral probe outstanding; no new FR |
 | Reasoning-effort probe (`likha --probe-effort`) | [effort-probe/](effort-probe/spec.md) | planned — decisions recorded 2026-10-06 (FR-40) |
 | Repo context file (/init → AGENTS.md; one read-only survey turn, root AGENTS.md edit only, reviewed diff, 32 KiB warning) | [repo-init/](repo-init/spec.md) | implemented (local) — automated suite green; real-terminal walkthrough pending |
 | Plan mode (/plan read-only) | [plan-mode/](plan-mode/spec.md) | planned — Phase 3; all edit/shell/MCP blocked |

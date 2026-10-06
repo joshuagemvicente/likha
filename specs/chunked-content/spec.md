@@ -1,7 +1,9 @@
 # Feature: Chunked message content (Mistral thinking and text chunks)
 
-**Status:** planned — decisions recorded 2026-10-06 (user delegated defaults);
-no implementation started. No new functional requirement: this is
+**Status:** implemented (local) 2026-10-06 — M1 (parsing) and M2 (Mistral
+thinking replay) landed; automated suite green; live Mistral probe (tasks
+T9) outstanding, so nothing claims Mistral works. Decisions recorded
+2026-10-06 (user delegated defaults). No new functional requirement: this is
 conformance to [v1-spec FR-03](../v1-spec.md) (responses stream, and
 assistant text is distinguished from other output) and FR-15 (thinking-model
 reasoning renders in the muted role). Replay builds on
