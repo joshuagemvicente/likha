@@ -213,7 +213,6 @@ func ProfileRunner(client *model.Client, repo *repository.Repository, harness []
 			})
 			// Read the fork's telemetry exactly once, even when Stream failed.
 			node.RecordRequest(child.LastRequest())
-			assistant = replyHook(request, assistant)
 			assistant.Role = "assistant"
 			if assistant.Content == "" || (streamErr != nil && len(partial.Content) > len(assistant.Content)) {
 				assistant.Content = partial.Content
