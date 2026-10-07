@@ -4,6 +4,9 @@
 interactive walkthrough pending). Questionnaire amendment (2026-10-05): implemented (local) — automated suite
 green; walkthrough and live probe pending.
 **Phase:** 3. **Product requirements:** FR-30 (amended 2026-10-05).
+Refined by [attention-notifications](../attention-notifications/spec.md) (FR-41,
+implemented (local) 2026-10-07): a question opening signals the terminal, and
+an opt-in auto-skip returns the skip refusal marked as timed out.
 
 ## Tool and interaction
 

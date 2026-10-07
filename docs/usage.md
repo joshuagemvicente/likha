@@ -62,6 +62,14 @@ Two optional segments are on by default now: `folder` (working repository path w
 
 With `update` enabled, the line also shows `update → vX` when the throttled startup check finds a newer published release. The check runs at most once per 24 hours per state directory (`update_check.json`, mode 0600), serves silently on every failure, never notifies development builds, can be pointed at another endpoint with `LIKHA_UPDATE_API`, and can be turned off entirely with `LIKHA_UPDATE_CHECK=0`.
 
+## Attention signals
+
+When Likha needs you, it rings the terminal bell and sends an OSC 9 desktop-notification sequence, once each time an approval review or web consent opens, an `ask_user` question opens, or a run of at least 10 seconds finishes or fails. A cancelled run and shorter runs stay quiet, and nothing is sent while your terminal reports that it has focus (terminals that never report focus always get the signal). The notification reads `Likha · <folder>: approval needed` (or `question waiting`, `run finished`, `run failed`) and never includes a path, command, question or model output. Terminals that do not support OSC 9 ignore it; inside tmux the sequence is wrapped for passthrough, which tmux forwards only with `allow-passthrough` on. Likha starts no helper process.
+
+Both signals are on by default. Turn either off in `config.json`: `"attention": {"bell": false}` or `"attention": {"desktop": false}`. Approvals and consent never time out. Unanswered model questions can, if you opt in: `"attention": {"ask_skip_after_minutes": 10}` (1–120; absent or 0 means off) shows an `Auto-skips in M:SS` countdown in the question dialog and, if you have not pressed any key in the dialog by then, closes it as skipped and tells the model no answer arrived in time. It never picks an option for you. Any key in the dialog stops the countdown. An out-of-range value turns auto-skip off with a notice at launch.
+
+Verified by automated checks only; which terminals show the desktop notification has not been walked through yet.
+
 ## Slash commands
 
 A prompt starting with `/` is a command, acting on the application and **never sent to the model**:

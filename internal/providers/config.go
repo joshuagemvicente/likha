@@ -49,6 +49,39 @@ type StoredProviderConfig struct {
 	// owns their meaning and reads them straight from the file; this field
 	// exists so saving a theme or model never drops them.
 	Web json.RawMessage `json:"web,omitempty"`
+	// Attention holds the attention-signal settings (specs/attention-notifications).
+	Attention *StoredAttentionConfig `json:"attention,omitempty"`
+}
+
+// StoredAttentionConfig controls the terminal bell, the OSC 9 desktop
+// notification, and the opt-in ask_user auto-skip. Bell and Desktop are
+// default-on pointers resolved with FlagEnabled; AskSkipAfterMinutes 0 (or
+// absent) leaves questions waiting indefinitely.
+type StoredAttentionConfig struct {
+	Bell                *bool `json:"bell,omitempty"`
+	Desktop             *bool `json:"desktop,omitempty"`
+	AskSkipAfterMinutes int   `json:"ask_skip_after_minutes,omitempty"`
+}
+
+// Attention auto-skip bounds, in whole minutes (specs/attention-notifications D2).
+const (
+	MinAskSkipMinutes = 1
+	MaxAskSkipMinutes = 120
+)
+
+// AskSkipLimit resolves the auto-skip setting. ok is false when the stored
+// value is outside 1–120; the caller then treats auto-skip as off and tells
+// the user, because an out-of-range value is a typo, not a reason to refuse
+// to start.
+func (c StoredAttentionConfig) AskSkipLimit() (minutes int, ok bool) {
+	switch {
+	case c.AskSkipAfterMinutes == 0:
+		return 0, true
+	case c.AskSkipAfterMinutes < MinAskSkipMinutes || c.AskSkipAfterMinutes > MaxAskSkipMinutes:
+		return 0, false
+	default:
+		return c.AskSkipAfterMinutes, true
+	}
 }
 
 // StoredCommandTrust maps a check key ("script:test", "go", "make") to the

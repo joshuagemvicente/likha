@@ -438,3 +438,38 @@ func TestAskUserQuestionnaireThroughRegistry(t *testing.T) {
 		t.Fatalf("registry refusals reached the backend")
 	}
 }
+
+// A question the opt-in auto-skip closed (specs/attention-notifications)
+// refuses with a reason the model can act on, in both forms; a plain skip
+// keeps its existing wording.
+func TestAskUserTimedOutSkip(t *testing.T) {
+	cases := []struct {
+		name      string
+		arguments string
+		answer    AskAnswer
+		content   string
+	}{
+		{"single, one minute", `{"question":"Proceed?"}`, AskAnswer{Skipped: true, TimedOutMinutes: 1},
+			"The question was skipped automatically: no answer within 1 minute."},
+		{"single, many minutes", `{"question":"Proceed?","options":["yes","no"]}`, AskAnswer{Skipped: true, TimedOutMinutes: 15},
+			"The question was skipped automatically: no answer within 15 minutes."},
+		{"questionnaire", mixedQuestionnaire, AskAnswer{Skipped: true, TimedOutMinutes: 120},
+			"The question was skipped automatically: no answer within 120 minutes."},
+		{"single, plain skip unchanged", `{"question":"Proceed?"}`, AskAnswer{Skipped: true},
+			"The user skipped the question."},
+		{"questionnaire, plain skip unchanged", mixedQuestionnaire, AskAnswer{Skipped: true},
+			askQuestionnaireSkipped},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := &askRecorder{answer: tc.answer}
+			result := runAsk(t, recorder, tc.arguments)
+			if result.Status != Refused || result.Content != tc.content {
+				t.Fatalf("result = %s %q, want refusal %q", result.Status, result.Content, tc.content)
+			}
+			if recorder.calls != 1 {
+				t.Fatalf("backend calls = %d, want 1", recorder.calls)
+			}
+		})
+	}
+}
