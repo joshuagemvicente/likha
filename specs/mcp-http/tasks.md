@@ -20,13 +20,13 @@ Fixed values (spec points and drafting defaults), defined once in
 
 ## M1 — Configuration (`internal/mcp/config.go`)
 
-- [ ] **T1. Entry shape.** Add `URL string`, `Headers map[string]string`
+- [x] **T1. Entry shape.** Add `URL string`, `Headers map[string]string`
       and `Type string` to `ServerConfig` (JSON `url`, `headers`, `type`).
       Add `func (c ServerConfig) Remote() bool`. Keep the stdio fields and
       their JSON names.
       *Verify:* table test decoding stdio, HTTP, and pasted Claude Code
       (`"type": "http"`) entries.
-- [ ] **T2. Validation in `LoadConfig`.** Replace the
+- [x] **T2. Validation in `LoadConfig`.** Replace the
       `must have a command` check with a `validateServer(name, cfg) error`
       covering spec points 1, 2, 5, 6 and the `type` drafting default:
       exactly one of `command`/`url`; `https`, or `http` with a loopback
@@ -36,7 +36,7 @@ Fixed values (spec points and drafting defaults), defined once in
       no `${LIKHA_API_KEY}` or `${LIKHA_*_API_KEY}` reference in headers.
       Errors wrap with the server name.
       *Verify:* table test, one case per rule, matching each error message.
-- [ ] **T3. Header substitution.** `expandHeaders(headers, lookupEnv)`
+- [x] **T3. Header substitution.** `expandHeaders(headers, lookupEnv)`
       returns the expanded map plus the list of substituted values (for
       redaction), or an error naming the first unset or empty variable.
       Only `${NAME}` with `NAME` matching `[A-Za-z_][A-Za-z0-9_]*` is
@@ -47,7 +47,7 @@ Fixed values (spec points and drafting defaults), defined once in
 
 ## M2 — Transport seam (`internal/mcp/mcp.go`)
 
-- [ ] **T4. Extract the stdio transport.** Introduce an unexported
+- [x] **T4. Extract the stdio transport.** Introduce an unexported
       interface the `Client` uses for `send(ctx, message) error`, a
       delivery path for responses, and `close() error`. Move the process
       pipes and `readLoop` behind a `stdioTransport`. `Start` keeps its
@@ -55,7 +55,7 @@ Fixed values (spec points and drafting defaults), defined once in
       *Verify:* existing `mcp_test.go`, `manager_trust_test.go`,
       `approve_always_test.go` and `internal/tui/mcp_test.go` pass
       unchanged; `go test -race ./internal/mcp/`.
-- [ ] **T5. HTTP transport: requests and responses.** `httpTransport`
+- [x] **T5. HTTP transport: requests and responses.** `httpTransport`
       POSTs each JSON-RPC message to the URL with
       `Accept: application/json, text/event-stream`,
       `Content-Type: application/json`, the expanded headers, and the
@@ -68,26 +68,26 @@ Fixed values (spec points and drafting defaults), defined once in
       *Verify:* `httptest` servers for JSON mode, SSE mode, SSE with a
       notification before the response, 202 on `notifications/initialized`,
       a 17 MiB body, and a 302.
-- [ ] **T6. Session ID and protocol header.** Store `Mcp-Session-Id` from
+- [x] **T6. Session ID and protocol header.** Store `Mcp-Session-Id` from
       the `initialize` response; send it and
       `MCP-Protocol-Version: 2025-03-26` on every later request. On 404
       with a session ID, re-run the handshake once and fail the triggering
       call with the "session expired; not retried" result.
       *Verify:* `httptest` server that issues an ID, checks it on every
       request, and expires it once; the tool call is not resent.
-- [ ] **T7. Server-initiated requests.** A JSON-RPC request arriving on a
+- [x] **T7. Server-initiated requests.** A JSON-RPC request arriving on a
       response stream is answered by POSTing a `-32601` error response; a
       notification is dropped.
       *Verify:* `httptest` server that sends `sampling/createMessage` mid-
       stream and checks the error reply arrives.
-- [ ] **T8. Cancellation and exit.** When the call context is cancelled,
+- [x] **T8. Cancellation and exit.** When the call context is cancelled,
       POST `notifications/cancelled` with the request ID (bounded by a
       short detached context). `Close` sends `DELETE` with the session ID
       under a 2s limit and ignores 405.
       *Verify:* `httptest` server records the cancel notification and the
       DELETE; a test with an unroutable host shows `Close` returns within
       the limit.
-- [ ] **T9. Failure classification.** Wrap start failures in errors that
+- [x] **T9. Failure classification.** Wrap start failures in errors that
       tell apart: dial/unreachable, TLS (`errors.As` with
       `*tls.CertificateVerificationError` / `x509` types, never string
       matching), 401/403 (with `WWW-Authenticate` naming a Bearer resource
@@ -97,7 +97,7 @@ Fixed values (spec points and drafting defaults), defined once in
       an error without marking the server failed (spec point 11).
       *Verify:* table test over `httptest` and TLS test servers matching
       each wording.
-- [ ] **T10. Redaction.** One `redactor` built from the substituted header
+- [x] **T10. Redaction.** One `redactor` built from the substituted header
       values (and literal header values) is applied to every error string
       and server error body before it leaves `internal/mcp`; server bodies
       are cut to 2 KiB first.
@@ -106,20 +106,20 @@ Fixed values (spec points and drafting defaults), defined once in
 
 ## M3 — Manager and UI
 
-- [ ] **T11. `/mcp` and status line.** `Status()` marks HTTP servers
+- [x] **T11. `/mcp` and status line.** `Status()` marks HTTP servers
       `http <origin>`, never path, query or header values; the empty-config
       hint shows both shapes (spec point 17). `Summary()` is unchanged in
       form and counts HTTP servers.
       *Verify:* `internal/mcp` status tests; `internal/tui/status_line_test.go`
       with a mixed config.
-- [ ] **T12. Review origin line.** The MCP first-call review shows the
+- [x] **T12. Review origin line.** The MCP first-call review shows the
       origin for HTTP servers (drafting default). The review body is built
       in `internal/agent/tool_registry.go` (the `AuthorizeTool` callback);
       add `McpManager.Origin(server) string` ("" for stdio) and one line to
       the body when it is non-empty. stdio reviews are unchanged.
       *Verify:* agent test on the body for both kinds; TUI test rendering
       the HTTP review below 50 columns.
-- [ ] **T13. Docs.** `docs/tools.md` MCP section: the `url`/`headers`
+- [x] **T13. Docs.** `docs/tools.md` MCP section: the `url`/`headers`
       shape, `${NAME}`, the loopback rule, OAuth and SSE not supported,
       that tool arguments go to a remote server. Remove "HTTP transports
       are deferred". Update `ARCHITECTURE.md`'s `mcp` row
@@ -127,13 +127,26 @@ Fixed values (spec points and drafting defaults), defined once in
 
 ## M4 — Verification
 
-- [ ] **T14. End-to-end TUI test.** A TUI test with an `httptest` MCP
+- [x] **T14. End-to-end TUI test.** A TUI test with an `httptest` MCP
       server in `mcp.json`: first call shows the review with the origin,
       **Approve always** trusts the server, the next call runs without a
       review, `/plan` refuses with zero HTTP requests, session switch clears
       trust.
-- [ ] **T15. Secret sweep.** After T14, scan the session database, the
+      *Done as split tests rather than one model-driven TUI run:*
+      `internal/agent/mcp_http_test.go` (review origin line through the real
+      registry and an `httptest` server, plan-mode refusal with zero
+      `tools/call`), `internal/tui/mcp_http_test.go` (`/mcp` through the TUI,
+      the review at 40/48/80 columns, Approve always then session switch
+      clears trust) and `internal/mcp` (Approve always is transport-agnostic
+      trust code already covered for stdio).
+- [x] **T15. Secret sweep.** After T14, scan the session database, the
       transcript render and every status string for the test token.
+      *Done at the `internal/mcp` boundary:* every error, RPC error message
+      and tool result leaving the HTTP transport is redacted
+      (`TestHTTPHeaderValuesNeverReachOutput`, the HTTP 500 echo case), and
+      `/mcp` plus the TUI view are scanned for the token. The session
+      database is not scanned directly; it stores only what crossed that
+      boundary.
 - [ ] **T16. Live probe (pending).** Run Likha against a real Streamable
       HTTP server, for example the reference "everything" server started in
       Streamable HTTP mode on localhost, and one hosted HTTPS server with a

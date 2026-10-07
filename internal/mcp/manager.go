@@ -122,21 +122,26 @@ func (m *McpManager) Status() string {
 	defer m.mu.Unlock()
 	var b strings.Builder
 	if len(m.servers) == 0 {
-		fmt.Fprintf(&b, "No MCP servers configured. Edit %s (same shape as Claude Desktop: {\"mcpServers\": {\"name\": {\"command\": ..., \"args\": [...], \"env\": {...}}}}); new servers appear on next launch.", m.path)
+		fmt.Fprintf(&b, "No MCP servers configured. Edit %s (same shape as Claude Desktop: {\"mcpServers\": {\"name\": {\"command\": ..., \"args\": [...], \"env\": {...}}}}, or for a Streamable HTTP server {\"name\": {\"url\": \"https://...\", \"headers\": {\"Authorization\": \"Bearer ${TOKEN}\"}}}); new servers appear on next launch.", m.path)
 		return b.String()
 	}
 	fmt.Fprintf(&b, "Configured MCP servers (edit %s):", m.path)
-	for name := range m.servers {
+	for name, cfg := range m.servers {
+		label, failure := name, "crashed"
+		if cfg.Remote() {
+			// Only the origin: the path, query and header values stay private.
+			label, failure = fmt.Sprintf("%s (http %s)", name, origin(cfg.URL)), "failed"
+		}
 		switch {
 		case m.failed[name] != "":
-			fmt.Fprintf(&b, "\n- %s: crashed (%s)", name, m.failed[name])
+			fmt.Fprintf(&b, "\n- %s: %s (%s)", label, failure, m.failed[name])
 		case m.clients[name] != nil:
-			fmt.Fprintf(&b, "\n- %s: running", name)
+			fmt.Fprintf(&b, "\n- %s: running", label)
 			for _, tool := range m.clients[name].Tools {
 				fmt.Fprintf(&b, "\n    tool: %s", tool.Name)
 			}
 		default:
-			fmt.Fprintf(&b, "\n- %s: not started (starts on first prompt)", name)
+			fmt.Fprintf(&b, "\n- %s: not started (starts on first prompt)", label)
 		}
 	}
 	return b.String()
@@ -170,6 +175,22 @@ func (m *McpManager) Summary() string {
 		summary += " crashed"
 	}
 	return summary
+}
+
+// Origin returns scheme://host[:port] for an HTTP server, or "" for a stdio
+// or unknown server. Reviews show it so the user sees arguments leave the
+// machine.
+func (m *McpManager) Origin(server string) string {
+	if m == nil {
+		return ""
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg, ok := m.servers[server]
+	if !ok || !cfg.Remote() {
+		return ""
+	}
+	return origin(cfg.URL)
 }
 
 // Trusted reports whether a server has been approved for this session.
