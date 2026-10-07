@@ -6,12 +6,9 @@
 package mcp
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -33,17 +30,24 @@ const (
 // so tests can shorten it.
 var CallTimeout = 60 * time.Second
 
-// Client manages one running MCP server process.
+// Client manages one connected MCP server. The transport carries its
+// JSON-RPC messages; Client owns request IDs, the handshake and tool calls.
 type Client struct {
-	name    string
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	reader  *bufio.Reader
-	mu      sync.Mutex
-	pending map[int]chan rpcResponse
-	nextID  int
-	Tools   []Tool
-	closed  bool
+	name   string
+	conn   transport
+	mu     sync.Mutex
+	nextID int
+	Tools  []Tool
+	closed bool
+}
+
+// transport carries JSON-RPC messages to one server. call sends a request
+// and waits for the response carrying the same ID; notify sends a message
+// that expects no response; close releases the connection or process.
+type transport interface {
+	call(ctx context.Context, id int, payload []byte) (rpcResponse, error)
+	notify(ctx context.Context, payload []byte) error
+	close() error
 }
 
 type rpcRequest struct {
@@ -65,34 +69,14 @@ type rpcResponse struct {
 	Error   *rpcError       `json:"error,omitempty"`
 }
 
-// Start launches the server process and performs the MCP handshake:
+// Start connects to the server and performs the MCP handshake:
 // initialize → notifications/initialized → tools/list.
 func Start(name string, cfg ServerConfig, userAgent string) (*Client, error) {
-	cmd := exec.Command(cfg.Command, cfg.Args...)
-	cmd.Env = append(cmd.Environ(), "LIKHA_USER_AGENT="+userAgent)
-	for key, value := range cfg.Env {
-		cmd.Env = append(cmd.Env, key+"="+value)
-	}
-	stdin, err := cmd.StdinPipe()
+	conn, err := startStdio(name, cfg, userAgent)
 	if err != nil {
-		return nil, fmt.Errorf("mcp %s: stdin pipe: %w", name, err)
+		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("mcp %s: stdout pipe: %w", name, err)
-	}
-	cmd.Stderr = nil // the server's logs must not corrupt the protocol stream
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("mcp %s: start %q: %w", name, cfg.Command, err)
-	}
-	c := &Client{
-		name:    name,
-		cmd:     cmd,
-		stdin:   stdin,
-		reader:  bufio.NewReaderSize(stdout, 1<<20),
-		pending: make(map[int]chan rpcResponse),
-	}
-	go c.readLoop()
+	c := &Client{name: name, conn: conn}
 	if err := c.handshake(userAgent); err != nil {
 		c.Close()
 		return nil, err
@@ -120,7 +104,7 @@ func (c *Client) handshake(userAgent string) error {
 	if result.ProtocolVersion != protocolVersion {
 		return fmt.Errorf("mcp %s: server speaks protocol %q, Likha speaks %q", c.name, result.ProtocolVersion, protocolVersion)
 	}
-	if err := c.notify("notifications/initialized", nil); err != nil {
+	if err := c.notify(ctx, "notifications/initialized", nil); err != nil {
 		return fmt.Errorf("mcp %s: initialized notification: %w", c.name, err)
 	}
 	var list struct {
@@ -145,55 +129,38 @@ func (c *Client) request(ctx context.Context, method string, params any, result 
 	}
 	c.nextID++
 	id := c.nextID
-	chanReply := make(chan rpcResponse, 1)
-	c.pending[id] = chanReply
+	c.mu.Unlock()
 	payload, err := json.Marshal(rpcRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params})
 	if err != nil {
-		delete(c.pending, id)
-		c.mu.Unlock()
 		return rpcResponse{}, err
 	}
-	if _, err := c.stdin.Write(append(payload, '\n')); err != nil {
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return rpcResponse{}, err
+	reply, err := c.conn.call(ctx, id, payload)
+	if err != nil {
+		return reply, err
 	}
-	c.mu.Unlock()
-
-	select {
-	case reply := <-chanReply:
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		if reply.Error != nil {
-			return reply, fmt.Errorf("RPC error %d: %s", reply.Error.Code, reply.Error.Message)
-		}
-		if result != nil && len(reply.Result) > 0 {
-			if err := json.Unmarshal(reply.Result, result); err != nil {
-				return reply, fmt.Errorf("decode result: %w", err)
-			}
-		}
-		return reply, nil
-	case <-ctx.Done():
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return rpcResponse{}, fmt.Errorf("request timed out: %w", ctx.Err())
+	if reply.Error != nil {
+		return reply, fmt.Errorf("RPC error %d: %s", reply.Error.Code, reply.Error.Message)
 	}
+	if result != nil && len(reply.Result) > 0 {
+		if err := json.Unmarshal(reply.Result, result); err != nil {
+			return reply, fmt.Errorf("decode result: %w", err)
+		}
+	}
+	return reply, nil
 }
 
-func (c *Client) notify(method string, params any) error {
+func (c *Client) notify(ctx context.Context, method string, params any) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
+	closed := c.closed
+	c.mu.Unlock()
+	if closed {
 		return fmt.Errorf("server is stopped")
 	}
 	payload, err := json.Marshal(rpcRequest{JSONRPC: "2.0", Method: method, Params: params})
 	if err != nil {
 		return err
 	}
-	_, err = c.stdin.Write(append(payload, '\n'))
-	return err
+	return c.conn.notify(ctx, payload)
 }
 
 // Call invokes one tool and returns its text content. isError reports an MCP
@@ -219,38 +186,7 @@ func (c *Client) Call(ctx context.Context, tool string, arguments json.RawMessag
 	return b.String(), reply.IsError, nil
 }
 
-// readLoop is the pump started lazily by request; it matches responses to
-// pending requests by ID and ignores server-initiated requests/notifications.
-func (c *Client) readLoop() {
-	for {
-		line, err := c.reader.ReadString('\n')
-		if err != nil {
-			c.failPending(fmt.Errorf("server stopped: %w", err))
-			return
-		}
-		var reply rpcResponse
-		if err := json.Unmarshal([]byte(line), &reply); err != nil || reply.ID == 0 {
-			continue // notification or unparseable line: ignored in v1
-		}
-		c.mu.Lock()
-		waiter := c.pending[reply.ID]
-		c.mu.Unlock()
-		if waiter != nil {
-			waiter <- reply
-		}
-	}
-}
-
-func (c *Client) failPending(err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for id, waiter := range c.pending {
-		waiter <- rpcResponse{ID: id, Error: &rpcError{Message: err.Error()}}
-		delete(c.pending, id)
-	}
-}
-
-// Close kills the server process and fails any pending calls.
+// Close stops the server connection and fails any pending calls.
 func (c *Client) Close() error {
 	c.mu.Lock()
 	if c.closed {
@@ -259,5 +195,8 @@ func (c *Client) Close() error {
 	}
 	c.closed = true
 	c.mu.Unlock()
-	return c.cmd.Process.Kill()
+	if c.conn == nil {
+		return nil
+	}
+	return c.conn.close()
 }
