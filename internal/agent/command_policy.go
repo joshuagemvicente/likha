@@ -18,6 +18,19 @@ const AutoCommandTimeout = 10 * time.Minute
 // run_command result; the transcript renders it as a label.
 const CommandApprovalPrefix = "Approval: "
 
+// reviewTier names why a command needs a review, for refusals that cannot
+// show one.
+func reviewTier(decision cmdpolicy.Decision) string {
+	switch decision.Tier {
+	case cmdpolicy.AlwaysAsk:
+		return "always asks: this command " + decision.Reason
+	case cmdpolicy.Verify:
+		return "verification check not covered by repository trust"
+	default:
+		return "asks before running"
+	}
+}
+
 // authorizeCommand applies specs/command-permissions to one validated
 // command. A nil error means it may run; *auto names why when no prompt was
 // shown. Refused commands never reach the user as a prompt.
@@ -76,7 +89,10 @@ func authorizeCommand(ctx context.Context, root, command string, options RunOpti
 	}
 	request.Body = body + "\nApproved commands can access files outside this repository and use the network. Detached processes may outlive cancellation."
 
-	approved, err := awaitApproval(ctx, request, emit)
+	approved, err := review(ctx, request, options, emit, NoReviewerError{
+		Action: "this command was not run (" + reviewTier(decision) + ")",
+		Advice: "If it is needed, name it in your answer; the user can run it themselves.",
+	})
 	if err != nil {
 		return err
 	}

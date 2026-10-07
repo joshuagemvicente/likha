@@ -165,6 +165,39 @@ func requestApproval(ctx context.Context, kind, title, body string, emit func(Tu
 	return awaitApproval(ctx, &ApprovalRequest{Kind: kind, Title: title, Body: body}, emit)
 }
 
+// NoReviewerError is the refusal returned instead of a review when no person
+// can answer one (RunOptions.NoReviewer, specs/headless-print). It is neither
+// a success nor a user rejection (FR-09).
+type NoReviewerError struct {
+	// Kind is the review that would have opened: "edit", "command" or "mcp".
+	Kind string
+	// Action describes what was not done, e.g. "this edit was not applied".
+	Action string
+	// Reason says why nobody can review, e.g. "no reviewer is present in
+	// headless mode".
+	Reason string
+	// Advice tells the model what to do instead; it may be empty.
+	Advice string
+}
+
+func (e *NoReviewerError) Error() string {
+	message := "refused (" + e.Kind + " needs review): " + e.Reason + ", so " + e.Action + "."
+	if e.Advice != "" {
+		message += " " + e.Advice
+	}
+	return message
+}
+
+// review asks for one decision, or refuses with a *NoReviewerError when the
+// run has no reviewer. A refused review emits no approval event.
+func review(ctx context.Context, request *ApprovalRequest, options RunOptions, emit func(TurnEvent), refusal NoReviewerError) (bool, error) {
+	if options.NoReviewer != "" {
+		refusal.Kind, refusal.Reason = request.Kind, options.NoReviewer
+		return false, &refusal
+	}
+	return awaitApproval(ctx, request, emit)
+}
+
 // awaitApproval emits a prepared request and blocks for its single decision.
 func awaitApproval(ctx context.Context, request *ApprovalRequest, emit func(TurnEvent)) (bool, error) {
 	request.Reply = make(chan bool, 1)

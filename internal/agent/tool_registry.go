@@ -75,6 +75,12 @@ type RunOptions struct {
 	// (specs/approve-always). Nil: every edit asks and no edit review offers
 	// Approve always.
 	EditGrant *EditGrant
+	// NoReviewer, when set, says why no person can answer a review in this
+	// run (specs/headless-print). Every edit, command and MCP review is then
+	// refused with a *NoReviewerError instead of emitting an approval event;
+	// actions that run without a review are unaffected. Empty: a person
+	// reviews as usual.
+	NoReviewer string
 }
 
 // TaskProfile is one accepted, drift-checked profile ready to run.
@@ -406,10 +412,19 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 		register(tools.Tool{
 			Definition: item.Definition, Source: tools.Source{Kind: "mcp", Server: item.SourceServer, Tool: item.OriginalName}, Effects: []tools.Effect{tools.Write, tools.Exec, tools.Network}, Target: "external", Interactive: true, Aliases: item.Aliases,
 			Authorize: func(ctx context.Context, input json.RawMessage) error {
-				return servers.AuthorizeTool(ctx, item.SourceServer, item.OriginalName, string(input), func(server, tool, arguments string) mcp.Decision {
+				// refused holds a no-reviewer refusal so it replaces the
+				// manager's generic decline in the model's result.
+				var refused error
+				err := servers.AuthorizeTool(ctx, item.SourceServer, item.OriginalName, string(input), func(server, tool, arguments string) mcp.Decision {
 					body := fmt.Sprintf("MCP server: %s\nTool: %s\nArguments: %s\n\n\"Approve\" runs this call only. \"Approve always\" trusts this server's tools for the rest of this session. MCP servers run with your permissions; local cancellation may not stop server work.", server, tool, arguments)
 					request := &ApprovalRequest{Kind: "mcp", Title: "MCP tool", Body: body, Remember: RememberServer}
-					approved, err := awaitApproval(ctx, request, emit)
+					approved, err := review(ctx, request, options, emit, NoReviewerError{
+						Action: "the call to MCP server " + server + " was not made",
+					})
+					var noReviewer *NoReviewerError
+					if errors.As(err, &noReviewer) {
+						refused = err
+					}
 					switch {
 					case err != nil || !approved:
 						return mcp.Declined
@@ -419,6 +434,10 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 						return mcp.ApprovedOnce
 					}
 				})
+				if err != nil && refused != nil {
+					return refused
+				}
+				return err
 			},
 			Run: func(ctx context.Context, input json.RawMessage) (tools.Result, error) {
 				content, isError, err := servers.CallTool(ctx, item.SourceServer, item.OriginalName, input)
