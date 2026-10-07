@@ -12,6 +12,7 @@ import (
 	"likha/internal/actions"
 	"likha/internal/agent"
 	"likha/internal/model"
+	"likha/internal/runsetup"
 	"likha/internal/session"
 	"likha/internal/tools"
 )
@@ -81,7 +82,7 @@ func (m *ui) handleUndoCommand(line, arg string) tea.Cmd {
 		m.entries = append(m.entries, entry{role: "Error", content: changedSinceWritten(changed)})
 		return nil
 	}
-	if err := proposal.SetJournal(privateEditJournal(m.store, m.snapshot.ID)); err != nil {
+	if err := proposal.SetJournal(runsetup.EditJournal(m.store, m.snapshot.ID)); err != nil {
 		m.entries = append(m.entries, entry{role: "Error", content: "Undo unavailable: " + err.Error() + ". Nothing was reverted."})
 		return nil
 	}

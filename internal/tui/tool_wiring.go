@@ -3,18 +3,16 @@ package tui
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"likha/internal/actions"
 	"likha/internal/agent"
 	"likha/internal/model"
-	"likha/internal/providers"
+	"likha/internal/runsetup"
 	"likha/internal/session"
 	"likha/internal/tooloutput"
 	"likha/internal/tools"
@@ -49,22 +47,10 @@ func (m *ui) toolRunOptions(runID uint64) agent.RunOptions {
 		options.ContextWindow = m.contextWindow
 		options.AutoCompact = m.autoCompactEnabled()
 	}
-	store, sessionID := m.store, m.snapshot.ID
-	if store != nil && sessionID != "" {
+	if m.store != nil && m.snapshot.ID != "" {
 		options.TasksEnabled = m.client != nil && m.repo != nil
-		options.SaveTask = store.SaveTask
-		// Plan checklist updates persist through the store immediately and
-		// mirror into the snapshot on the UI event; the apply hook only
-		// writes private session state, never repo or provider state.
-		options.PlanApply = func(ctx context.Context, steps []tools.PlanStep) error {
-			return store.SavePlan(sessionID, session.Plan{Steps: steps, UpdatedAt: time.Now().UTC()})
-		}
-		options.EditJournal = func(proposal *actions.EditProposal) error {
-			return proposal.SetJournal(privateEditJournal(store, sessionID))
-		}
-		options.RecordChangeSet = func(toolCallID string, set actions.ChangeSet) error {
-			return saveChangeSet(store, sessionID, toolCallID, set)
-		}
+		// Plan checklist updates mirror into the snapshot on the UI event.
+		runsetup.ApplySession(&options, m.store, m.snapshot.ID)
 	}
 	// The ask broker blocks the tool handler, never the UI loop: the reply
 	// channel has room for exactly one send and the run context terminates
@@ -95,48 +81,8 @@ func (m *ui) toolRunOptions(runID uint64) agent.RunOptions {
 	// Steer now (steering-prompts M2): the signal channel is created with
 	// the turn's steer channel and written only on the UI goroutine.
 	options.SteerNow = m.steerNow
-	if stateDir, root := m.stateDir, m.root; stateDir != "" {
-		options.CommandTrusted = func(check, fingerprint string) bool {
-			return providers.CommandTrusted(stateDir, root, check, fingerprint)
-		}
-		options.TrustChecks = func(checks map[string]string) error {
-			return providers.TrustCommandChecks(stateDir, root, checks)
-		}
-	}
+	runsetup.ApplyCommandTrust(&options, m.stateDir, m.root)
 	return options
-}
-
-// privateEditJournal persists one apply's progress records into a single
-// session-owned edit_journal row, created on the first record.
-func privateEditJournal(store *session.Store, sessionID string) func(actions.EditProgress) error {
-	journalID := ""
-	return func(progress actions.EditProgress) error {
-		data, err := json.Marshal(progress)
-		if err != nil {
-			return err
-		}
-		id, err := store.RecordEditProgress(sessionID, journalID, data)
-		if err == nil {
-			journalID = id
-		}
-		return err
-	}
-}
-
-// saveChangeSet keeps an applied edit's change set in the session's undo
-// history (specs/edit-undo).
-func saveChangeSet(store *session.Store, sessionID, toolCallID string, set actions.ChangeSet) error {
-	data, err := json.Marshal(set)
-	if err != nil {
-		return fmt.Errorf("encode change set: %w", err)
-	}
-	if _, err := store.SaveChangeSet(sessionID, toolCallID, data); err != nil {
-		if errors.Is(err, session.ErrChangeSetTooLarge) {
-			return fmt.Errorf("%w: %w", agent.ErrChangeSetTooLarge, err)
-		}
-		return err
-	}
-	return nil
 }
 
 // askBroker pairs one ask_user call with a single UI reply. Send delivery is
