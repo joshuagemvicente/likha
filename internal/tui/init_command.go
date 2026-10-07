@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"likha/internal/agent"
+	"likha/internal/hooks"
 )
 
 // initNoProposalNote closes a /init run that never showed a review for the
@@ -41,7 +42,7 @@ func (m *ui) startInit(guidance string) tea.Cmd {
 	// toolRunOptions reads the flag while the turn starts; finishRun clears
 	// it, so only this run is limited.
 	m.initRun, m.initProposed = true, false
-	cmd := m.startTurnDisplay(display, agent.InitPrompt(guidance), nil)
+	cmd := m.startTurnDisplay(hooks.OriginInit, display, agent.InitPrompt(guidance), nil)
 	if !m.working {
 		m.initRun = false
 	}
