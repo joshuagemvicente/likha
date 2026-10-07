@@ -45,6 +45,10 @@ rules in [specs/README.md](../README.md).
 
 - [x] Exit codes: 0 completed (also with refusals), 1 failed or time limit,
       2 usage/config, 130 signal.
+- [x] Hooks (FR-45) apply: a `prompt_submit` block exits 1 before any
+      request and saves nothing; a `pre_tool` block is a refused
+      `tool_result`; `attention` never fires. (`internal/headless/hooks_test.go`,
+      `tests/integration` `TestHeadlessHooksBlockPromptAndTool`)
 - [x] SIGINT cancels like Esc, saves the session and exits 130.
 - [x] `--max-time` cancels the run and reports `time_limit`.
 - [x] The session is listed by `--sessions`, opens with `--resume ID` in the

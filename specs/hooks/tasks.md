@@ -7,11 +7,8 @@ the drafting defaults (D1–D12) in review before M1 starts.
 
 **Progress (2026-10-07):** M1–M3 implemented (local). T13 docs done
 (`docs/usage.md` Hooks section, `docs/tools.md` pointer); its CHANGELOG
-entry is added when the branch merges. T12 waits for FR-44: the registry gate
-already covers any headless run that passes `RunOptions.Hooks`, but the
-headless runner must load hooks, fire `session_start`, `prompt_submit` and
-`run_end`, fire `post_tool` from `hook_observe` events, and skip `attention`.
-W1 is not done. Implementation notes: the gate is `tools.Gate`
+entry is added when the branch merges. T12 done after FR-44 merged
+(`internal/headless/hooks.go`). W1 is not done. Implementation notes: the gate is `tools.Gate`
 (`Registry.SetGate`); children get it through the new last parameter of
 `ExploreRunner` and `ProfileRunner`; `post_tool` leaves the agent as a
 `hook_observe` turn event that the interface fires off the run; the TUI's
@@ -119,12 +116,19 @@ Fixed values (drafting defaults D3, D6), defined once in `internal/hooks`:
 
 ## M4 — Headless and docs
 
-- [ ] **T12. Headless (FR-44, D11).** The headless runner loads hooks and
+- [x] **T12. Headless (FR-44, D11).** The headless runner loads hooks and
       fires `session_start`, `prompt_submit`, `pre_tool`, `post_tool` and
-      `run_end`, but not `attention`. A block in `--json` output is a
-      `refusal` event with `hook_blocked`.
-      *Verify:* integration test in `tests/integration/` with a temp
-      `LIKHA_STATE_DIR` holding a blocking hook.
+      `run_end`, but not `attention`. A `pre_tool` block in `--json` output
+      is a `tool_result` with `status` `refused` whose content is
+      `Blocked by hook "<name>": <reason>` (FR-44 schema 1 has no separate
+      `refusal` event, so none was added). A blocked `prompt_submit` sends
+      no request, saves nothing, and exits 1 with the block message as the
+      run's error. Hook warnings and an unusable `hooks.json` are `notice`
+      events (stderr `likha: note:` lines in text mode). Observe-only hooks
+      run in the background and are awaited before the result is written.
+      *Verified:* `internal/headless/hooks_test.go` (real hook commands) and
+      `tests/integration` `TestHeadlessHooksBlockPromptAndTool` with the
+      built binary and a temp `LIKHA_STATE_DIR`.
 - [ ] **T13. Docs and changelog.** `docs/usage.md` hooks section (format,
       events, payload schema v1, exit codes, safety note from spec point 14).
       Add a `CHANGELOG.md` **Unreleased** entry stating what was verified.

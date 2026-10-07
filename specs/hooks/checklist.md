@@ -69,8 +69,12 @@ here has been seen in a real terminal yet (tasks W1).
 - [x] Explore children and profile tasks fire `pre_tool`/`post_tool` with
       their identity, and never `prompt_submit` or `attention`.
       (`TestExploreChildReadBlockedAndNamed/explore` and `/review`)
-- [ ] Headless runs apply the same blocks and report them as refusals.
-      Waits for [headless-print](../headless-print/spec.md) (tasks T12).
+- [x] Headless runs apply the same blocks and report them as refusals.
+      A blocked `prompt_submit` sends no request and exits 1; a `pre_tool`
+      block is a refused `tool_result`; `session_start`, `post_tool` and
+      `run_end` fire and `attention` never does; an unusable `hooks.json` is a
+      `Hooks disabled:` notice. (`internal/headless/hooks_test.go`,
+      `tests/integration` `TestHeadlessHooksBlockPromptAndTool`)
 
 ## Surfaces
 

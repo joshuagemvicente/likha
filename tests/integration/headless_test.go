@@ -256,3 +256,58 @@ func TestHeadlessInterruptExits130(t *testing.T) {
 		t.Fatalf("interrupted session not saved: %q", list)
 	}
 }
+
+// writeHooksFile writes a private hooks.json into the state directory.
+func writeHooksFile(t *testing.T, state, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(state, "hooks.json"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHeadlessHooksBlockPromptAndTool(t *testing.T) {
+	t.Run("prompt_submit block exits one before any request", func(t *testing.T) {
+		fake := newScriptedProvider(t, "text:never sent")
+		state, repo := t.TempDir(), t.TempDir()
+		writeHooksFile(t, state, `{"hooks":{"prompt_submit":[{"name":"guard","command":"echo '{\"decision\":\"block\",\"reason\":\"not today\"}'"}]}}`)
+		code, stdout, stderr := runLikha(t, likhaCommand(state, append(fake.headlessArgs("-p", "do it"), repo)...))
+		if code != 1 || stdout != "" || !strings.Contains(stderr, `Prompt blocked by hook "guard": not today`) {
+			t.Fatalf("exit = %d stdout = %q\n%s", code, stdout, stderr)
+		}
+		if fake.postCount() != 0 {
+			t.Fatalf("a blocked prompt sent %d model requests", fake.postCount())
+		}
+	})
+	t.Run("pre_tool block is a refusal and the file is untouched", func(t *testing.T) {
+		fake := newScriptedProvider(t, "edit:README.md", "text:Blocked, so I describe the change.")
+		state, repo := t.TempDir(), t.TempDir()
+		readme := filepath.Join(repo, "README.md")
+		if err := os.WriteFile(readme, []byte("original\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		ended := filepath.Join(t.TempDir(), "run_end.json")
+		writeHooksFile(t, state, `{"hooks":{
+			"pre_tool":[{"name":"no-edits","match":["edit_file"],"command":"echo '{\"decision\":\"block\",\"reason\":\"read-only day\"}'"}],
+			"run_end":[{"name":"end","command":"cat > '`+ended+`'"}]}}`)
+		code, stdout, stderr := runLikha(t, likhaCommand(state, append(fake.headlessArgs("--json", "-p", "edit it"), repo)...))
+		if code != 0 {
+			t.Fatalf("exit = %d\n%s\n%s", code, stdout, stderr)
+		}
+		if content, _ := os.ReadFile(readme); string(content) != "original\n" {
+			t.Fatalf("README changed to %q despite the block", content)
+		}
+		var blocked bool
+		for _, event := range jsonEvents(t, stdout) {
+			if event["type"] == "tool_result" && event["status"] == "refused" && strings.Contains(event["content"].(string), `Blocked by hook "no-edits": read-only day`) {
+				blocked = true
+			}
+		}
+		if !blocked {
+			t.Fatalf("no refused tool_result naming the hook:\n%s", stdout)
+		}
+		data, err := os.ReadFile(ended)
+		if err != nil || !strings.Contains(string(data), `"outcome":"completed"`) {
+			t.Fatalf("run_end payload = %q (%v)", data, err)
+		}
+	})
+}
