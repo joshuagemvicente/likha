@@ -80,6 +80,10 @@ type TurnEvent struct {
 	// Err is the cause of a Kind "error" event, so the interface can match it
 	// with errors.As (an effort rejection gets a hint); Text is its message.
 	Err error
+	// ContextWindow is the window an "auto_compacted" event compacted
+	// against; ContextTokens then holds the estimate that triggered it
+	// (specs/auto-compaction).
+	ContextWindow int64
 }
 
 // ConsentRequest asks for one conversation-scoped web grant. Search consents

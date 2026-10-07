@@ -41,6 +41,12 @@ type RunOptions struct {
 	// read-only tier and every write tool refuse without review. Never
 	// persisted.
 	InstallMode bool
+	// ContextWindow is the main model's resolved context window, 0 when
+	// unknown. AutoCompact enables compacting a main-turn request that
+	// reaches 85% of it (specs/auto-compaction); either zero value turns
+	// that off. Explore children and profile tasks never read them.
+	ContextWindow int64
+	AutoCompact   bool
 	// Ask brokers one interactive question; PlanApply persists a checklist
 	// replacement; SkillLoad loads one discovered skill; WebSearch runs a
 	// consent-gated configured search. Nil hooks register the tool with its

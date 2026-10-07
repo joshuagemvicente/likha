@@ -1,8 +1,17 @@
 # Tasks: Automatic compaction
 
-Ordered implementation tasks. Behavior wording lives in [spec.md](spec.md);
-code paths in [context.md](context.md). Each milestone leaves `go test ./...`
-and `go vet ./...` green. Nothing here changes `/compact`.
+Ordered implementation tasks. T1–T9 done 2026-10-07 (automated checks only);
+T10 (CHANGELOG) is merged by the coordinator; W1 is the user's walkthrough.
+Behavior wording lives in [spec.md](spec.md); code paths in
+[context.md](context.md). Each milestone leaves `go test ./...` and
+`go vet ./...` green. Nothing here changes `/compact`.
+
+Implementation notes: the trigger and `compactRun` live in
+`internal/agent/auto_compaction.go`; the loop drains steering again right
+after a compaction (a safe point, D8); the TUI side is
+`internal/tui/auto_compaction.go` (`compacting` / `auto_compacted` events,
+`m.priorLen = 1` rebase); the footer flag is `transcript.TurnInfo.Compacted`
+(`"compacted"` in the stored footer JSON, omitted when false).
 
 Fixed values, defined once in `internal/agent`:
 
@@ -14,14 +23,14 @@ Fixed values, defined once in `internal/agent`:
 
 ## M1 — Decide and compact inside the agent loop (`internal/agent`)
 
-- [ ] **T1. Run options.** Add `ContextWindow int64` and `AutoCompact bool`
+- [x] **T1. Run options.** Add `ContextWindow int64` and `AutoCompact bool`
       to `RunOptions`. Zero window or `false` disables the feature. Explore
       and profile options never set them.
       *Verify:* compile; existing tests unchanged.
-- [ ] **T2. Trigger predicate.** `shouldAutoCompact(tokens int64, ok bool,
+- [x] **T2. Trigger predicate.** `shouldAutoCompact(tokens int64, ok bool,
       window int64) bool` — false when `!ok` or `window <= 0`.
       *Verify:* table test: 84%, 85%, 100%, unknown estimate, zero window.
-- [ ] **T3. Keep-verbatim compaction.** `compactRun(ctx, client, history,
+- [x] **T3. Keep-verbatim compaction.** `compactRun(ctx, client, history,
       runStart int)` summarizes `history` with the automatic focus and
       returns `[summary developer msg] + user messages in history[runStart:]
       + developer continuation note` ("Work already done in this run is in
@@ -31,7 +40,7 @@ Fixed values, defined once in `internal/agent`:
       *Verify:* unit test with a fake model: request body carries the full
       history + instruction + focus; the replacement order is exact; the
       input slice is untouched.
-- [ ] **T4. Wire into `RunTurnWithOptions`.** After the `context` estimate,
+- [x] **T4. Wire into `RunTurnWithOptions`.** After the `context` estimate,
       if the predicate fires and the run has not stood down: emit
       `compacting`, call `compactRun`, then
       - success: replace `history`, rebuild `request`, re-estimate, emit
@@ -48,10 +57,10 @@ Fixed values, defined once in `internal/agent`:
 
 ## M2 — Show it and keep the run alive (`internal/tui`)
 
-- [ ] **T5. Pass values in.** `tool_wiring.go` sets `ContextWindow` from
+- [x] **T5. Pass values in.** `tool_wiring.go` sets `ContextWindow` from
       `m.contextWindow` when `m.contextWindowKnown`, and `AutoCompact` from
       config (T8).
-- [ ] **T6. Handle `compacting` / `auto_compacted`.** `compacting` sets the
+- [x] **T6. Handle `compacting` / `auto_compacted`.** `compacting` sets the
       status to `Compacting…` without ending the run. `auto_compacted`
       swaps `m.history`, recalculates context, appends the automatic
       divider entry (spec point 5 wording), persists, marks the turn for
@@ -61,16 +70,16 @@ Fixed values, defined once in `internal/agent`:
       *Verify:* TUI test: a run that triggers, compacts, and finishes; a
       steering prompt queued during compaction is delivered in the same run;
       `finishRun` leaves no stray queued rows.
-- [ ] **T7. Footer.** Add `· compacted` to the turn footer when the run
+- [x] **T7. Footer.** Add `· compacted` to the turn footer when the run
       compacted at least once.
       *Verify:* footer render test.
 
 ## M3 — Opt-out and docs
 
-- [ ] **T8. Config key.** `StoredProviderConfig.AutoCompact *bool`
+- [x] **T8. Config key.** `StoredProviderConfig.AutoCompact *bool`
       (`auto_compact`), nil = on, preserved across saves like `Web`.
       *Verify:* round-trip test; saving a theme keeps `auto_compact: false`.
-- [ ] **T9. Docs.** `docs/usage.md` compaction section and config paragraph;
+- [x] **T9. Docs.** `docs/usage.md` compaction section and config paragraph;
       pointer from `specs/conversation-compaction/spec.md` decision 1.
 - [ ] **T10. CHANGELOG** entry under Unreleased stating what was verified.
 
