@@ -235,6 +235,7 @@ type ui struct {
 	turnEffort       string          // effort level the current user turn runs at; "" is Default
 	turnThoughtBase  int             // reasoning ordinal of the current turn's first block
 	turnToolItems    int             // top-level tool items the current turn opened
+	turnCompacted    bool            // the current user turn compacted automatically (specs/auto-compaction)
 }
 
 // dialogMatches documents the shared selection-dialog filter: a
@@ -515,8 +516,9 @@ func (m *ui) startTurnDisplay(display, prompt string, queued []string) tea.Cmd {
 			// path: the engine has already appended the message to its
 			// history, so the UI must account for it before the run ends.
 			// Usage events too: a cancel must not lose a request that
-			// already completed and was billed.
-			if ev.Kind == "done" || ev.Kind == "error" || ev.Kind == "tool_result" || ev.Kind == "steer" || ev.Kind == "stream_interrupted" || ev.Kind == "notice" || ev.Kind == "task" || ev.Kind == "task_runtime" || ev.Kind == "tool_checkpoint" || ev.Kind == "usage" {
+			// already completed and was billed. An automatic compaction
+			// replaced the engine's history and carries billed usage.
+			if ev.Kind == "done" || ev.Kind == "error" || ev.Kind == "tool_result" || ev.Kind == "steer" || ev.Kind == "stream_interrupted" || ev.Kind == "notice" || ev.Kind == "task" || ev.Kind == "task_runtime" || ev.Kind == "tool_checkpoint" || ev.Kind == "usage" || ev.Kind == "auto_compacted" {
 				select {
 				case events <- ev:
 				case <-abandon:
@@ -734,6 +736,10 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		// A finished compaction holds any queue for an explicit Enter.
 		m.steer, m.steerNow, m.steering = nil, nil, false
 		return nil
+	case "compacting":
+		return m.beginAutoCompaction()
+	case "auto_compacted":
+		return m.applyAutoCompaction(v)
 	case "done", "error":
 		if cmd := m.finishRun(v); cmd != nil {
 			m.layoutWidth = 0

@@ -37,7 +37,7 @@ Every file edit and every risky shell command is shown to you as an exact diff o
 | **MCP servers** | Use stdio MCP servers with a Claude Desktop–style `mcp.json`. Each server needs your approval the first time it is used. |
 | **Web tools (opt-in)** | `web_fetch` for public HTTPS pages and `web_search` (keyless DuckDuckGo, or Brave, Tavily, or Exa with a key), each needing consent before first use. |
 | **Skills** | Global Markdown instruction files that you load into a turn with `/skill <name>`. |
-| **Resumable sessions** | Local SQLite history per repository, auto-generated session names, and `/compact` to summarize long conversations. |
+| **Resumable sessions** | Local SQLite history per repository, auto-generated session names, `/compact` to summarize long conversations, and automatic compaction near the context limit. |
 | **Spend and context tracking** | The status line shows context usage, tokens, and session spend from provider-reported costs or a bundled price catalog. It never guesses a price for an unknown model. |
 | **A polished TUI** | Markdown and syntax-highlighted answers, inline diffs, collapsible reasoning, smooth scrolling, built-in copy, 22 themes, and Nerd Font or plain-ASCII glyph modes. |
 
