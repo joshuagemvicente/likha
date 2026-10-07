@@ -1,13 +1,16 @@
 // Package mcp connects Likha to user-configured Model Context Protocol (MCP)
-// servers over stdio. Likha launches each server as a child process, performs
-// the MCP initialize handshake, exposes the server's tools to the agent loop,
-// and calls them on demand. Likha hosts no servers of its own: every server
-// comes from the user's mcp.json and its processes are killed on exit.
+// servers over stdio or Streamable HTTP. Likha launches each stdio server as
+// a child process or connects to an HTTP server's URL, performs the MCP
+// initialize handshake, exposes the server's tools to the agent loop, and
+// calls them on demand. Likha hosts no servers of its own: every server comes
+// from the user's mcp.json; processes are killed and HTTP sessions ended on
+// exit.
 package mcp
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -33,12 +36,13 @@ var CallTimeout = 60 * time.Second
 // Client manages one connected MCP server. The transport carries its
 // JSON-RPC messages; Client owns request IDs, the handshake and tool calls.
 type Client struct {
-	name   string
-	conn   transport
-	mu     sync.Mutex
-	nextID int
-	Tools  []Tool
-	closed bool
+	name      string
+	userAgent string
+	conn      transport
+	mu        sync.Mutex
+	nextID    int
+	Tools     []Tool
+	closed    bool
 }
 
 // transport carries JSON-RPC messages to one server. call sends a request
@@ -72,25 +76,46 @@ type rpcResponse struct {
 // Start connects to the server and performs the MCP handshake:
 // initialize → notifications/initialized → tools/list.
 func Start(name string, cfg ServerConfig, userAgent string) (*Client, error) {
-	conn, err := startStdio(name, cfg, userAgent)
+	var conn transport
+	var err error
+	if cfg.Remote() {
+		conn, err = startHTTP(name, cfg, userAgent)
+	} else {
+		conn, err = startStdio(name, cfg, userAgent)
+	}
 	if err != nil {
 		return nil, err
 	}
-	c := &Client{name: name, conn: conn}
-	if err := c.handshake(userAgent); err != nil {
+	c := &Client{name: name, conn: conn, userAgent: userAgent}
+	if err := c.handshake(); err != nil {
 		c.Close()
 		return nil, err
 	}
 	return c, nil
 }
 
-func (c *Client) handshake(userAgent string) error {
+func (c *Client) handshake() error {
 	ctx, cancel := context.WithTimeout(context.Background(), CallTimeout)
 	defer cancel()
+	if err := c.initialize(ctx); err != nil {
+		return err
+	}
+	var list struct {
+		Tools []Tool `json:"tools"`
+	}
+	if _, err := c.request(ctx, "tools/list", nil, &list); err != nil {
+		return fmt.Errorf("mcp %s: tools/list: %w", c.name, err)
+	}
+	c.Tools = list.Tools
+	return nil
+}
+
+// initialize negotiates the protocol version and opens the server session.
+func (c *Client) initialize(ctx context.Context) error {
 	params := map[string]any{
 		"protocolVersion": protocolVersion,
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "likha", "version": strings.TrimPrefix(userAgent, "likha/")},
+		"clientInfo":      map[string]any{"name": "likha", "version": strings.TrimPrefix(c.userAgent, "likha/")},
 	}
 	var result struct {
 		ProtocolVersion string `json:"protocolVersion"`
@@ -107,14 +132,15 @@ func (c *Client) handshake(userAgent string) error {
 	if err := c.notify(ctx, "notifications/initialized", nil); err != nil {
 		return fmt.Errorf("mcp %s: initialized notification: %w", c.name, err)
 	}
-	var list struct {
-		Tools []Tool `json:"tools"`
-	}
-	if _, err := c.request(ctx, "tools/list", nil, &list); err != nil {
-		return fmt.Errorf("mcp %s: tools/list: %w", c.name, err)
-	}
-	c.Tools = list.Tools
 	return nil
+}
+
+// restartSession opens a new server session after the old one expired. The
+// tool list is not refreshed: a changed list is picked up on relaunch.
+func (c *Client) restartSession() error {
+	ctx, cancel := context.WithTimeout(context.Background(), CallTimeout)
+	defer cancel()
+	return c.initialize(ctx)
 }
 
 // request sends a JSON-RPC request and waits for its matching response,
@@ -135,6 +161,13 @@ func (c *Client) request(ctx context.Context, method string, params any, result 
 		return rpcResponse{}, err
 	}
 	reply, err := c.conn.call(ctx, id, payload)
+	var expired *sessionExpiredError
+	if errors.As(err, &expired) && expired.restart {
+		// The failed call is never resent: it may already have had effects.
+		if restartErr := c.restartSession(); restartErr != nil {
+			return reply, fmt.Errorf("%w; starting a new session failed: %v", err, restartErr)
+		}
+	}
 	if err != nil {
 		return reply, err
 	}

@@ -119,3 +119,39 @@ choices the interview did not cover. The ones most worth a second look:
 the 404 session-expiry behavior (fail the call rather than resend), the
 review origin line, and refusing `args`/`env` on HTTP entries rather than
 ignoring them.
+
+## Implementation notes (2026-10-07)
+
+Implemented (local) on branch `impl/mcp-http`: `internal/mcp/config.go`
+(entry shape, validation, `${NAME}` expansion), `internal/mcp/mcp.go`
+(transport seam, session restart), `internal/mcp/stdio_transport.go`
+(unchanged stdio behavior, moved), `internal/mcp/http_transport.go`
+(Streamable HTTP), `internal/mcp/manager.go` (`/mcp`, `Origin`), and the
+review origin line in `internal/agent/tool_registry.go`. Tests:
+`internal/mcp/http_transport_test.go`, `internal/agent/mcp_http_test.go`,
+`internal/tui/mcp_http_test.go`.
+
+Deviations from the drafting defaults, each chosen to keep existing
+configs working or to keep secrets safer:
+
+- **`type` is checked only on `url` entries.** A stdio entry's `type` (and
+  any `headers`) stays ignored, as before this feature, so pasted Claude
+  Code entries with `"type": "stdio"` keep loading.
+- **Redaction runs before the 2 KiB cut**, not after, so a cut never leaves
+  part of a secret behind.
+- **Redaction scope.** Every configured header value (literal or
+  substituted) is redacted, plus each whitespace-separated part of 8 bytes
+  or more (a server may echo the token without `Bearer`). Values shorter
+  than 4 bytes are not redacted: they are not secret-shaped and replacing
+  them would mangle ordinary text. A tool result is redacted too; if the
+  redacted result is no longer valid JSON, the call fails instead of
+  returning the unredacted text.
+- **Wording.** A failed HTTP server reads `failed (…)` in `/mcp`; stdio
+  servers keep `crashed (…)`, and the status-line suffix stays `crashed`
+  for both. A connection that drops mid-call reads `the connection
+  dropped`, distinct from `could not connect`.
+- **Cancellation notice is HTTP-only.** `notifications/cancelled` is sent
+  for HTTP calls (in the background, bounded by 2 s, awaited by `Close`);
+  stdio cancellation behaves exactly as before.
+
+Not verified: no real remote MCP server (T16) and no real-TUI walkthrough.

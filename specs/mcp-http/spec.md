@@ -1,7 +1,12 @@
 # Feature: MCP over HTTP (Streamable HTTP servers in `mcp.json`)
 
-**Status:** planned — decisions recorded 2026-10-07 (user interview); no
-implementation started. Requirement: [v1-spec FR-46](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
+**Status:** implemented (local) 2026-10-07 — automated suite green against
+local `httptest` fake servers (JSON and SSE responses, session ID and
+expiry, redirects, TLS, 401/403, HTML, oversize, cancellation, exit,
+header redaction); drafting defaults adopted as written except the
+deviations recorded in [context.md](context.md#implementation-notes-2026-10-07).
+No real remote MCP server has been tried (tasks T16), and there is no
+real-TUI walkthrough. Requirement: [v1-spec FR-46](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
 Refines [mcp-support](../mcp-support/spec.md) (FR-16) and
 [approve-always](../approve-always/spec.md); never contradicts them.
 

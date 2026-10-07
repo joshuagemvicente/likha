@@ -407,7 +407,11 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 			Definition: item.Definition, Source: tools.Source{Kind: "mcp", Server: item.SourceServer, Tool: item.OriginalName}, Effects: []tools.Effect{tools.Write, tools.Exec, tools.Network}, Target: "external", Interactive: true, Aliases: item.Aliases,
 			Authorize: func(ctx context.Context, input json.RawMessage) error {
 				return servers.AuthorizeTool(ctx, item.SourceServer, item.OriginalName, string(input), func(server, tool, arguments string) mcp.Decision {
-					body := fmt.Sprintf("MCP server: %s\nTool: %s\nArguments: %s\n\n\"Approve\" runs this call only. \"Approve always\" trusts this server's tools for the rest of this session. MCP servers run with your permissions; local cancellation may not stop server work.", server, tool, arguments)
+					remote := ""
+					if origin := servers.Origin(server); origin != "" {
+						remote = fmt.Sprintf("Remote MCP server: %s (the arguments are sent over the network)\n", origin)
+					}
+					body := fmt.Sprintf("MCP server: %s\n%sTool: %s\nArguments: %s\n\n\"Approve\" runs this call only. \"Approve always\" trusts this server's tools for the rest of this session. MCP servers run with your permissions; local cancellation may not stop server work.", server, remote, tool, arguments)
 					request := &ApprovalRequest{Kind: "mcp", Title: "MCP tool", Body: body, Remember: RememberServer}
 					approved, err := awaitApproval(ctx, request, emit)
 					switch {
