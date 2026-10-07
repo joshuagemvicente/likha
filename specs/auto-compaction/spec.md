@@ -1,7 +1,11 @@
 # Feature: Automatic compaction (compact before the context window fills)
 
-**Status:** planned — decisions recorded 2026-10-07 (user interview); no
-implementation started. Requirement: [v1-spec FR-42](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
+**Status:** implemented (local) 2026-10-07 — decisions recorded 2026-10-07
+(user interview); drafting defaults D1–D10 implemented as written.
+Verified by automated checks only (`go test ./...`, `go vet ./...`,
+`gofmt`, `-race` on agent, tui, transcript and providers) against local
+test providers; no real-terminal walkthrough (tasks W1) and no live
+provider. Requirement: [v1-spec FR-42](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
 Refines [conversation-compaction](../conversation-compaction/spec.md)
 (replaces its resolved decision 1, "manual-only in v1") and builds on
 [context-tracker](../context-tracker/spec.md) (FR-23).
