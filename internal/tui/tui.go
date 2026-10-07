@@ -217,6 +217,9 @@ type ui struct {
 	// editDiffNext collects the ones the layout in progress uses (nil
 	// outside rebuild).
 	approvedEdits map[string]string
+	// undo is the /undo review open in the pending review slot
+	// (specs/edit-undo); nil when the pending review is an agent request.
+	undo          *undoReview
 	editDiffCache map[editDiffKey]transcript.DiffSummary
 	editDiffNext  map[editDiffKey]transcript.DiffSummary
 
@@ -1711,7 +1714,18 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "right", "tab":
 				m.moveReviewFocus(1)
 				return m, nil
+			case "esc":
+				// An /undo review has no run to cancel: Esc is Cancel.
+				// Agent reviews keep Esc's cancel-run meaning below.
+				if m.undo != nil {
+					m.cancelUndo()
+					return m, nil
+				}
 			case "enter":
+				if m.undo != nil {
+					m.confirmUndo()
+					return m, nil
+				}
 				if m.reviewFocus == focusApprove || m.reviewFocus == focusRemember && m.pending.Remember != "" {
 					if m.width < minWidth || m.height < minHeight {
 						return m, nil

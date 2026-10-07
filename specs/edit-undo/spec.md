@@ -1,7 +1,9 @@
 # Feature: Undo Likha's edits (`/undo`)
 
-**Status:** planned — decisions recorded 2026-10-07 (user interview); no
-implementation started. Requirement: [v1-spec FR-43](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
+**Status:** implemented (local) 2026-10-07 — automated checks only
+(`go test ./...`, `go vet ./...`, `gofmt`, `-race` on the touched
+packages); real-terminal walkthrough (tasks W1) outstanding. Drafting
+defaults D1–D11 were adopted as written. Requirement: [v1-spec FR-43](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
 
 ## Context
 

@@ -105,6 +105,8 @@ func (m *ui) statusHints(page, pages int, narrow bool) []string {
 			kind = m.reviewMark("Command review")
 		} else if m.pending.Kind == "mcp" {
 			kind = m.reviewMark("MCP review")
+		} else if m.pending.Kind == undoReviewKind {
+			kind = m.reviewMark("Undo review")
 		}
 		return []string{kind + " · " + position + " · " + controls, "Review " + position + " " + compact}
 	}

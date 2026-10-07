@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -55,18 +56,10 @@ func (m *ui) toolRunOptions(runID uint64) agent.RunOptions {
 			return store.SavePlan(sessionID, session.Plan{Steps: steps, UpdatedAt: time.Now().UTC()})
 		}
 		options.EditJournal = func(proposal *actions.EditProposal) error {
-			journalID := ""
-			return proposal.SetJournal(func(progress actions.EditProgress) error {
-				data, err := json.Marshal(progress)
-				if err != nil {
-					return err
-				}
-				id, err := store.RecordEditProgress(sessionID, journalID, data)
-				if err == nil {
-					journalID = id
-				}
-				return err
-			})
+			return proposal.SetJournal(privateEditJournal(store, sessionID))
+		}
+		options.RecordChangeSet = func(toolCallID string, set actions.ChangeSet) error {
+			return saveChangeSet(store, sessionID, toolCallID, set)
 		}
 	}
 	// The ask broker blocks the tool handler, never the UI loop: the reply
@@ -107,6 +100,39 @@ func (m *ui) toolRunOptions(runID uint64) agent.RunOptions {
 		}
 	}
 	return options
+}
+
+// privateEditJournal persists one apply's progress records into a single
+// session-owned edit_journal row, created on the first record.
+func privateEditJournal(store *session.Store, sessionID string) func(actions.EditProgress) error {
+	journalID := ""
+	return func(progress actions.EditProgress) error {
+		data, err := json.Marshal(progress)
+		if err != nil {
+			return err
+		}
+		id, err := store.RecordEditProgress(sessionID, journalID, data)
+		if err == nil {
+			journalID = id
+		}
+		return err
+	}
+}
+
+// saveChangeSet keeps an applied edit's change set in the session's undo
+// history (specs/edit-undo).
+func saveChangeSet(store *session.Store, sessionID, toolCallID string, set actions.ChangeSet) error {
+	data, err := json.Marshal(set)
+	if err != nil {
+		return fmt.Errorf("encode change set: %w", err)
+	}
+	if _, err := store.SaveChangeSet(sessionID, toolCallID, data); err != nil {
+		if errors.Is(err, session.ErrChangeSetTooLarge) {
+			return fmt.Errorf("%w: %w", agent.ErrChangeSetTooLarge, err)
+		}
+		return err
+	}
+	return nil
 }
 
 // askBroker pairs one ask_user call with a single UI reply. Send delivery is

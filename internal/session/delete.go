@@ -15,8 +15,9 @@ var (
 )
 
 // Delete removes one session owned by this store's repository. Its plans,
-// task_records and edit_journal rows go with it through ON DELETE CASCADE in
-// the same transaction. Retained tool output lives outside the database; the
+// task_records, edit_journal and undo history (edit_changesets,
+// edit_changeset_drops) rows go with it through ON DELETE CASCADE in the
+// same transaction. Retained tool output lives outside the database; the
 // caller removes it separately (tooloutput.RemoveSession).
 func (s *Store) Delete(id string) error {
 	if !validID(id) {
