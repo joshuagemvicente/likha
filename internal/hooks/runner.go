@@ -311,7 +311,7 @@ func readDecision(hook Hook, out string) hookResult {
 	switch strings.ToLower(strings.TrimSpace(d.Decision)) {
 	case "":
 		return hookResult{}
-	case "block", "deny":
+	case "block":
 		return hookResult{block: true, reason: boundReason(d.Reason, "no reason given")}
 	default:
 		return hookResult{warning: fmt.Sprintf("Hook %q returned decision %q; hooks cannot approve, so it counts as no objection and every usual review still applies.", hook.Name, d.Decision)}

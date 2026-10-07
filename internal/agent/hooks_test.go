@@ -19,6 +19,7 @@ import (
 	"likha/internal/explore"
 	"likha/internal/hooks"
 	"likha/internal/model"
+	"likha/internal/profiles"
 	"likha/internal/repository"
 	"likha/internal/tools"
 )
@@ -321,6 +322,14 @@ func TestAllSteeringBlockedEndsRunWithoutRequest(t *testing.T) {
 }
 
 func TestExploreChildReadBlockedAndNamed(t *testing.T) {
+	for _, agentName := range []string{"explore", "review"} {
+		t.Run(agentName, func(t *testing.T) { childReadBlocked(t, agentName) })
+	}
+}
+
+// childReadBlocked runs one child (explore, or a profile task) whose read of
+// .env a pre_tool hook blocks, and checks the payload names that child.
+func childReadBlocked(t *testing.T, agentName string) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("TOKEN=x\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -345,16 +354,21 @@ func TestExploreChildReadBlockedAndNamed(t *testing.T) {
 		defer mu.Unlock()
 		emitted = append(emitted, ev)
 	})
-	scope := tools.Scope{Agent: "explore", Allowed: map[string]bool{"read": true}}
-	manager, err := explore.New(context.Background(), explore.Config{
+	scope := tools.Scope{Agent: agentName, Allowed: map[string]bool{"read": true}}
+	config := explore.Config{
 		Root: repo.Root(), Provider: "local", Model: client.Model(), Scope: scope,
 		Runner: ExploreRunner(client, repo, nil, scope, nil, gate),
-	})
+	}
+	if agentName != "explore" {
+		profile := profiles.Profile{Name: agentName, Description: "reviews", Origin: "global"}
+		config.Runners = map[string]explore.Runner{agentName: ProfileRunner(client, repo, nil, scope, nil, profile, "Review the code.", gate)}
+	}
+	manager, err := explore.New(context.Background(), config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer manager.Wait()
-	outcome, err := manager.Spawn(context.Background(), "", "call_1", explore.Spec{Agent: "explore", Description: "look", Prompt: "read the env"})
+	outcome, err := manager.Spawn(context.Background(), "", "call_1", explore.Spec{Agent: agentName, Description: "look", Prompt: "read the env"})
 	if err != nil || outcome.Status != explore.Completed {
 		t.Fatalf("spawn: %v %+v", err, outcome)
 	}
@@ -372,7 +386,7 @@ func TestExploreChildReadBlockedAndNamed(t *testing.T) {
 	if err := json.Unmarshal(data, &ev); err != nil {
 		t.Fatal(err)
 	}
-	if ev.Agent != "explore" || ev.SessionID != "s1" || ev.Tool.Name != "read" {
+	if ev.Agent != agentName || ev.SessionID != "s1" || ev.Tool.Name != "read" {
 		t.Fatalf("child payload = %+v", ev)
 	}
 }
