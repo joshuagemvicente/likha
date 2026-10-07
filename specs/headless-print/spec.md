@@ -1,7 +1,10 @@
 # Feature: Headless print mode (`likha -p`)
 
-**Status:** planned — decisions recorded 2026-10-07 (user interview); no
-implementation started. Requirement: [v1-spec FR-44](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
+**Status:** implemented (local) 2026-10-07 — automated suite green
+(unit, app, TUI-resume and `tests/integration` tests against local
+`httptest` providers; headless probe of the built binary against local
+fakes only). Drafting defaults D1–D10 adopted as written. Outstanding: a
+user-run live probe on a real provider (tasks T13). Requirement: [v1-spec FR-44](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
 
 ## Context
 

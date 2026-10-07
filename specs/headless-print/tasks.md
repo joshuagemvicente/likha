@@ -1,5 +1,23 @@
 # Tasks: Headless print mode
 
+**Progress (2026-10-07):** T1–T12 implemented (local); T12's
+`CHANGELOG.md` entry is added when the branch merges. T13 (user-run live
+probe) is outstanding. Commits: `refactor(effortprobe)` (T8's scrubber moved
+to `internal/redact`), `refactor(tui)` (T3, `internal/runsetup`),
+`feat(agent)` (T1–T2), `feat(app)` (T4–T11), `docs`. Notes from
+implementation:
+
+- T1: the refusal is `agent.NoReviewerError` returned by a shared
+  `review` helper at the three review sites; the message reads
+  `refused (<kind> needs review): no reviewer is present in headless mode,
+  so … .` An MCP refusal reaches the model through the registry's generic
+  authorization message (as an MCP decline always has); headless never
+  starts MCP servers, so no headless run hits that path.
+- T4: signal handling lives in `internal/app` (`interruptContext`); the
+  driver only reads the cancellation cause.
+- T11: integration tests run a binary built once in `TestMain`, because
+  `go run` reports every child exit status as 1.
+
 Ordered implementation tasks. Behavior wording lives in [spec.md](spec.md);
 code paths in [context.md](context.md). Each milestone leaves `go test ./...`
 and `go vet ./...` green. Nothing user-visible ships before M3; M1 and M2
@@ -17,7 +35,7 @@ Fixed values (spec decisions and drafting defaults):
 
 ## M1 — Refuse instead of asking (`internal/agent`)
 
-- [ ] **T1. `RunOptions.NoReviewer`.** Add a string field (empty = a person
+- [x] **T1. `RunOptions.NoReviewer`.** Add a string field (empty = a person
       can review) holding the refusal reason, e.g. "no reviewer is present
       in headless mode". Thread it to `awaitApproval` (via the registry's
       options) so that, when set, no `approval` event is emitted and a typed
@@ -25,7 +43,7 @@ Fixed values (spec decisions and drafting defaults):
       it to a refused tool result, never to "rejected by user" (FR-09).
       *Verify:* table test over the three approval sites: no event emitted,
       result status refused, file unchanged, command not run.
-- [ ] **T2. Refusal wording.** Edit refusals tell the model to describe the
+- [x] **T2. Refusal wording.** Edit refusals tell the model to describe the
       change in its answer; command refusals name the tier
       (ask / always-ask / untrusted check) and that the user can run it;
       MCP refusals name the server. Auto paths (read-only, trusted check)
@@ -36,7 +54,7 @@ Fixed values (spec decisions and drafting defaults):
 
 ## M2 — Shared run assembly (behavior-preserving refactor)
 
-- [ ] **T3. Extract non-UI run options.** Move the parts of
+- [x] **T3. Extract non-UI run options.** Move the parts of
       `tui.toolRunOptions` that do not touch UI state (outputs store,
       `SaveTask`, `PlanApply`, `EditJournal`, skill catalog, task profiles,
       command trust hooks) into a package both `tui` and `headless` can
@@ -47,30 +65,30 @@ Fixed values (spec decisions and drafting defaults):
 
 ## M3 — Headless driver (`internal/headless`)
 
-- [ ] **T4. Driver.** `Run(ctx, Config, stdout, stderr) int` builds
+- [x] **T4. Driver.** `Run(ctx, Config, stdout, stderr) int` builds
       `RunOptions` from T3 with `NoReviewer` set, `Ask`/`WebSearch`/
       `WebFetch` nil, `servers` nil, `steer` nil, then calls
       `agent.RunTurnWithOptions`. Context carries `--max-time` and signal
       cancellation (SIGINT/SIGTERM; a second signal exits at once).
       *Verify:* unit test with a fake `model.Client` endpoint (`httptest`)
       covering completed, failed, cancelled, time limit.
-- [ ] **T5. Text renderer.** stderr progress lines (start, tool start and
+- [x] **T5. Text renderer.** stderr progress lines (start, tool start and
       outcome, refusals, notices, summary); stdout gets only the final
       assistant text from `done.History`, written once. No ANSI codes.
       *Verify:* golden stderr/stdout for a run with one read, one refused
       edit and a final answer.
-- [ ] **T6. JSON renderer.** Map `TurnEvent` kinds to the spec's event types;
+- [x] **T6. JSON renderer.** Map `TurnEvent` kinds to the spec's event types;
       exactly one `result` last, also on failure/cancel/timeout; bounded
       fields; `encoding/json` per line with flush.
       *Verify:* decode every line; first is `start` with `schema: 1`, last is
       `result`; refused edit appears as `tool_result` `status: refused`.
-- [ ] **T7. Session persistence.** Create or load the session, title from the
+- [x] **T7. Session persistence.** Create or load the session, title from the
       prompt's first line (no naming request), save `History` plus plain
       entries renderable by the TUI, save on every ending. Save failure →
       exit 1 with a visible error.
       *Verify:* `store.List` shows the session; TUI `--resume` model renders
       it (tui test loading the saved snapshot).
-- [ ] **T8. Redaction.** Pass every printed error and `error` field through
+- [x] **T8. Redaction.** Pass every printed error and `error` field through
       the credential scrubber (move `effortprobe.Redact` to a shared package
       if needed, as its own refactor commit).
       *Verify:* fake provider echoing the key in a 400 body; neither stream
@@ -78,13 +96,13 @@ Fixed values (spec decisions and drafting defaults):
 
 ## M4 — CLI wiring (`internal/app`)
 
-- [ ] **T9. Flags.** `-p`, `--json`, `--max-time`; `-p -` reads stdin
+- [x] **T9. Flags.** `-p`, `--json`, `--max-time`; `-p -` reads stdin
       (256 KiB cap). Combination errors (D5), empty prompt, leading `/` →
       exit 2 before any request. Branch before the interactive-terminal
       check and before `mcp.NewMcpManager`; print the one-line MCP note when
       servers are configured.
       *Verify:* app tests for each usage error; no request reaches the fake.
-- [ ] **T10. Startup.** Reuse provider/model/key resolution; no setup
+- [x] **T10. Startup.** Reuse provider/model/key resolution; no setup
       (exit 2); ChatGPT login needed → exit 2 with the `--login` hint;
       failed connection check → exit 1; stored effort applied (D6); OpenCode
       session header set.
@@ -92,12 +110,12 @@ Fixed values (spec decisions and drafting defaults):
 
 ## M5 — End-to-end and docs
 
-- [ ] **T11. Integration tests** (`tests/integration/headless_test.go`):
+- [x] **T11. Integration tests** (`tests/integration/headless_test.go`):
       `go run ./cmd/likha -p …` against an `httptest` provider, no TTY:
       completed run, refused edit (file unchanged), read-only command,
       refused command, `--json` parse, SIGINT → 130, `--max-time` → 1,
       unconfigured state dir → 2, `--resume` continuation.
-- [ ] **T12. Docs.** `--help` text (drop "needs an interactive terminal",
+- [x] **T12. Docs.** `--help` text (drop "needs an interactive terminal",
       add the three flags), `docs/usage.md` "Headless runs" section with the
       event table and exit codes, `README.md` pointer, `CHANGELOG.md`
       Unreleased entry stating what was verified.

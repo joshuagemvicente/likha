@@ -149,6 +149,14 @@ func TestHeadlessWithoutProviderExitsTwo(t *testing.T) {
 	}
 }
 
+func TestHeadlessChatGPTWithoutSignInExitsTwo(t *testing.T) {
+	headlessEnv(t)
+	code, stdout, stderr := runApp("--provider", "chatgpt", "-p", "hi", t.TempDir())
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "likha --provider chatgpt --login") {
+		t.Fatalf("exit = %d stdout = %q stderr = %q", code, stdout, stderr)
+	}
+}
+
 func TestHeadlessConnectionFailureExitsOneRedacted(t *testing.T) {
 	headlessEnv(t)
 	fake := newHeadlessProvider(t, http.StatusUnauthorized)

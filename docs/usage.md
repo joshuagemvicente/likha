@@ -123,6 +123,34 @@ Reasoning models accept an effort level that trades speed and tokens for deeper 
 
 The provider and model must come from these flags or `LIKHA_PROVIDER`/`LIKHA_MODEL`; the provider stored by first-run setup is never probed. `--api-key` works as usual but is never stored by a probe. `--endpoint` (or `LIKHA_ENDPOINT`) may point the named provider elsewhere, and the result is then labelled `endpoint override`; nothing is sent there before you confirm, so the levels come from the bundled catalog or `--probe-levels`. `claude` refuses `--endpoint`, since only its own endpoint speaks the native Messages API that carries effort, and refuses `--probe-wire`, since it has one shape. Exit codes: 0 when the probe ran to the end and wrote its report, 1 when you declined, Default failed, the provider rejected the credentials, the report could not be written, or the results could not be printed (the report is still saved and its path printed to stderr), 2 for a usage error (nothing was sent), and 130 for Ctrl+C.
 
+## Headless runs (`-p`)
+
+`likha -p "PROMPT" [repository]` runs one prompt without the TUI and exits. It works without a terminal, so scripts, CI jobs and editor tasks can use it. `likha -p - [repository]` reads the prompt from stdin instead (UTF-8, at most 256 KiB). The provider, model, key and stored effort level resolve as they do for an interactive launch; first-run setup and ChatGPT browser sign-in never start, so set those up interactively first.
+
+Nothing asks for a decision. Reads, `read_output`, `plan_update`, explore children, read-only commands and verification checks you already trusted in the TUI (while their scripts are unchanged) run as usual. Everything that would open a review or a question is refused without running: `edit` and `edit_file` proposals (nothing is written; the model is asked to describe the change in its answer instead), commands that would ask, `ask_user`, web search and fetch, and MCP tools. Configured MCP servers are not started, because MCP trust is per session and a headless run can never grant it. The model gets each refusal as a refused result saying no reviewer is present in headless mode, never as success or as your rejection, and may finish the run. No flag approves actions headlessly.
+
+Output:
+
+- **Text (default):** stdout gets only the final answer, written once when the run completes. stderr gets plain progress lines (no color): the repository, provider, model, effort and session at the start, one line per tool call with its outcome (`ok`, `auto-approved (…)`, `refused: …`, `error: …`), notes, and a summary with the status, session ID, requests, tool calls, refusals, tokens, and spend when the price is known. Reasoning is not printed.
+- **`--json`:** stdout carries only JSON Lines, one event per line, as the run happens; stderr stays empty after startup.
+
+| Event | Fields |
+| --- | --- |
+| `start` | `schema` (1), `session_id`, `repository`, `provider`, `model`, `effort` |
+| `text` | `delta` of answer text |
+| `reasoning` | `delta` of display reasoning |
+| `tool_start` | `call_id`, `name`, `arguments` (at most 4 KiB) |
+| `tool_result` | `call_id`, `name`, `status` (`ok`, `error`, `refused`, `cancelled`), `auto_approved` when a reason applied, `content` (at most 4 KiB) |
+| `notice` | `text` |
+| `usage` | `prompt_tokens`, `completion_tokens`, `reasoning_tokens`, `cached_tokens`, `cost` when known |
+| `result` | `status` (`completed`, `failed`, `cancelled`, `time_limit`), `text` (the answer), `session_id`, `requests`, `tool_calls`, `refusals`, token totals, `cost` when known, `error` when the run did not complete |
+
+Exactly one `result` event ends every run that started, and it is the last line. Later schema versions may add fields; existing fields keep their meaning while `schema` stays 1.
+
+Exit codes: 0 the run completed (refusals included), 1 the run failed (provider or connection error, time limit, session not saved, output not written), 2 a usage or setup error before any prompt was sent, 130 interrupted. Ctrl+C (SIGINT) or SIGTERM cancels the run like Esc and saves the session; a second signal exits at once. `--max-time DURATION` bounds the whole run (default `30m`, `0` for none); until automatic model recovery lands, it is also what stops a provider that stops sending data.
+
+Each run is saved as an ordinary session, titled from the prompt's first line. Open it later with `likha --resume ID`, or continue it headlessly with `likha --resume ID -p "next prompt"`. `-p` combines with `--provider`, `--model`, `--api-key`, `--endpoint`, `--resume`, `--json`, `--max-time` and the repository path; `--theme`, `--nerd-fonts`, `--ascii` and `--debug-models` are accepted and have no effect. It cannot be combined with `--sessions`, `--login` or `--probe-effort`, and `--json` or `--max-time` without `-p` is a usage error. Slash commands are interactive only: a prompt starting with `/` is refused. No output contains your API key or sign-in tokens.
+
 ## Conversation compaction (`/compact`)
 
 Long sessions resend their entire history to the provider every turn, and eventually that exceeds the model's context window. `/compact` is the escape hatch: Likha makes **one** summarize model call over the conversation so far — preserving your goal, the decisions made, files changed and how, pending next steps, and open questions — and replaces the summarized turns with that brief, so the task continues without the transcript. Anything after `/compact` (for example `/compact focus on the approval flow refactor`) steers what the summary emphasizes without being stored as conversation content.

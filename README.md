@@ -121,9 +121,10 @@ For API-key providers, Likha looks for a key in this order: `--api-key`, `LIKHA_
 likha [options] [repository]       # repository defaults to the current directory
 likha --sessions [repository]      # list saved sessions (no model needed)
 likha --resume ID [repository]     # resume one
+likha -p "PROMPT" [repository]     # one headless run: answer on stdout, nothing prompts
 ```
 
-Put options before the repository path. `likha --help` lists every option, provider, and environment variable.
+Put options before the repository path. Headless runs (`-p`, `--json` events, exit codes) are described in [docs/usage.md](docs/usage.md#headless-runs--p). `likha --help` lists every option, provider, and environment variable.
 
 ### Keys
 
