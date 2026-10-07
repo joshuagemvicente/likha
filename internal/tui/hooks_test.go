@@ -314,7 +314,7 @@ func TestObserveHooksRunOffTheUIAndReportFailures(t *testing.T) {
 		cmds = append(cmds, m.runEndHooks(agent.TurnEvent{Kind: state.kind, Text: state.text}))
 	}
 	m.cancelling = false
-	cmds = append(cmds, m.attentionMoment(attentionReview), m.fireSessionStart(true))
+	cmds = append(cmds, m.attentionMoment(hookAttentionReview), m.fireSessionStart(true))
 	_, observeCmd := m.Update(agent.TurnEvent{Kind: "hook_observe", Hook: &hooks.Event{Event: hooks.PostTool, SessionID: "sess-9", Repository: root, Agent: "main", Tool: &hooks.ToolCall{Name: "read"}, Result: &hooks.ToolResult{Status: "succeeded"}}})
 	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
 		t.Fatalf("firing observe hooks blocked the UI for %s", elapsed)

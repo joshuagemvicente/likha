@@ -199,6 +199,7 @@ type ui struct {
 	ask                   askState
 	askSequence           uint64 // delivery identity counter under m.events broker
 	consent               consentState
+	attention             attentionState // bell/OSC 9 signals and ask auto-skip (specs/attention-notifications)
 	reportedSkillErrors   string
 	webGrants             map[string]bool   // conversation-scoped web consents
 	commandGrants         *cmdpolicy.Grants // commands approved always for this session; replaced on session switch
@@ -268,6 +269,8 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 		glyphs = likhaui.NerdGlyphs()
 	}
 	m := &ui{root: root, repo: repo, client: client, modelName: name, conn: conn, stateDir: stateDir, store: store, snapshot: snapshot, history: snapshot.History, promptHistory: newPromptHistory(restoredPromptHistory(snapshot)), following: true, caretOn: true, streaming: -1, activity: -1, status: "Connected", mode: modeMain, theme: theme, glyphs: glyphs, blocks: likhaui.BlockGlyphSet(conn.ASCII), themeName: themeName, composerStyle: validComposerStyle(conn.ComposerStyle), statusLineOpts: conn.StatusLine, started: time.Now(), freshSession: len(snapshot.Entries) == 0, commandGrants: &cmdpolicy.Grants{}, editGrant: &agent.EditGrant{}}
+	attention, attentionInvalid := newAttentionState(conn.Attention, conn.AttentionOut, root, insideTmux())
+	m.attention = attention
 	m.restoreTaskRecords()
 	m.restorePlan()
 	m.refreshProfileCatalog()
@@ -298,6 +301,9 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 	// where the compact header line and status line carry identity instead.
 	if m.freshSession {
 		m.entries = append(m.entries, entry{role: "Logo", content: logo})
+	}
+	if attentionInvalid {
+		m.entries = append(m.entries, entry{role: "Likha", content: attentionSkipInvalidNote})
 	}
 	if conn.Setup {
 		m.mode = modeSetup
@@ -516,6 +522,7 @@ func (m *ui) startTurnDisplay(origin, display, prompt string, queued []string) t
 	m.beginTurnFooter()
 	m.status = "Waiting for model"
 	m.working = true
+	m.markRunStarted()
 	m.jumpBottom()
 	m.layoutWidth = 0
 	m.showActivity()
@@ -620,11 +627,11 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 			}
 		})
 		m.markAwaitingAnswer(ask.CallID)
-		return m.attentionMoment(attentionQuestion)
+		return tea.Batch(m.attentionMoment(hookAttentionQuestion), m.armAskTimer())
 	case "consent":
 		m.clearTextSelection()
 		m.openConsent(v.Consent)
-		return m.attentionMoment(attentionReview)
+		return m.attentionMoment(hookAttentionReview)
 	case "context":
 		// Each stream replaces the displayed context state. An unknown
 		// measurement intentionally clears any value from the prior turn.
@@ -677,7 +684,8 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		m.reviewFocus = focusApprove
 		m.markSeenFromScroll()
 		m.status = "Review " + m.pending.Kind + " before approval"
-		return m.attentionMoment(attentionReview)
+		m.signalAttention(attentionApproval)
+		return m.attentionMoment(hookAttentionReview)
 	case "tool_start", "tool_result":
 		m.hideActivity()
 		m.streamBuf.Reset()
@@ -766,6 +774,7 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		m.entries = append(m.entries, entry{role: "Likha", content: "Conversation compacted. Summary of earlier turns:\n\n" + v.Text})
 		m.status = "Ready"
 		m.working = false
+		m.signalRunEnd(false, false)
 		if m.cancel != nil {
 			m.cancel()
 		}
@@ -828,6 +837,7 @@ func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
 		m.recordUnexecutedCalls(v.History)
 	}
 	turnTools, turnCancelled := m.turnToolItems, m.cancelling
+	m.signalRunEnd(v.Kind == "error", m.cancelling)
 	m.liveToolCalls, m.runToolCalls, m.approvalCall = nil, nil, ""
 	m.approvedEdits = nil
 	if m.cancelling {
@@ -1170,6 +1180,7 @@ func (m *ui) reconcileQueue() {
 func (m *ui) startCompaction(focus string) tea.Cmd {
 	m.status = "Compacting…"
 	m.working = true
+	m.markRunStarted()
 	m.turnStarted = time.Time{} // a compaction is not a user turn: no footer
 	m.jumpBottom()
 	m.layoutWidth = 0
@@ -1379,6 +1390,11 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clipboardNoticeExpiredMsg:
 		m.handleClipboardNoticeExpired(v)
 		return m, nil
+	case tea.FocusMsg, tea.BlurMsg:
+		m.handleFocus(v)
+		return m, nil
+	case askTimerMsg:
+		return m, m.handleAskTimer(v)
 	case updateAvailableMsg:
 		if v.version != "" {
 			m.updateVersion = v.version

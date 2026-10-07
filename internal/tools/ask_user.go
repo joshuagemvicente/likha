@@ -88,10 +88,23 @@ func (r AskRequest) Pages() []AskQuestion {
 // is treated as a refusal, never as an empty successful answer. For a
 // questionnaire, Answers holds one entry per question in request order and
 // Text is unused; Skipped=true means the whole questionnaire was skipped.
+// TimedOutMinutes is set with Skipped when the opt-in auto-skip closed the
+// question (specs/attention-notifications): the refusal then says why.
 type AskAnswer struct {
-	Text    string              `json:"text"`
-	Skipped bool                `json:"skipped"`
-	Answers []AskQuestionAnswer `json:"answers,omitempty"`
+	Text            string              `json:"text"`
+	Skipped         bool                `json:"skipped"`
+	Answers         []AskQuestionAnswer `json:"answers,omitempty"`
+	TimedOutMinutes int                 `json:"timed_out_minutes,omitempty"`
+}
+
+// askTimedOutRefusal is the refusal for a question the auto-skip closed. It
+// tells the model no answer arrived in time, so it can continue without one.
+func askTimedOutRefusal(minutes int) string {
+	unit := "minutes"
+	if minutes == 1 {
+		unit = "minute"
+	}
+	return fmt.Sprintf("The question was skipped automatically: no answer within %d %s.", minutes, unit)
 }
 
 // AskQuestionAnswer is the user's response to one questionnaire page. Text is
@@ -178,9 +191,13 @@ func AskUserTool(ask func(context.Context, string, AskRequest) (AskAnswer, error
 			if answer.Skipped {
 				// A skip is an explicit unresolved refusal, never an empty
 				// successful answer, so the parent run can continue.
+				content := "The user skipped the question."
+				if answer.TimedOutMinutes > 0 {
+					content = askTimedOutRefusal(answer.TimedOutMinutes)
+				}
 				return BoundResult(Result{
 					Status: Refused, Source: askUserSource,
-					Content:  "The user skipped the question.",
+					Content:  content,
 					Warnings: warnings,
 				}), nil
 			}
@@ -425,6 +442,9 @@ type askQuestionnaireEntry struct {
 func askQuestionnaireResult(request AskRequest, answer AskAnswer, warnings []string) Result {
 	refuse := func(content string) Result {
 		return BoundResult(Result{Status: Refused, Source: askUserSource, Content: content, Warnings: warnings})
+	}
+	if answer.Skipped && answer.TimedOutMinutes > 0 {
+		return refuse(askTimedOutRefusal(answer.TimedOutMinutes))
 	}
 	if answer.Skipped {
 		return refuse(askQuestionnaireSkipped)

@@ -2,6 +2,8 @@
 
 **Status:** implemented (local) — automated suite green; real-TUI
 walkthrough outstanding.
+Related: [attention-notifications](../attention-notifications/spec.md) (FR-41)
+signals the terminal when a review opens; reviews never close on a timer.
 
 ## Context
 

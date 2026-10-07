@@ -61,6 +61,7 @@ func (m *ui) openConsent(req *agent.ConsentRequest) {
 	m.jumpBottom()
 	m.layoutWidth = 0
 	m.persist()
+	m.signalAttention(attentionApproval)
 }
 
 func (m *ui) closeConsent() {

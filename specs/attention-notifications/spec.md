@@ -1,7 +1,11 @@
 # Feature: Attention notifications (bell, desktop notice, opt-in question auto-skip)
 
-**Status:** planned — decisions recorded 2026-10-07 (user interview); no
-implementation started. Requirement: [v1-spec FR-41](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
+**Status:** implemented (local) 2026-10-07 — decisions recorded 2026-10-07
+(user interview); drafting defaults D1–D9 adopted as written when the user
+asked for implementation. Automated checks only (`go test ./...`,
+`go vet ./...`, `gofmt`, `-race` on app, tui, tools and providers); no
+real-terminal walkthrough yet (W1), so which terminals show OSC 9, and tmux
+passthrough end to end, are unverified. Requirement: [v1-spec FR-41](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
 Refines [ask-user](../ask-user/spec.md) (FR-30) and
 [permission-ui](../permission-ui/spec.md); contradicts neither.
 
@@ -66,7 +70,8 @@ Out of scope:
 
 ## Drafting defaults (confirm in review)
 
-These were chosen while drafting and are not user decisions yet.
+These were chosen while drafting and adopted as written for the 2026-10-07
+implementation; they remain open to review.
 
 - D1. **Both signals are on by default.** A user who never opens
   `config.json` gets them.

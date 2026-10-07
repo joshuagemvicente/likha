@@ -15,9 +15,9 @@ import (
 // Attention kinds for the attention hook event (specs/hooks D1): the moments
 // FR-41 (attention-notifications) signals.
 const (
-	attentionReview   = "review"
-	attentionQuestion = "question"
-	attentionRunEnd   = "run_end"
+	hookAttentionReview   = "review"
+	hookAttentionQuestion = "question"
+	hookAttentionRunEnd   = "run_end"
 )
 
 // hookWarningsMsg carries warnings from hooks fired off the UI goroutine.
@@ -74,10 +74,11 @@ func (m *ui) fireSessionStart(resumed bool) tea.Cmd {
 	return m.fireObserveHook(ev)
 }
 
-// attentionMoment is the one place a moment that needs the user is
-// announced: an approval review or a question opened, or a run finished.
-// It fires the attention hook; FR-41's bell and desktop notification belong
-// here too, so every signal fires from the same moments.
+// attentionMoment fires the attention hook for a moment that needs the user:
+// an approval review or a question opened, or a run finished. FR-41's bell
+// and desktop notification fire at the same moments through signalAttention
+// and signalRunEnd (attention.go), which add their own focus and run-length
+// rules.
 func (m *ui) attentionMoment(kind string) tea.Cmd {
 	ev := m.hookEvent(hooks.Attention)
 	ev.Attention = kind
@@ -102,7 +103,7 @@ func (m *ui) runEndHooks(v agent.TurnEvent) tea.Cmd {
 	if ev.Outcome == "cancelled" {
 		return cmd
 	}
-	return tea.Batch(cmd, m.attentionMoment(attentionRunEnd))
+	return tea.Batch(cmd, m.attentionMoment(hookAttentionRunEnd))
 }
 
 // promptHook returns the prompt_submit check a new run performs on its own
