@@ -387,12 +387,12 @@ func runChildTask(t *testing.T, agentName string, delta replayDelta, content str
 	scope := tools.Scope{Agent: "explore", Allowed: map[string]bool{"read": true}}
 	config := explore.Config{
 		Root: repo.Root(), Provider: delta.provider, Model: client.Model(), Scope: scope,
-		Runner: ExploreRunner(client, repo, nil, scope, nil),
+		Runner: ExploreRunner(client, repo, nil, scope, nil, nil),
 	}
 	if agentName != "explore" {
 		profile := profiles.Profile{Name: agentName, Description: "reviews", Origin: "global"}
 		config.Runners = map[string]explore.Runner{
-			agentName: ProfileRunner(client, repo, nil, scope, nil, profile, "Review the code."),
+			agentName: ProfileRunner(client, repo, nil, scope, nil, profile, "Review the code.", nil),
 		}
 	}
 	manager, err := explore.New(context.Background(), config)
