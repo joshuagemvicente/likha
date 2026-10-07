@@ -31,6 +31,7 @@ type Edit struct {
 	old     string
 	new     string
 	before  os.FileInfo // nil for a file that did not exist
+	applied bool        // set once Apply published the new content
 }
 
 // PrepareEdit only reads the repository. Parent directories must already exist;
@@ -155,11 +156,13 @@ func (e *Edit) Apply() error {
 			}
 			return fmt.Errorf("publish %q: %w", e.Path, err)
 		}
+		e.applied = true
 		return nil
 	}
 	if err := unix.Renameat(int(parent.Fd()), tmpName, int(parent.Fd()), name); err != nil {
 		return fmt.Errorf("publish %q: %w", e.Path, err)
 	}
+	e.applied = true
 	return nil
 }
 

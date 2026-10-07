@@ -430,6 +430,10 @@ type reviewButton struct {
 // reviewButtons lists the decision bar left to right: Approve, the optional
 // remember action the request offers (specs/command-permissions), Decline.
 func (m *ui) reviewButtons() []reviewButton {
+	if m.pending != nil && m.pending.Kind == undoReviewKind {
+		return []reviewButton{{focus: focusApprove, label: "Undo", narrow: "Undo", gated: true},
+			{focus: focusDecline, label: "Cancel", narrow: "Cancel"}}
+	}
 	buttons := []reviewButton{{focus: focusApprove, label: "Approve", narrow: "Approve", gated: true}}
 	if m.pending != nil {
 		switch m.pending.Remember {

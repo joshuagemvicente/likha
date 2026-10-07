@@ -70,7 +70,7 @@ A prompt starting with `/` is a command, acting on the application and **never s
 | --- | --- |
 | `/sessions` | List saved sessions for the repository (newest first). |
 | `/sessions <n>` | Resume that session in place — no relaunch needed. |
-| `/sessions`, then **Ctrl+D** | Delete the highlighted session after a second confirmation: removes its plan, task, and journal records, and its private tool-output directory when that cleanup succeeds (if cleanup fails, the session is still deleted and the leftover is reported as an error). Refused while a run or review is active; deleting the current session continues in a fresh one. (Checks pass; interactive walkthrough pending.) |
+| `/sessions`, then **Ctrl+D** | Delete the highlighted session after a second confirmation: removes its plan, task, journal, and undo-history records, and its private tool-output directory when that cleanup succeeds (if cleanup fails, the session is still deleted and the leftover is reported as an error). Refused while a run or review is active; deleting the current session continues in a fresh one. (Checks pass; interactive walkthrough pending.) |
 | `/models` | Open a dialog of every configured provider's models, grouped under one section header per provider (active provider first); ↑/↓ navigate, type to filter, Enter applies. Enter on another provider's model moves the session to that provider+model and stores the pair. When the model publishes reasoning-effort levels and its provider can carry them, Enter opens an effort step first (see [Reasoning effort](#reasoning-effort)). |
 | `/effort [level]` | Open the effort step for the current model, or set a level directly (`/effort high`, `/effort default`). See [Reasoning effort](#reasoning-effort). |
 | `/providers` | Open a dialog to manage a provider's stored key; `/providers <n-or-name> [key]` targets one directly. Switching provider and model happens through `/models`. Selecting an unconnected ChatGPT row opens browser sign-in; a connected row opens account management. |
@@ -79,6 +79,7 @@ A prompt starting with `/` is a command, acting on the application and **never s
 | `/agents` | Inspect agent profiles, the live task tree, child transcripts, and branch cancellation. |
 | `/plan` | Toggle read-only plan mode: edits, commands, and MCP calls are refused until you toggle it off. |
 | `/todo` | Show the persisted plan checklist and its progress. |
+| `/undo` | Revert Likha's most recent file change after a review; repeat it to go further back. Shell command effects are not undone. See [Undo](#undo-undo). |
 | `/skills` | List the global Markdown skills discovered under `skills/<name>/SKILL.md`. |
 | `/skill <name> [request]` | Load one skill and start a turn with it. |
 | `/mcp` | Show configured MCP servers, their state, and their tools. |
@@ -141,6 +142,20 @@ Before each model request of a run, Likha estimates the request's size. When the
 - It never runs when the context window is unknown (the status line shows `ctx ~42k/?`), and never for explore children, profile tasks or session naming.
 
 Automatic compaction is on by default. To turn it off, add `"auto_compact": false` to the private `config.json`; the status line's 80% warning and `/compact` keep working as before.
+
+## Undo (`/undo`)
+
+Every file change Likha applies through its edit tools (`edit_file` and `edit`, including edits under **Approve always** and `/init` proposals) is kept as one *change set*: the files it touched, their content and permissions before the write, and any directories it created. `/undo` takes back the newest remaining change set; run it again to take back the one before that.
+
+- `/undo` first opens a review with the reverse diff — restored files show their diff back to the original, files Likha created show as deletions, and directories Likha created are listed. **Undo** applies it (after you have read every page, like an edit review); **Cancel** or **Esc** writes nothing and keeps the change set. Approve always never covers an undo.
+- Undo never overwrites newer work. If any file in the change set changed since Likha wrote it (content, permissions, deleted, or replaced by a symlink), nothing is reverted and every changed path is named. Saving the file again with the same content (an editor that writes by rename) does not count as a change. The change set stays, so you can put the file back and try again.
+- Files Likha created are removed; directories Likha created are removed only when they are empty.
+- **Effects of shell commands are not undone.** The review says so when a command ran after the change.
+- The next model request carries a short note naming the undone paths (never their content), so the model rereads them.
+- Undo history is private session data in `sessions.sqlite`: it survives resume, is deleted with the session, and keeps at most 20 change sets and 64 MiB per session (the oldest go first; `/undo` then says older changes can no longer be undone). An edit too large to keep says `not undoable: too large` on its tool item.
+- `/undo` is refused during a run or a pending review, and with any argument. An interrupted undo is reported on resume like an interrupted edit (`/tools recovery`) and is never replayed.
+
+(Checks pass; interactive walkthrough pending.)
 
 ## File references (`@`)
 

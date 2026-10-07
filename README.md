@@ -153,6 +153,7 @@ Put options before the repository path. `likha --help` lists every option, provi
 | `/init [guidance]` | Survey the repository and propose a root `AGENTS.md` for review. |
 | `/install <request>` | Interview you about an install, show a plan, then run each step with approval. |
 | `/todo` | Show the model's plan checklist. |
+| `/undo` | Revert Likha's most recent file change after a review (shell command effects are not undone). |
 | `/agents` | Inspect subagent profiles, the task tree, and child transcripts. |
 | `/tools` | Inspect available tools, their permissions, and retained output. |
 | `/mcp` | Show MCP servers and their tools. |

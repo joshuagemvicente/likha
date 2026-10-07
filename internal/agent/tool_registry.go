@@ -81,6 +81,10 @@ type RunOptions struct {
 	// (specs/approve-always). Nil: every edit asks and no edit review offers
 	// Approve always.
 	EditGrant *EditGrant
+	// RecordChangeSet saves what an applied edit wrote so /undo can revert
+	// it (specs/edit-undo). It runs after the write; a failure leaves the
+	// edit applied and marks it not undoable. Nil records nothing.
+	RecordChangeSet func(toolCallID string, set actions.ChangeSet) error
 }
 
 // TaskProfile is one accepted, drift-checked profile ready to run.
@@ -247,6 +251,9 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 				result.Content = autoEditLabel + result.Content
 				result.Diff = prepared.Diff
 			}
+			if set, ok := prepared.ChangeSet(); ok {
+				result.Warnings = recordChangeSet(ctx, options, set)
+			}
 			return result, nil
 		},
 	})
@@ -305,6 +312,9 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 			if autoEdit && err == nil {
 				result.Content = autoEditLabel + result.Content
 				result.Diff = batchBody
+			}
+			if set, ok := batch.ChangeSet(); ok {
+				result.Warnings = recordChangeSet(ctx, options, set)
 			}
 			return result, err
 		},

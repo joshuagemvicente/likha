@@ -215,6 +215,9 @@ func configure(db *sql.DB) error {
 	if err := configurePlans(tx); err != nil {
 		return err
 	}
+	if err := configureChangeSets(tx); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit session schema setup: %w", err)
 	}

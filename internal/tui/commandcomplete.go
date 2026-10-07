@@ -32,6 +32,7 @@ var commands = []commandItem{
 	{"themes", "list or apply a color theme"},
 	{"tools", "inspect available tools, source, permissions, and output storage"},
 	{"todo", "show the persisted plan/todo checklist and its progress"},
+	{"undo", "revert Likha's most recent file change after a review; shell command effects are not undone"},
 }
 
 // commandQuery reports whether the draft is inside a slash-command token:
