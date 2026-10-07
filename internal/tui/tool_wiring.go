@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"likha/internal/actions"
 	"likha/internal/agent"
 	"likha/internal/model"
-	"likha/internal/providers"
+	"likha/internal/runsetup"
 	"likha/internal/session"
 	"likha/internal/tooloutput"
 	"likha/internal/tools"
@@ -44,30 +43,10 @@ func (m *ui) openOutputStore() {
 
 func (m *ui) toolRunOptions(runID uint64) agent.RunOptions {
 	options := agent.RunOptions{Outputs: m.outputs, SessionID: m.snapshot.ID, Provider: m.conn.ProviderCanonical, PlanMode: m.planMode, InitMode: m.initRun, InstallMode: m.installRun}
-	store, sessionID := m.store, m.snapshot.ID
-	if store != nil && sessionID != "" {
+	if m.store != nil && m.snapshot.ID != "" {
 		options.TasksEnabled = m.client != nil && m.repo != nil
-		options.SaveTask = store.SaveTask
-		// Plan checklist updates persist through the store immediately and
-		// mirror into the snapshot on the UI event; the apply hook only
-		// writes private session state, never repo or provider state.
-		options.PlanApply = func(ctx context.Context, steps []tools.PlanStep) error {
-			return store.SavePlan(sessionID, session.Plan{Steps: steps, UpdatedAt: time.Now().UTC()})
-		}
-		options.EditJournal = func(proposal *actions.EditProposal) error {
-			journalID := ""
-			return proposal.SetJournal(func(progress actions.EditProgress) error {
-				data, err := json.Marshal(progress)
-				if err != nil {
-					return err
-				}
-				id, err := store.RecordEditProgress(sessionID, journalID, data)
-				if err == nil {
-					journalID = id
-				}
-				return err
-			})
-		}
+		// Plan checklist updates mirror into the snapshot on the UI event.
+		runsetup.ApplySession(&options, m.store, m.snapshot.ID)
 	}
 	// The ask broker blocks the tool handler, never the UI loop: the reply
 	// channel has room for exactly one send and the run context terminates
@@ -98,14 +77,7 @@ func (m *ui) toolRunOptions(runID uint64) agent.RunOptions {
 	// Steer now (steering-prompts M2): the signal channel is created with
 	// the turn's steer channel and written only on the UI goroutine.
 	options.SteerNow = m.steerNow
-	if stateDir, root := m.stateDir, m.root; stateDir != "" {
-		options.CommandTrusted = func(check, fingerprint string) bool {
-			return providers.CommandTrusted(stateDir, root, check, fingerprint)
-		}
-		options.TrustChecks = func(checks map[string]string) error {
-			return providers.TrustCommandChecks(stateDir, root, checks)
-		}
-	}
+	runsetup.ApplyCommandTrust(&options, m.stateDir, m.root)
 	return options
 }
 
