@@ -15,6 +15,7 @@ import (
 	"likha/internal/agent"
 	"likha/internal/cmdpolicy"
 	"likha/internal/explore"
+	"likha/internal/hooks"
 	"likha/internal/model"
 	"likha/internal/profiles"
 	"likha/internal/providers"
@@ -206,6 +207,15 @@ type ui struct {
 	webConfigSeen         bool
 	grantsMu              sync.Mutex // serializes UI writes with tool-goroutine reads
 
+	// User hooks from <stateDir>/hooks.json (specs/hooks), read once at
+	// launch: nil when none are configured or the file was refused, in
+	// which case hooksErr says why. promptRow is the You row of a run whose
+	// prompt_submit check has not finished, so a block can remove it.
+	hooks     *hooks.Runner
+	hooksPath string
+	hooksErr  error
+	promptRow int
+
 	// Explore/agent child usage already added to the token totals and spend:
 	// task ID → the newest counted record version and its usage sums.
 	taskUsageCounted map[string]countedTaskUsage
@@ -302,6 +312,7 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 			}
 		}
 		m.status = "First-run setup"
+		m.loadHooks()
 		return m
 	}
 	if conn.Err != nil {
@@ -318,6 +329,7 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 	}
 	m.openOutputStore()
 	m.reportInterruptedTasks()
+	m.loadHooks()
 	if client != nil {
 		// --model and the stored model never prompt; the stored level applies,
 		// checked against the live levels the startup /models fetch published.
@@ -342,12 +354,13 @@ func (m *ui) Init() tea.Cmd {
 	if m.mode == modeSetup && m.setup.stage == setupLogin && !m.setup.checking {
 		login = m.startOAuthLogin(model.Providers[m.setup.cursor])
 	}
+	sessionStart := m.fireSessionStart(!m.freshSession)
 	shouldCheck, mark, err := update.Prepared(m.stateDir)
 	if err != nil || !shouldCheck {
 		// No update check due: only the caret blink loop runs.
-		return tea.Batch(blinkCaret(), login)
+		return tea.Batch(blinkCaret(), login, sessionStart)
 	}
-	return tea.Batch(blinkCaret(), login, func() tea.Msg {
+	return tea.Batch(blinkCaret(), login, sessionStart, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		latest, err := update.Latest(ctx)
@@ -449,14 +462,14 @@ func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
 	// Only handleCommand's /init and /install paths run in init or install
 	// mode; every other turn starts as a normal one.
 	m.initRun, m.initProposed, m.installRun = false, false, false
-	return m.startTurnDisplay(prompt, prompt, queued)
+	return m.startTurnDisplay(hooks.OriginTyped, prompt, prompt, queued)
 }
 
 // startTurnDisplay is startTurn with a transcript line that differs from the
 // model prompt: the You row shows display while the model and the saved
 // history receive prompt (/init shows "/init [guidance]" but sends the full
-// survey prompt).
-func (m *ui) startTurnDisplay(display, prompt string, queued []string) tea.Cmd {
+// survey prompt). origin is how the prompt arrived, for prompt_submit hooks.
+func (m *ui) startTurnDisplay(origin, display, prompt string, queued []string) tea.Cmd {
 	steer := make(chan string, 64)
 	for _, q := range queued {
 		select {
@@ -478,6 +491,14 @@ func (m *ui) startTurnDisplay(display, prompt string, queued []string) tea.Cmd {
 	m.priorLen = len(prior)
 	m.turnSent = make(map[string]int)
 	m.entries = append(m.entries, entry{role: "You", content: display})
+	// A prompt_submit hook runs on the run's goroutine before anything is
+	// sent; until it passes, the prompt is not persisted, so a block leaves
+	// no trace of it in the session.
+	checkPrompt := m.promptHook(origin)
+	m.promptRow = -1
+	if checkPrompt != nil {
+		m.promptRow = len(m.entries) - 1
+	}
 	if display != prompt {
 		if m.displayPrompts == nil {
 			m.displayPrompts = make(map[string]string)
@@ -486,7 +507,9 @@ func (m *ui) startTurnDisplay(display, prompt string, queued []string) tea.Cmd {
 	}
 	m.history = append(m.history, model.Message{Role: "user", Content: prompt})
 	m.refreshStatusSessionTitle()
-	m.persist()
+	if checkPrompt == nil {
+		m.persist()
+	}
 	m.streamBuf.Reset()
 	m.streaming = -1
 	m.closeReasoning()
@@ -511,29 +534,41 @@ func (m *ui) startTurnDisplay(display, prompt string, queued []string) tea.Cmd {
 	abandon := m.abandon
 	client, repo, root, mcp := m.client, m.repo, m.root, m.conn.Mcp
 	options := m.toolRunOptions(m.runID)
-	go func() {
-		defer close(events)
-		agent.RunTurnWithOptions(ctx, client, repo, root, prior, prompt, mcp, steer, options, func(ev agent.TurnEvent) {
-			ev.RunID = runID
-			// Steer deliveries join terminal events in the non-droppable
-			// path: the engine has already appended the message to its
-			// history, so the UI must account for it before the run ends.
-			// Usage events too: a cancel must not lose a request that
-			// already completed and was billed. An automatic compaction
-			// replaced the engine's history and carries billed usage.
-			if ev.Kind == "done" || ev.Kind == "error" || ev.Kind == "tool_result" || ev.Kind == "steer" || ev.Kind == "stream_interrupted" || ev.Kind == "notice" || ev.Kind == "task" || ev.Kind == "task_runtime" || ev.Kind == "tool_checkpoint" || ev.Kind == "usage" || ev.Kind == "auto_compacted" {
-				select {
-				case events <- ev:
-				case <-abandon:
-				}
-				return
-			}
+	emit := func(ev agent.TurnEvent) {
+		ev.RunID = runID
+		// Steer deliveries join terminal events in the non-droppable
+		// path: the engine has already appended the message to its
+		// history, so the UI must account for it before the run ends.
+		// Usage events too: a cancel must not lose a request that
+		// already completed and was billed. Hook warnings, blocks and
+		// post_tool events are never silently lost either (specs/hooks), and
+		// an automatic compaction replaced the engine's history and carries
+		// billed usage (specs/auto-compaction).
+		switch ev.Kind {
+		case "done", "error", "tool_result", "steer", "stream_interrupted", "notice", "task", "task_runtime", "tool_checkpoint", "usage", "hook", "hook_observe", "steer_blocked", "prompt_blocked", "auto_compacted":
 			select {
 			case events <- ev:
-			case <-ctx.Done():
 			case <-abandon:
 			}
-		})
+			return
+		}
+		select {
+		case events <- ev:
+		case <-ctx.Done():
+		case <-abandon:
+		}
+	}
+	go func() {
+		defer close(events)
+		if checkPrompt != nil {
+			// A cancel during the check falls through: the run then ends
+			// as cancelled like any other run cancelled before a request.
+			if block := checkPrompt(ctx, prompt, emit); block != nil && ctx.Err() == nil {
+				emit(agent.TurnEvent{Kind: "prompt_blocked", Text: display, Err: block})
+				return
+			}
+		}
+		agent.RunTurnWithOptions(ctx, client, repo, root, prior, prompt, mcp, steer, options, emit)
 	}()
 	return tea.Batch(waitEvent(events), m.activityTickCmd())
 }
@@ -585,11 +620,11 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 			}
 		})
 		m.markAwaitingAnswer(ask.CallID)
-		return nil
+		return m.attentionMoment(attentionQuestion)
 	case "consent":
 		m.clearTextSelection()
 		m.openConsent(v.Consent)
-		return nil
+		return m.attentionMoment(attentionReview)
 	case "context":
 		// Each stream replaces the displayed context state. An unknown
 		// measurement intentionally clears any value from the prior turn.
@@ -642,6 +677,7 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		m.reviewFocus = focusApprove
 		m.markSeenFromScroll()
 		m.status = "Review " + m.pending.Kind + " before approval"
+		return m.attentionMoment(attentionReview)
 	case "tool_start", "tool_result":
 		m.hideActivity()
 		m.streamBuf.Reset()
@@ -743,6 +779,16 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		return m.beginAutoCompaction()
 	case "auto_compacted":
 		return m.applyAutoCompaction(v)
+	case "hook":
+		m.applyHookWarnings([]string{v.Text})
+	case "hook_observe":
+		if v.Hook != nil {
+			return m.fireObserveHook(*v.Hook)
+		}
+	case "steer_blocked":
+		m.applySteerBlocked(v)
+	case "prompt_blocked":
+		m.applyPromptBlocked(v)
 	case "done", "error":
 		if cmd := m.finishRun(v); cmd != nil {
 			m.layoutWidth = 0
@@ -757,6 +803,7 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 // for an explicit Enter. forceStopRun reuses it for a run that never
 // delivered one.
 func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
+	hooksCmd := m.runEndHooks(v)
 	m.hideActivity()
 	m.closeReasoning()
 	m.pending = nil
@@ -818,7 +865,8 @@ func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
 	m.persist()
 	m.refreshStatusSessionTitle()
 	m.steer, m.steerNow, m.steering = nil, nil, false
-	return m.autoNameAfterFirstTurn(v.Kind)
+	// Batch drops nil commands, so without hooks this is the naming command.
+	return tea.Batch(m.autoNameAfterFirstTurn(v.Kind), hooksCmd)
 }
 
 // addRequestUsage adds one completed model request to the session token
@@ -949,6 +997,14 @@ func (m *ui) queueRunDraft() bool {
 		if prompt == "" {
 			return false
 		}
+	case prompt == "/hooks":
+		// The one command that works during a run (specs/hooks point 13):
+		// it only reports, so it cannot disturb the run.
+		m.entries = append(m.entries, entry{role: "Likha", content: m.hooksView()})
+		m.input = nil
+		m.edit.endCaret(nil)
+		m.layoutWidth = 0
+		return false
 	case strings.HasPrefix(prompt, "/"):
 		m.entries = append(m.entries, entry{role: "Error", content: runDraftCommandRefusal})
 		m.layoutWidth = 0
@@ -1058,7 +1114,8 @@ func (m *ui) sendHeldQueue() tea.Cmd {
 	m.entries = kept
 	head, rest := m.queue[0], m.queue[1:]
 	m.queue = nil
-	return m.startTurn(head, rest)
+	m.initRun, m.initProposed, m.installRun = false, false, false
+	return m.startTurnDisplay(hooks.OriginSteering, head, head, rest)
 }
 
 // flipQueuedRow turns the first queued row with the given content into a
@@ -1383,6 +1440,9 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = "Cancel requested for task " + toolShortText(v.taskID, 64)
 		}
+		return m, nil
+	case hookWarningsMsg:
+		m.applyHookWarnings(v.warnings)
 		return m, nil
 	case agent.TurnEvent:
 		if !m.working || v.RunID != m.runID {

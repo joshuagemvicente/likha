@@ -13,6 +13,7 @@ import (
 	"likha/internal/actions"
 	"likha/internal/cmdpolicy"
 	"likha/internal/explore"
+	"likha/internal/hooks"
 	"likha/internal/mcp"
 	"likha/internal/model"
 	"likha/internal/profiles"
@@ -91,6 +92,10 @@ type RunOptions struct {
 	// actions that run without a review are unaffected. Empty: a person
 	// reviews as usual.
 	NoReviewer string
+	// Hooks runs the user's hooks.json (specs/hooks): pre_tool and post_tool
+	// on every registry of the run, children included, and prompt_submit on
+	// steering prompts at delivery. Nil: dispatch is exactly as without hooks.
+	Hooks *hooks.Runner
 }
 
 // TaskProfile is one accepted, drift-checked profile ready to run.
@@ -119,6 +124,9 @@ func RegistryForOptions(repo *repository.Repository, root string, options RunOpt
 func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpManager, options RunOptions, emit func(TurnEvent)) (*tools.Registry, []string) {
 	outputs := options.Outputs
 	registry := tools.New()
+	if gate := newHookGate(options.Hooks, options.SessionID, root, emit); gate != nil {
+		registry.SetGate(gate)
+	}
 	var warnings []string
 	// install holds one /install turn's plan-first gate; nil outside that
 	// turn and when plan mode's stricter gate already applies.

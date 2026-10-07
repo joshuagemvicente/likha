@@ -83,6 +83,7 @@ A prompt starting with `/` is a command, acting on the application and **never s
 | `/skills` | List the global Markdown skills discovered under `skills/<name>/SKILL.md`. |
 | `/skill <name> [request]` | Load one skill and start a turn with it. |
 | `/mcp` | Show configured MCP servers, their state, and their tools. |
+| `/hooks` | List the hooks from `hooks.json`, each with its last outcome, or why the file was refused (see [Hooks](#hooks)). Works during a run. |
 | `/compact [focus]` | Summarize the conversation so far into one compact brief and continue from it — the summarized turns are replaced, the session stays resumable. |
 | `/quit` | Exit, same as Ctrl+D. |
 | `/help` | Print the command list in the conversation. |
@@ -184,6 +185,52 @@ Every file change Likha applies through its edit tools (`edit_file` and `edit`, 
 - `/undo` is refused during a run or a pending review, and with any argument. An interrupted undo is reported on resume like an interrupted edit (`/tools recovery`) and is never replayed.
 
 (Checks pass; interactive walkthrough pending.)
+
+## Hooks
+
+Hooks run your own commands at fixed Likha events: to log every command, refuse reads of `.env`, or play a sound when a run ends. They come **only** from `hooks.json` in Likha's private state directory (`~/.config/likha/hooks.json` on macOS and Linux). No repository file (`.likha/hooks.json`, `.claude/settings.json`, …) ever adds a hook. Likha never creates the file; it reads it once at launch, so edits apply after a relaunch.
+
+```json
+{
+  "hooks": {
+    "pre_tool": [
+      {"name": "no-dotenv", "match": ["read", "grep"], "command": "~/bin/deny-dotenv"}
+    ],
+    "post_tool": [{"match": ["run_command"], "command": "cat >> ~/likha-commands.jsonl"}],
+    "run_end": [{"command": "afplay /System/Library/Sounds/Glass.aiff"}]
+  }
+}
+```
+
+Each entry needs a `command`. Optional fields:
+
+- `name`: shown in `/hooks`, warnings and block reasons (default `<event>[<index>]`).
+- `match`: glob patterns over the tool's name, only on `pre_tool` and `post_tool` (`run_command`, `edit*`, `mcp__github__*`). Without it the hook runs for every tool.
+- `timeout`: whole seconds from 1 to 60 (default 10). A hook that runs out is killed with everything it started.
+- `on_error`: `block` (default) or `allow`, for the blocking events below.
+
+**Events.** Every event carries `version` (1), `event`, `session_id`, `repository` and `agent` (`main`, or a child such as `explore`).
+
+| Event | When | Extra fields | Can block |
+| --- | --- | --- | --- |
+| `session_start` | Launch, and resuming a session with `/sessions` | `resumed` | No |
+| `prompt_submit` | Before your prompt is sent (typed, queued steering, `/init`, `/install`) | `prompt`, `origin` | Yes |
+| `pre_tool` | After a tool call's arguments are validated, before any review, grant or auto-approval | `tool` (`name`, `source`, `server` for MCP, `effects`, `arguments`) | Yes |
+| `post_tool` | After a tool call finishes | `tool`, `result` (`status`, `exit_code` for commands, `content` up to 16 KiB, `content_truncated`) | No |
+| `run_end` | A run completed, failed or was cancelled | `outcome`, `error` | No |
+| `attention` | A review or question opened, or a run finished on its own | `attention` (`review`, `question`, `run_end`) | No |
+
+Explore and profile children fire only `pre_tool` and `post_tool`, with their own `agent`.
+
+**How a hook answers.** The hook gets the event as one JSON object on stdin. It runs with `sh -c` in the repository root, with `LIKHA_HOOK_EVENT` and `LIKHA_SESSION_ID` set, and without `LIKHA_API_KEY` or any `LIKHA_*_API_KEY`. For `pre_tool` and `prompt_submit`:
+
+- exit status **2** blocks, and stderr is the reason;
+- or print `{"decision": "block", "reason": "…"}` and exit 0;
+- exit 0 with no output means no objection.
+
+A blocked tool call never runs and opens no review; the model receives `Blocked by hook "<name>": <reason>`. A blocked prompt is not sent and goes back to the composer; a blocked queued prompt is dropped and the others stay queued. **Hooks can never approve:** output such as `{"decision": "allow"}` is ignored with a warning, and every usual review, question and refusal still applies. A blocking hook that fails (other exit status, timeout, output that is not a JSON object) blocks unless it sets `"on_error": "allow"`; either way a warning names the hook and the cause. Observe-only hooks never block or delay the run; their failures show one warning each. Hook output never reaches the model, apart from a block reason. stdout and stderr are each read up to 64 KiB; a block reason is cut to 1 KiB.
+
+**Safety.** A hook runs with your permissions, outside any review, and receives tool arguments and prompt text. Likha refuses the whole file, and runs no hook from it, when it is invalid JSON, names an unknown event or field, has an entry without a command or with a bad pattern, timeout or `on_error`, or is writable by group or others (`chmod go-w`). The refusal is shown at launch and in `/hooks`.
 
 ## File references (`@`)
 

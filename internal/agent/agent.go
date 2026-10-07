@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"likha/internal/explore"
+	"likha/internal/hooks"
 	"likha/internal/mcp"
 	"likha/internal/model"
 	"likha/internal/repository"
@@ -79,11 +80,16 @@ type TurnEvent struct {
 	Usage *model.RequestUsage
 	// Err is the cause of a Kind "error" event, so the interface can match it
 	// with errors.As (an effort rejection gets a hint); Text is its message.
+	// On a "steer_blocked" event it is the hook's *hooks.BlockError.
 	Err error
 	// ContextWindow is the window an "auto_compacted" event compacted
 	// against; ContextTokens then holds the estimate that triggered it
 	// (specs/auto-compaction).
 	ContextWindow int64
+	// Hook is a post_tool event (Kind "hook_observe") for the interface to
+	// fire off the tool path (specs/hooks): observe-only hooks never delay
+	// the run.
+	Hook *hooks.Event
 }
 
 // ConsentRequest asks for one conversation-scoped web grant. Search consents

@@ -42,7 +42,7 @@ func (m *ui) openOutputStore() {
 }
 
 func (m *ui) toolRunOptions(runID uint64) agent.RunOptions {
-	options := agent.RunOptions{Outputs: m.outputs, SessionID: m.snapshot.ID, Provider: m.conn.ProviderCanonical, PlanMode: m.planMode, InitMode: m.initRun, InstallMode: m.installRun}
+	options := agent.RunOptions{Outputs: m.outputs, SessionID: m.snapshot.ID, Provider: m.conn.ProviderCanonical, PlanMode: m.planMode, InitMode: m.initRun, InstallMode: m.installRun, Hooks: m.hooks}
 	if m.contextWindowKnown {
 		options.ContextWindow = m.contextWindow
 		options.AutoCompact = m.autoCompactEnabled()

@@ -173,7 +173,7 @@ func (m *ui) listSessionsDialog() {
 }
 
 // commandHelp is the text /help prints and unknown-command errors point to.
-const commandHelp = "Commands: /compact [focus] summarize the conversation into a compact brief; /init [guidance] survey the repository and propose a root AGENTS.md for review; /install <request> interview you about an install, show a plan, then run each step with approval; /sessions [n] list or resume a saved session; /tools inspect tool availability, source, and permissions; /tools clear-output explicitly clear this session's retained output; /models list models from every configured provider and pick one, then its reasoning effort when it has levels; /effort [level] show or set the current model's reasoning effort; /providers manage a provider's stored key (auth); switching happens through /models; /plan toggle read-only plan mode (edits, commands, and MCP calls refuse without approval flow); /agents inspect the explore profile, task tree, and child transcripts; /todo show the persisted plan checklist; /undo revert Likha's most recent file change after a review (shell command effects are not undone);/skills list the discovered global skill catalog; /skill <name> [request] load one skill and start a turn; /quit exit; /help this list. Ctrl+O inspects tool results without losing your draft. Selections open a dialog: ↑/↓ navigate, type to filter, Enter apply, Esc cancel. Unknown /commands are not sent to the model; // sends a literal slash."
+const commandHelp = "Commands: /compact [focus] summarize the conversation into a compact brief; /init [guidance] survey the repository and propose a root AGENTS.md for review; /install <request> interview you about an install, show a plan, then run each step with approval; /sessions [n] list or resume a saved session; /tools inspect tool availability, source, and permissions; /tools clear-output explicitly clear this session's retained output; /models list models from every configured provider and pick one, then its reasoning effort when it has levels; /effort [level] show or set the current model's reasoning effort; /providers manage a provider's stored key (auth); switching happens through /models; /plan toggle read-only plan mode (edits, commands, and MCP calls refuse without approval flow); /agents inspect the explore profile, task tree, and child transcripts; /todo show the persisted plan checklist; /undo revert Likha's most recent file change after a review (shell command effects are not undone); /hooks list the hooks from hooks.json and their last outcome (also during a run); /skills list the discovered global skill catalog; /skill <name> [request] load one skill and start a turn; /quit exit; /help this list. Ctrl+O inspects tool results without losing your draft. Selections open a dialog: ↑/↓ navigate, type to filter, Enter apply, Esc cancel. Unknown /commands are not sent to the model; // sends a literal slash."
 
 // handleCommand dispatches a leading-slash input. Reserved commands act on
 // the application and never reach the model; unknown commands restore the
@@ -227,6 +227,13 @@ func (m *ui) handleCommand(line string) tea.Cmd {
 		return nil
 	case "undo":
 		return m.handleUndoCommand(line, arg)
+	case "hooks":
+		if arg != "" {
+			m.entries = append(m.entries, entry{role: "Error", content: "The /hooks command takes no arguments; it lists the configured hooks."})
+			return nil
+		}
+		m.entries = append(m.entries, entry{role: "Likha", content: m.hooksView()})
+		return nil
 	case "todo":
 		if arg != "" {
 			m.entries = append(m.entries, entry{role: "Error", content: "The /todo command takes no arguments; it shows the persisted checklist."})
@@ -392,7 +399,7 @@ func (m *ui) resumeSession(id string) tea.Cmd {
 	m.jumpBottom()
 	m.layoutWidth = 0
 	m.status = "Resumed session"
-	return nil
+	return m.fireSessionStart(true)
 }
 
 // updateDialog handles keys while a selection dialog is open. The cursor

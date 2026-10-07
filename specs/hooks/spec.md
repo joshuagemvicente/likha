@@ -1,7 +1,10 @@
 # Feature: Hooks (user commands that observe Likha and can block)
 
-**Status:** planned — decisions recorded 2026-10-07 (user interview); no
-implementation started. Requirement: [v1-spec FR-45](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
+**Status:** implemented (local) 2026-10-07 — automated suite green (unit,
+agent and TUI tests running real hook scripts); the drafting defaults below
+were adopted as written. Outstanding: headless runs (T12) wait for
+[headless-print](../headless-print/spec.md) to land, and the real-terminal
+walkthrough (W1) has not been done. Requirement: [v1-spec FR-45](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
 
 ## Context
 

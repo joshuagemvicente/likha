@@ -25,7 +25,7 @@ const (
 // ExploreRunner starts each accepted task with a private client and fresh
 // conversation. The captured harness and scope are run-boundary snapshots,
 // never the parent's conversation, approvals, or live configuration.
-func ExploreRunner(client *model.Client, repo *repository.Repository, harness []model.Message, scope tools.Scope, outputs *tooloutput.Store) explore.Runner {
+func ExploreRunner(client *model.Client, repo *repository.Repository, harness []model.Message, scope tools.Scope, outputs *tooloutput.Store, gate tools.Gate) explore.Runner {
 	harness = exploreLoopMessages(harness)
 	if scope.Allowed != nil {
 		allowed := make(map[string]bool, len(scope.Allowed))
@@ -98,6 +98,9 @@ func ExploreRunner(client *model.Client, repo *repository.Repository, harness []
 		registry, err := ExploreRegistry(repo, node, childScope)
 		if err != nil {
 			return finish(explore.Failed, "Cannot construct explore tools: "+err.Error())
+		}
+		if gate != nil {
+			registry.SetGate(gate)
 		}
 		profile := ExploreMessages(exploreLoopMessages(harness), record)
 		// ExploreMessages includes the scoped user brief. Keep that one fresh

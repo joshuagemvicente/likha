@@ -19,6 +19,7 @@ var commands = []commandItem{
 	{"compact", "summarize the conversation so far into a compact brief, /compact [focus] steers it"},
 	{"effort", "choose the current model's reasoning effort: /effort [level]"},
 	{"help", "list the reserved commands"},
+	{"hooks", "list the hooks from hooks.json and each one's last outcome"},
 	{"init", "survey the repository and propose a root AGENTS.md for review: /init [guidance]"},
 	{"install", "interview you about an install, show a plan, then run each step with approval: /install <request>"},
 	{"mcp", "show the connected MCP servers or how to configure them"},
