@@ -1,10 +1,11 @@
 # Feature: Hooks (user commands that observe Likha and can block)
 
 **Status:** implemented (local) 2026-10-07 — automated suite green (unit,
-agent and TUI tests running real hook scripts); the drafting defaults below
-were adopted as written. Outstanding: headless runs (T12) wait for
-[headless-print](../headless-print/spec.md) to land, and the real-terminal
-walkthrough (W1) has not been done. Requirement: [v1-spec FR-45](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
+agent, TUI and headless tests running real hook scripts, plus a
+`tests/integration` run of the built binary); the drafting defaults below
+were adopted as written. Headless runs (T12, D11) are wired since
+[headless-print](../headless-print/spec.md) merged: a blocked prompt exits 1
+before any request. Outstanding: the real-terminal walkthrough (W1). Requirement: [v1-spec FR-45](../v1-spec.md#attention-and-automation-amendment-user-approved-2026-10-07).
 
 ## Context
 

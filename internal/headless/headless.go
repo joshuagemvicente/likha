@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"likha/internal/agent"
+	"likha/internal/hooks"
 	"likha/internal/model"
 	"likha/internal/redact"
 	"likha/internal/repository"
@@ -91,21 +92,44 @@ func Run(ctx context.Context, cfg Config, stdout, stderr io.Writer) int {
 		SessionID: cfg.Snapshot.ID, Repository: cfg.Root, Provider: cfg.Display,
 		Model: cfg.Client.Model(), Effort: effortName(cfg.Effort),
 	})
+	runner, hookNotice := loadHooks(cfg.StateDir)
+	options.Hooks = runner
+	if hookNotice != "" {
+		notices = append(notices, hookNotice)
+	}
 	for _, notice := range append(append([]string(nil), cfg.Notices...), notices...) {
 		out.event(agent.TurnEvent{Kind: "notice", Text: notice})
 		rec.observe(agent.TurnEvent{Kind: "notice", Text: notice})
 	}
 
+	// Parallel read-only tool groups and background hooks emit from several
+	// goroutines.
 	var mu sync.Mutex
-	agent.RunTurnWithOptions(ctx, cfg.Client, cfg.Repo, cfg.Root, cfg.Snapshot.History, cfg.Prompt, nil, nil, options, func(ev agent.TurnEvent) {
-		// Parallel read-only tool groups emit from several goroutines.
+	deliver := func(ev agent.TurnEvent) {
 		mu.Lock()
 		defer mu.Unlock()
 		rec.observe(ev)
 		out.event(ev)
+	}
+	hookRun := &hookSet{runner: runner, sessionID: cfg.Snapshot.ID, root: cfg.Root, warn: func(text string) {
+		deliver(agent.TurnEvent{Kind: "notice", Text: text})
+	}}
+	hookRun.sessionStart(resumed)
+	if block := hookRun.promptBlocked(ctx, cfg.Prompt); block != nil {
+		// Nothing was sent or saved; the prompt is the user's to change.
+		hookRun.wait()
+		return finishBlocked(cfg, out, stderr, block)
+	}
+	agent.RunTurnWithOptions(ctx, cfg.Client, cfg.Repo, cfg.Root, cfg.Snapshot.History, cfg.Prompt, nil, nil, options, func(ev agent.TurnEvent) {
+		if hookRun.turnEvent(ev) {
+			return
+		}
+		deliver(ev)
 	})
 
 	result := rec.result(ctx)
+	hookRun.runEnd(result)
+	hookRun.wait()
 	if err := save(cfg, rec, resumed); err != nil {
 		result.markSaveFailed(err)
 	}
@@ -114,6 +138,16 @@ func Run(ctx context.Context, cfg Config, stdout, stderr io.Writer) int {
 		return ExitFailed
 	}
 	return result.exitCode()
+}
+
+// finishBlocked reports a run whose prompt a prompt_submit hook blocked: no
+// request was sent and nothing was saved, and the run exits 1 (failed).
+func finishBlocked(cfg Config, out renderer, stderr io.Writer, block *hooks.BlockError) int {
+	result := runResult{SessionID: cfg.Snapshot.ID, Status: statusFailed, Err: cfg.clean(block.PromptMessage()), Totals: totals{CostKnown: true}}
+	if err := out.finish(result); err != nil {
+		fmt.Fprintf(stderr, "likha: write output: %v\n", err)
+	}
+	return ExitFailed
 }
 
 // runOptions builds the agent options for a run nobody can review: no ask

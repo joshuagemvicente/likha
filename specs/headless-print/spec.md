@@ -72,7 +72,8 @@ below; change them here first if review disagrees.
 - **D1. Prompt source.** `-p TEXT` takes the prompt; `-p -` reads it from
   stdin (UTF-8, at most 256 KiB). Piped stdin is never read otherwise.
 - **D2. Exit codes.** 0 completed; 1 the run failed (model or connection
-  error, time limit, session not saved, output not written); 2 usage or
+  error, time limit, session not saved, output not written, or a
+  `prompt_submit` hook blocked the prompt before any request); 2 usage or
   configuration error before any model request; 130 interrupted by a signal.
   Refusals do not change the exit code: a run that completed with refusals
   exits 0 and reports them.
@@ -101,7 +102,11 @@ below; change them here first if review disagrees.
 - **D9. Reasoning in `--json`.** Reasoning deltas are emitted as
   `reasoning` events; the default text mode never prints reasoning.
 - **D10. Other features.** Attention notifications (FR-41) never fire.
-  Hooks (FR-45), once implemented, run as in an interactive run.
+  Hooks (FR-45) run as in an interactive run (hooks D11): a `pre_tool`
+  block is a refused `tool_result`; a `prompt_submit` block sends nothing,
+  saves nothing and exits 1 with the block message as the error;
+  `session_start`, `post_tool` and `run_end` fire, `attention` never does;
+  hook warnings and an unusable `hooks.json` are reported as notices.
   Automatic compaction (FR-42) and model recovery (FR-36) apply once
   implemented.
 

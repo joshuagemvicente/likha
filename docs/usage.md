@@ -232,6 +232,8 @@ A blocked tool call never runs and opens no review; the model receives `Blocked 
 
 **Safety.** A hook runs with your permissions, outside any review, and receives tool arguments and prompt text. Likha refuses the whole file, and runs no hook from it, when it is invalid JSON, names an unknown event or field, has an entry without a command or with a bad pattern, timeout or `on_error`, or is writable by group or others (`chmod go-w`). The refusal is shown at launch and in `/hooks`.
 
+**Headless runs.** `likha -p` loads the same `hooks.json` and runs the same hooks, except `attention` (nobody is watching). A blocked tool call is a refused result; a blocked prompt sends nothing, saves nothing and exits 1 with the block message. Hook warnings and a refused `hooks.json` appear as `likha: note:` lines on stderr, or `notice` events with `--json`. Observe-only hooks are awaited before the run's final result is written.
+
 ## File references (`@`)
 
 Type `@` in the prompt to open a file popup listing the repository's files **and folders**; keep typing to filter, ↑/↓ to move, **Enter** or **Tab** to complete, **Esc** to close. An `@path` reference in a submitted prompt — for example `explain @internal/agent/agent.go` — inlines that file's content into what the model receives, so it works with the context immediately instead of spending tool rounds reading it. A **folder reference** (`@src`, `@internal/`) inlines the folder's tree instead: one path per line, so the model sees structure and reads individual files on demand. (Package layout: see `ARCHITECTURE.md`.)
