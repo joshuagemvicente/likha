@@ -26,6 +26,39 @@ type Registry struct {
 	mu      sync.RWMutex
 	tools   map[string]registration
 	aliases map[string]map[string]bool
+	gate    Gate
+}
+
+// GateCall is a validated call as a Gate sees it: the canonical tool
+// identity, its declared effects, and a private copy of the arguments.
+type GateCall struct {
+	Name      string
+	Source    Source
+	Effects   []Effect
+	Arguments json.RawMessage
+}
+
+// Gate is a run-level policy that can only add refusals (specs/hooks).
+// BeforeTool runs after argument validation and before any authorization, so
+// a refused call never opens a review or uses a grant; a nil error lets the
+// call continue to its usual authorization unchanged. AfterTool observes the
+// final result of every call that passed BeforeTool and cannot change it.
+type Gate interface {
+	BeforeTool(ctx context.Context, scope Scope, call GateCall) error
+	AfterTool(ctx context.Context, scope Scope, call GateCall, result Result)
+}
+
+// SetGate installs the run's gate. A nil gate keeps dispatch unchanged.
+func (r *Registry) SetGate(gate Gate) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.gate = gate
+}
+
+func (r *Registry) currentGate() Gate {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.gate
 }
 
 func New() *Registry {
@@ -203,7 +236,16 @@ func (r *Registry) Catalog(scope Scope) []CatalogEntry {
 // Invoke validates identity, eligibility, and arguments before authorization.
 // It returns full handler content so the caller can retain its private artifact
 // before calling ModelContent or BoundResult. Even on error, Result is usable.
-func (r *Registry) Invoke(ctx context.Context, scope Scope, call model.ToolCall) (Result, error) {
+func (r *Registry) Invoke(ctx context.Context, scope Scope, call model.ToolCall) (result Result, err error) {
+	gate := r.currentGate()
+	// gated is set once the gate lets the call through; every later return,
+	// refusals and failures included, is then reported to AfterTool.
+	var gated *GateCall
+	defer func() {
+		if gated != nil {
+			gate.AfterTool(ctx, scope, *gated, result)
+		}
+	}()
 	entry, lookupError := r.resolve(call.Name)
 	source := entry.tool.Source
 	if ctx == nil {
@@ -242,6 +284,17 @@ func (r *Registry) Invoke(ctx context.Context, scope Scope, call model.ToolCall)
 	if err != nil {
 		return callFailure(call.Name, source, Refused, "invalid_arguments", "Invalid tool arguments: "+err.Error(), err)
 	}
+	if gate != nil {
+		gateCall := GateCall{Name: tool.Definition.Name, Source: source, Effects: append([]Effect(nil), tool.Effects...), Arguments: append(json.RawMessage(nil), arguments...)}
+		err = gate.BeforeTool(ctx, scope, gateCall)
+		if ctx.Err() != nil {
+			return cancelledCall(call.Name, source, ctx.Err())
+		}
+		if err != nil {
+			return callFailure(call.Name, source, Refused, "hook_blocked", err.Error(), err)
+		}
+		gated = &gateCall
+	}
 	if tool.Authorize != nil {
 		// The authorizer cannot mutate the validated payload handed to Run.
 		err = authorizeTool(ctx, tool.Authorize, append(json.RawMessage(nil), arguments...))
@@ -258,7 +311,7 @@ func (r *Registry) Invoke(ctx context.Context, scope Scope, call model.ToolCall)
 	if err := ctx.Err(); err != nil {
 		return cancelledCall(call.Name, source, err)
 	}
-	result, err := runTool(ctx, tool.Run, append(json.RawMessage(nil), arguments...))
+	result, err = runTool(ctx, tool.Run, append(json.RawMessage(nil), arguments...))
 	result.Executed = true
 	// Registration is authoritative provenance, including when a handler fails.
 	result.Source = source

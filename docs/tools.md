@@ -49,6 +49,10 @@ Likha can use tools from **MCP servers** (Model Context Protocol) you configure 
 - **`/mcp`** lists configured servers, their state, and their tools.
 - Invalid `mcp.json` fails loudly at startup; the file is 0600 in private state, never in the repository.
 
+## Hooks
+
+`hooks.json`, next to `mcp.json` in the private state directory, attaches your own commands to Likha events. A `pre_tool` hook can refuse a tool call before any review opens; no hook can approve anything. See [Hooks](usage.md#hooks) for the format, events and payloads.
+
 ## Command reviews
 
 To see a command review, try: “Use run_command to run `touch notes.txt`.” (Read-only commands such as `git status --short` now run without a review; see [Command approvals](#command-approvals).) The review shows the **exact shell command** and canonical repository working directory. Commands containing invisible or control characters, including tabs and line breaks, are rejected before review; control characters in other review text are escaped visibly. Again, **Approve** is available only after the whole review has been seen; **Decline** rejects without execution. An approved command runs via `sh -c` in that directory; its output and exit status appear in the conversation (long output is paged, and output above the command limit is marked truncated). **The working directory is not a sandbox. An approved command can read or change files outside the repository, access the network, and spawn detached processes that outlive cancellation.** Cancellation stops later agent actions, but it cannot guarantee that every process spawned by an approved command has terminated. Inspect the whole command before approving. Esc/Ctrl+C cancels a pending review without approving it. There is no blanket permission for edits or commands.

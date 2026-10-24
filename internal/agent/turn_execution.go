@@ -32,6 +32,9 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		return
 	}
 	harness, warnings := HarnessMessages(repo, root)
+	// Children share the run's hook gate: their pre_tool and post_tool events
+	// name the child agent (specs/hooks D12).
+	gate := newHookGate(options.Hooks, options.SessionID, root, emit)
 	scope := mainScope(options.Scope)
 	var childRunner explore.Runner
 	var taskRuntime *explore.Manager
@@ -57,7 +60,7 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 				if node.Record().Depth >= explore.MaxDepth {
 					childScope = scopeWithoutTask(childScope)
 				}
-				return ProfileRunner(client, repo, harness, childScope, options.Outputs, profile, instructions)(childCtx, node)
+				return ProfileRunner(client, repo, harness, childScope, options.Outputs, profile, instructions, gate)(childCtx, node)
 			}
 		}
 		var err error
@@ -97,7 +100,7 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		for _, definition := range definitions {
 			childScope.Allowed[definition.Name] = true
 		}
-		childRunner = ExploreRunner(client, repo, harness, childScope, options.Outputs)
+		childRunner = ExploreRunner(client, repo, harness, childScope, options.Outputs, gate)
 		emit(TurnEvent{Kind: "task_runtime", TaskRuntime: taskRuntime})
 	}
 	mainHarness := harness
@@ -129,11 +132,21 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		mainHarness = append([]model.Message(nil), mainHarness...)
 		mainHarness[0].Content += "\n\n" + options.SkillAdvert
 	}
-	applySteer := func(drained []string) {
+	// applySteer delivers drained steering prompts and reports how many
+	// reached the history: a prompt_submit hook may drop one at delivery
+	// (specs/hooks point 10) while the others stay.
+	applySteer := func(drained []string) int {
+		delivered := 0
 		for _, text := range drained {
+			if block := promptBlocked(ctx, options.Hooks, options.SessionID, root, text, emit); block != nil {
+				emit(TurnEvent{Kind: "steer_blocked", Text: text, Err: block})
+				continue
+			}
 			history = append(history, model.Message{Role: "user", Content: ExpandFileReferences(text, repo)})
 			emit(TurnEvent{Kind: "steer", Text: text, History: append([]model.Message(nil), history...)})
+			delivered++
 		}
+		return delivered
 	}
 	var continuation *model.Message
 	for round := 1; ; round++ {
@@ -199,8 +212,7 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 				fail(err)
 				return
 			}
-			if drained := drainSteer(steer); len(drained) > 0 {
-				applySteer(drained)
+			if drained := drainSteer(steer); len(drained) > 0 && applySteer(drained) > 0 {
 				continue
 			}
 			emit(TurnEvent{Kind: "done", History: history})

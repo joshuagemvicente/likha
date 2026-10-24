@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"likha/internal/agent"
+	"likha/internal/hooks"
 )
 
 // installUsage is the refusal shown for /install without a request
@@ -46,7 +47,7 @@ func (m *ui) startInstall(request string) tea.Cmd {
 	// toolRunOptions reads the flag while the turn starts; finishRun clears
 	// it, so only this run carries the plan gate.
 	m.installRun = true
-	cmd := m.startTurnDisplay("/install "+request, agent.InstallPrompt(request), nil)
+	cmd := m.startTurnDisplay(hooks.OriginInstall, "/install "+request, agent.InstallPrompt(request), nil)
 	if !m.working {
 		m.installRun = false
 	}
