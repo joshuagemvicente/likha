@@ -127,7 +127,20 @@ The provider and model must come from these flags or `LIKHA_PROVIDER`/`LIKHA_MOD
 
 Long sessions resend their entire history to the provider every turn, and eventually that exceeds the model's context window. `/compact` is the escape hatch: Likha makes **one** summarize model call over the conversation so far — preserving your goal, the decisions made, files changed and how, pending next steps, and open questions — and replaces the summarized turns with that brief, so the task continues without the transcript. Anything after `/compact` (for example `/compact focus on the approval flow refactor`) steers what the summary emphasizes without being stored as conversation content.
 
-The compacted session shows a visible marker entry ("Conversation compacted. Summary of earlier turns:") and the summary stays fully readable through normal paging; the brief travels as the conversation context on every later turn, and the session persists and resumes in its compacted state. `/compact` is **manual-only** — there is no automatic compaction near the context limit. It is refused with a visible message while a review is pending, on an empty session ("Nothing to compact yet."), and without a configured model; a failing or cancelled summarize (Esc cancels it) leaves the history untouched with a visible error, and you can retry.
+The compacted session shows a visible marker entry ("Conversation compacted. Summary of earlier turns:") and the summary stays fully readable through normal paging; the brief travels as the conversation context on every later turn, and the session persists and resumes in its compacted state. `/compact` itself runs only when you type it. It is refused with a visible message while a review is pending, on an empty session ("Nothing to compact yet."), and without a configured model; a failing or cancelled summarize (Esc cancels it) leaves the history untouched with a visible error, and you can retry.
+
+### Automatic compaction
+
+Before each model request of a run, Likha estimates the request's size. When the model's context window is known and the estimate reaches **85%** of it, Likha first compacts the conversation with the same single summarize call, then sends the request and the run carries on without any input from you:
+
+- The status line reads `Compacting…` while the summary is made. The run stays active: `/` commands stay refused and **Esc** cancels the run, leaving the conversation uncompacted.
+- The conversation shows a divider naming the trigger, for example `Conversation compacted automatically at ~86% of the 200k context window. Summary of earlier turns:`, followed by the summary. The earlier transcript stays on screen; only what is sent to the model changes.
+- The prompt that started the run and steering prompts already delivered in it are kept word for word after the summary; everything else, including the run's own tool rounds, is summarized. Prompts you queue while it compacts are delivered in the same run.
+- The turn footer adds `compacted` (`✻ gpt-5.5 · 2m 4s · 9 tools · compacted`), and the summarize call counts toward session spend. The compacted conversation is saved, so a resumed session continues compacted.
+- If compacting still leaves the request at 85% or more, or there is nothing earlier to summarize, Likha says so once and does not compact again in that run; `/compact` with a focus may help. If the summarize call fails, the error is shown, nothing is replaced, and the request is sent as it was.
+- It never runs when the context window is unknown (the status line shows `ctx ~42k/?`), and never for explore children, profile tasks or session naming.
+
+Automatic compaction is on by default. To turn it off, add `"auto_compact": false` to the private `config.json`; the status line's 80% warning and `/compact` keep working as before.
 
 ## File references (`@`)
 

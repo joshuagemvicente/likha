@@ -49,6 +49,15 @@ type StoredProviderConfig struct {
 	// owns their meaning and reads them straight from the file; this field
 	// exists so saving a theme or model never drops them.
 	Web json.RawMessage `json:"web,omitempty"`
+	// AutoCompact turns automatic compaction off when explicitly false
+	// (specs/auto-compaction D2). Absent means on, so config.json files
+	// stored before the key existed need no rewrite.
+	AutoCompact *bool `json:"auto_compact,omitempty"`
+}
+
+// AutoCompactEnabled reports whether automatic compaction is on.
+func (c StoredProviderConfig) AutoCompactEnabled() bool {
+	return FlagEnabled(c.AutoCompact)
 }
 
 // StoredCommandTrust maps a check key ("script:test", "go", "make") to the

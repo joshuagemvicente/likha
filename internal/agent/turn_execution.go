@@ -136,6 +136,51 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		}
 	}
 	var continuation *model.Message
+	buildRequest := func() []model.Message {
+		request := append(append([]model.Message(nil), mainHarness...), history...)
+		if continuation != nil {
+			request = append(request, *continuation)
+		}
+		return request
+	}
+	// runStart indexes the run's own prompt in history; automatic
+	// compaction keeps the user messages from there on verbatim.
+	// compactStoodDown ends automatic compaction for the rest of the run
+	// once it failed or could not get under the threshold (D5, D6).
+	runStart := len(prior)
+	compactStoodDown := !options.AutoCompact || options.ContextWindow <= 0
+	// compactBeforeRequest runs one automatic compaction (specs/
+	// auto-compaction). It reports false only when the run was cancelled
+	// and has already failed; every other outcome lets the request go out.
+	compactBeforeRequest := func(tokens int64) bool {
+		window := options.ContextWindow
+		emit(TurnEvent{Kind: "compacting"})
+		replacement, summary, usage, usageOK, err := compactRun(ctx, client, history, runStart)
+		if err != nil {
+			if usageOK {
+				emit(TurnEvent{Kind: "usage", Usage: &usage})
+			}
+			if ctx.Err() != nil {
+				fail(err)
+				return false
+			}
+			compactStoodDown = true
+			text := fmt.Sprintf("Automatic compaction failed: %v. Continuing without compacting again in this run.", err)
+			if errors.Is(err, errNothingToCompact) {
+				text = fmt.Sprintf("Nothing earlier to summarize at ~%d%% of the context window; continuing without compacting again in this run.", contextPercent(tokens, window))
+			}
+			emit(TurnEvent{Kind: "notice", Text: text, History: append([]model.Message(nil), history...)})
+			return true
+		}
+		history = replacement
+		runStart = 1 // compactRun puts the kept user prompts right after the summary
+		compacted := TurnEvent{Kind: "auto_compacted", Text: summary, History: append([]model.Message(nil), history...), ContextTokens: tokens, ContextWindow: window}
+		if usageOK {
+			compacted.Usage = &usage
+		}
+		emit(compacted)
+		return true
+	}
 	for round := 1; ; round++ {
 		if err := ctx.Err(); err != nil {
 			fail(err)
@@ -145,12 +190,26 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		// by the ordinary drain below; it must not stop the next request.
 		discardSteerNow(options.SteerNow)
 		applySteer(drainSteer(steer))
-		request := append(append([]model.Message(nil), mainHarness...), history...)
-		if continuation != nil {
-			request = append(request, *continuation)
-		}
+		request := buildRequest()
 		tokens, known := client.EstimateInputTokens(request, definitions)
 		emit(TurnEvent{Kind: "context", ContextTokens: tokens, ContextKnown: known, ContextEstimated: true})
+		if !compactStoodDown && shouldAutoCompact(tokens, known, options.ContextWindow) {
+			if !compactBeforeRequest(tokens) {
+				return
+			}
+			// Compaction is a safe point too: prompts queued while it ran
+			// join this request (D8), and a steer-now press is covered by
+			// that same delivery.
+			discardSteerNow(options.SteerNow)
+			applySteer(drainSteer(steer))
+			request = buildRequest()
+			tokens, known = client.EstimateInputTokens(request, definitions)
+			emit(TurnEvent{Kind: "context", ContextTokens: tokens, ContextKnown: known, ContextEstimated: true})
+			if !compactStoodDown && shouldAutoCompact(tokens, known, options.ContextWindow) {
+				compactStoodDown = true
+				emit(TurnEvent{Kind: "notice", Text: fmt.Sprintf("Still at ~%d%% of the context window after compacting; continuing without compacting again in this run. /compact with a focus may help.", contextPercent(tokens, options.ContextWindow)), History: append([]model.Message(nil), history...)})
+			}
+		}
 		roundCtx, stopRound := watchSteerNow(ctx, options.SteerNow, steer)
 		var partial, partialReasoning strings.Builder
 		assistant, usage, usageOK, err := client.StreamUsage(roundCtx, request, definitions, func(text string) {
