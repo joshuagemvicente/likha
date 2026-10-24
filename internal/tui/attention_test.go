@@ -121,7 +121,7 @@ func TestAttentionSignalsWhenReviewsOpen(t *testing.T) {
 	}
 	t.Run("web consent", func(t *testing.T) {
 		m, out, _ := attentionTestUI(t, providers.StoredAttentionConfig{})
-		m.Update(agent.TurnEvent{RunID: 1, Kind: "consent", Consent: &agent.ConsentRequest{Kind: "fetch-origin", Origin: "secret.example.com", Reply: make(chan bool, 1)}})
+		m.Update(agent.TurnEvent{RunID: 1, Kind: "consent", Consent: &agent.ConsentRequest{Kind: "fetch-origin", Origin: "secret.example.com", Reply: make(chan agent.ConsentReply, 1)}})
 		if got, want := out.String(), testBell+testOSC("approval needed"); got != want {
 			t.Fatalf("signal = %q, want %q", got, want)
 		}
@@ -455,7 +455,7 @@ func TestAttentionApprovalsNeverTimeOut(t *testing.T) {
 	}
 
 	m, _, clock = attentionTestUI(t, providers.StoredAttentionConfig{AskSkipAfterMinutes: 1})
-	consent := &agent.ConsentRequest{Kind: "fetch-origin", Origin: "example.com", Reply: make(chan bool, 1)}
+	consent := &agent.ConsentRequest{Kind: "fetch-origin", Origin: "example.com", Reply: make(chan agent.ConsentReply, 1)}
 	m.Update(agent.TurnEvent{RunID: 1, Kind: "consent", Consent: consent})
 	clock.advance(time.Hour)
 	tickAsk(m)
@@ -502,7 +502,7 @@ func TestAttentionMomentsSignalAndFireHookOnce(t *testing.T) {
 		signal string
 	}{
 		{agent.TurnEvent{RunID: 1, Kind: "approval", Approval: &agent.ApprovalRequest{Kind: "edit", Reply: make(chan bool, 1)}}, "approval needed"},
-		{agent.TurnEvent{RunID: 1, Kind: "consent", Consent: &agent.ConsentRequest{Kind: "fetch-origin", Origin: "example.com", Reply: make(chan bool, 1)}}, "approval needed"},
+		{agent.TurnEvent{RunID: 1, Kind: "consent", Consent: &agent.ConsentRequest{Kind: "fetch-origin", Origin: "example.com", Reply: make(chan agent.ConsentReply, 1)}}, "approval needed"},
 		{agent.TurnEvent{RunID: 1, Kind: "ask", Ask: &agent.AskInteraction{ID: "ask_1", CallID: "call_q", Reply: make(chan tools.AskAnswer, 1), Request: tools.AskRequest{Question: "Proceed?"}}}, "question waiting"},
 	}
 	for _, step := range steps {

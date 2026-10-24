@@ -67,16 +67,21 @@ type TurnEvent struct {
 	ContextTokens    int64
 	ContextKnown     bool
 	ContextEstimated bool
-	ToolCall         *model.ToolCall
-	ToolResult       *tools.Result
-	Task             *explore.Record
-	TaskRuntime      *explore.Manager
-	Ask              *AskInteraction
-	Consent          *ConsentRequest
+	// ContextReestimate marks an estimated "context" event that measures
+	// again the request the previous estimate announced: automatic
+	// compaction ran between them but sent nothing, so no new request
+	// starts (a request counter skips it).
+	ContextReestimate bool
+	ToolCall          *model.ToolCall
+	ToolResult        *tools.Result
+	Task              *explore.Record
+	TaskRuntime       *explore.Manager
+	Ask               *AskInteraction
+	Consent           *ConsentRequest
 	// Usage is one model request's breakdown (Kind "usage"), emitted after
 	// every successful request of a run so spend counts each tool round.
-	// A "stream_interrupted" event (steer now) carries the stopped request's
-	// usage when the provider reported any, and nil when it did not.
+	// A "stream_interrupted" event (steer now) carries no usage: a stopped
+	// stream never reaches the provider's final usage report.
 	Usage *model.RequestUsage
 	// Err is the cause of a Kind "error" event, so the interface can match it
 	// with errors.As (an effort rejection gets a hint); Text is its message.
@@ -103,7 +108,15 @@ type ConsentRequest struct {
 	Origin  string
 	URL     string
 	Privacy string // retention and data-flow disclosure shown before the decision
-	Reply   chan bool
+	Reply   chan ConsentReply
+}
+
+// ConsentReply settles one ConsentRequest. Err is set when the interface
+// could not ask at all (another interaction held the screen): the user made
+// no decision, so the caller must report a failure, never a decline.
+type ConsentReply struct {
+	Allowed bool
+	Err     error
 }
 
 // ScopeKey identifies the granted scope within one conversation.

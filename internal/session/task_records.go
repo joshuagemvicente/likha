@@ -39,7 +39,7 @@ var (
 )
 
 // This additive extension deliberately leaves the existing schema version at 1.
-func configureTaskRecords(tx *sql.Tx) error {
+func configureTaskRecords(tx schemaExecer) error {
 	for _, statement := range []string{
 		`CREATE TABLE IF NOT EXISTS task_records (
 			id TEXT PRIMARY KEY NOT NULL,
@@ -455,7 +455,7 @@ func sameTaskRecord(a, b explore.Record) bool {
 	}
 	for i, left := range a.History {
 		right := b.History[i]
-		if left.Role != right.Role || left.Content != right.Content || left.Reasoning != right.Reasoning || left.ToolCallID != right.ToolCallID || !left.Replay.Equal(right.Replay) || !slices.Equal(left.ToolCalls, right.ToolCalls) {
+		if left.Role != right.Role || left.Content != right.Content || left.Reasoning != right.Reasoning || left.Phase != right.Phase || left.ToolCallID != right.ToolCallID || !left.Replay.Equal(right.Replay) || !slices.Equal(left.ToolCalls, right.ToolCalls) {
 			return false
 		}
 	}

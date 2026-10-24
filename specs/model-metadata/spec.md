@@ -113,7 +113,10 @@ The 2026-10-04 review (recorded in chat and in `context.md`) found:
   when upstream gives a smaller input limit); `output` (max output tokens);
   `cost` in **US dollars per 1M tokens** with `input`, `output`, and optional
   `cache_read`, `cache_write`, `reasoning`, and `tiers`; `reasoning`
-  (capability flag); `modalities` (input); `status`; `updated` (upstream
+  (capability flag); `tool_call` (always `true`); `reasoning_options` (the
+  model's effort, `budget_tokens` and `toggle` controls in upstream order)
+  and `efforts` (derived from the effort entry), both per
+  [reasoning-options](../reasoning-options/spec.md); `modalities` (input); `status`; `updated` (upstream
   `last_updated`); `source` (`models.dev` or `override`); for overrides `ref`
   (doc URL or repo path), `verified` (date), optional `note`, and on a
   models.dev row an override changed, `overridden`: the fields it replaced.

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"likha/internal/hooks"
 	"likha/internal/model"
 	"likha/internal/repository"
 )
@@ -345,5 +346,114 @@ func TestSteerNowWithEmptyQueueDoesNotStop(t *testing.T) {
 	final := events[len(events)-1]
 	if indexOfKind(events, "stream_interrupted") >= 0 || final.Kind != "done" || final.History[len(final.History)-1].Content != "Whole answer." {
 		t.Fatalf("empty-queue signal stopped the response: %v", eventKinds(events))
+	}
+}
+
+// A steer-now press whose every steering prompt a prompt_submit hook blocks
+// delivers nothing, so the cut-short answer must not end the next request:
+// a request ending on an assistant turn is a prefill, which Claude rejects.
+// The model answers afresh instead.
+func TestSteerNowWithBlockedPromptDropsPartialAnswer(t *testing.T) {
+	repo, root := steerRepo(t)
+	steer := make(chan string, 4)
+	steerNow := make(chan struct{}, 1)
+	guard := hookScript(t, `case "$(cat)" in *zebra*) echo "no zebras" >&2; exit 2;; esac`)
+	options := RunOptions{SteerNow: steerNow, SessionID: "s1", Hooks: hookRunner(hooks.Hook{Event: hooks.PromptSubmit, Name: "guard", Command: guard})}
+	client, calls := steerServer(t, func(n int32, body steerRequest, w http.ResponseWriter, r *http.Request) {
+		switch n {
+		case 1:
+			sendFrame(w, `{"choices":[{"delta":{"content":"Partial answer"}}]}`)
+			<-r.Context().Done()
+		case 2:
+			m := body.Messages
+			if last := m[len(m)-1]; last.Role != "user" || last.Content != "start" {
+				t.Errorf("second request ends with %s %q, want the run's prompt: %+v", last.Role, last.Content, m)
+			}
+			sendFrame(w, `{"choices":[{"delta":{"content":"Full answer."},"finish_reason":"stop"}]}`)
+			sendFrame(w, `[DONE]`)
+		default:
+			t.Errorf("unexpected model request %d", n)
+		}
+	})
+	var events []TurnEvent
+	sent := false
+	RunTurnWithOptions(context.Background(), client, repo, root, nil, "start", nil, steer, options, func(ev TurnEvent) {
+		events = append(events, ev)
+		if ev.Kind == "text" && !sent {
+			sent = true
+			steer <- "my zebra token"
+			steerNow <- struct{}{}
+		}
+	})
+	if calls.Load() != 2 {
+		t.Fatalf("model requests = %d, want 2", calls.Load())
+	}
+	if indexOfKind(events, "steer_blocked") < 0 {
+		t.Fatalf("events = %v, want steer_blocked", eventKinds(events))
+	}
+	final := events[len(events)-1]
+	if final.Kind != "done" {
+		t.Fatalf("last event = %s, want done", final.Kind)
+	}
+	for _, message := range final.History {
+		if message.Content == "Partial answer" {
+			t.Fatalf("final history kept the cut-short answer: %+v", final.History)
+		}
+	}
+}
+
+// Cancelling the run while a prompt_submit hook screens the steering prompt
+// is not a block: the cut-short answer the transcript shows stays in the
+// history the run ends with, and no further request goes out.
+func TestSteerNowCancelledScreenKeepsPartialAnswer(t *testing.T) {
+	repo, root := steerRepo(t)
+	steer := make(chan string, 4)
+	steerNow := make(chan struct{}, 1)
+	screening := filepath.Join(t.TempDir(), "screening")
+	guard := hookScript(t, fmt.Sprintf(`touch %q; sleep 30`, screening))
+	options := RunOptions{SteerNow: steerNow, SessionID: "s1", Hooks: hookRunner(hooks.Hook{Event: hooks.PromptSubmit, Name: "guard", Command: guard, Timeout: time.Minute})}
+	client, calls := steerServer(t, func(n int32, body steerRequest, w http.ResponseWriter, r *http.Request) {
+		if n > 1 {
+			t.Errorf("unexpected model request %d", n)
+			return
+		}
+		sendFrame(w, `{"choices":[{"delta":{"content":"Partial answer"}}]}`)
+		<-r.Context().Done()
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		// Esc while the hook is still screening the steering prompt.
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(screening); err == nil {
+				cancel()
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	var events []TurnEvent
+	sent := false
+	RunTurnWithOptions(ctx, client, repo, root, nil, "start", nil, steer, options, func(ev TurnEvent) {
+		events = append(events, ev)
+		if ev.Kind == "text" && !sent {
+			sent = true
+			steer <- "steer me"
+			steerNow <- struct{}{}
+		}
+	})
+	if calls.Load() != 1 {
+		t.Fatalf("model requests = %d, want 1", calls.Load())
+	}
+	if indexOfKind(events, "steer_blocked") >= 0 {
+		t.Fatalf("a cancelled screen reported a block: %v", eventKinds(events))
+	}
+	final := events[len(events)-1]
+	if final.Kind != "error" {
+		t.Fatalf("last event = %s, want error: %v", final.Kind, eventKinds(events))
+	}
+	if last := final.History[len(final.History)-1]; last.Role != "assistant" || last.Content != "Partial answer" {
+		t.Fatalf("history ends with %s %q, want the cut-short answer: %+v", last.Role, last.Content, final.History)
 	}
 }

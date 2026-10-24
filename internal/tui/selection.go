@@ -344,11 +344,11 @@ func (m *ui) handleTextSelectionMouse(v tea.MouseMsg) bool {
 	if v.X >= 0 && v.X < m.width && v.Y >= bodyTop && v.Y < bodyTop+body {
 		row := m.scroll + v.Y - bodyTop
 		plain := m.transcriptSelectionPlain(row)
-		if strings.TrimSpace(plain) != "" && v.X < runewidth.StringWidth(plain) {
+		if strings.TrimSpace(plain) != "" && v.X < ansi.StringWidth(plain) {
 			m.freezeTranscriptSelection()
 			// Code/diff panels contain rectangle padding in the layout
 			// itself. Snapshot provenance removes it before accepting a hit.
-			if v.X >= runewidth.StringWidth(m.selection.snapshot.plain[row]) {
+			if v.X >= ansi.StringWidth(m.selection.snapshot.plain[row]) {
 				m.clearTextSelection()
 				return true
 			}
@@ -605,12 +605,16 @@ func (m *ui) transcriptSelectionAt(x, y int) textSelectionPoint {
 
 // Snap an interior cell of a wide glyph to the nearest insertion boundary.
 // Both endpoints use the same mapping, so backwards drags are symmetric.
+// Cells are measured as x/ansi measures graphemes, the measure Bubble Tea
+// truncates rows by and highlightSelectionCells cuts them by: go-runewidth
+// counts a regional-indicator flag as one cell where the screen shows two,
+// which shifted every selection after a flag by a cell.
 func selectionRuneAtCell(text string, cell int) int {
 	column, offset := 0, 0
 	clusters := uniseg.NewGraphemes(text)
 	for clusters.Next() {
 		cluster := clusters.Str()
-		width, count := runewidth.StringWidth(cluster), utf8.RuneCountInString(cluster)
+		width, count := ansi.StringWidth(cluster), utf8.RuneCountInString(cluster)
 		if cell <= column {
 			return offset
 		}
@@ -642,7 +646,7 @@ func (m *ui) highlightTranscriptSelection(row int, rendered string) string {
 	if left >= right {
 		return rendered
 	}
-	return highlightSelectionCells(rendered, runewidth.StringWidth(string(text[:left])), runewidth.StringWidth(string(text[:right])), textSelectionStyle(m.theme))
+	return highlightSelectionCells(rendered, ansi.StringWidth(string(text[:left])), ansi.StringWidth(string(text[:right])), textSelectionStyle(m.theme))
 }
 
 // Repaint only selected visible cells after the normal row renderer. ANSI

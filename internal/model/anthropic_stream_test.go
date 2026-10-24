@@ -172,6 +172,19 @@ func TestConsumeAnthropicStreamShapes(t *testing.T) {
 			wantReasoning: "cut",
 		},
 		{
+			// The whole input streamed as one JSON object before the limit
+			// ended generation: the call is complete and runs.
+			name:        "max_tokens after a complete final tool_use keeps the call",
+			events:      []string{evMessageStart, evTextStart(0), evText(0, "Globbing."), evStop(0), evToolStart(1, "t1", "glob"), evInput(1, `{"pattern":"*.go"}`), evStop(1), evMessageDelta("max_tokens"), evMessageStop},
+			wantCalls:   []ToolCall{{ID: "t1", Name: "glob", Arguments: `{"pattern":"*.go"}`}},
+			wantContent: "Globbing.",
+		},
+		{
+			name:      "context window exceeded after a complete final tool_use keeps the call",
+			events:    []string{evMessageStart, evToolStart(0, "t1", "glob"), evInput(0, `{}`), evStop(0), evMessageDelta("model_context_window_exceeded"), evMessageStop},
+			wantCalls: []ToolCall{{ID: "t1", Name: "glob", Arguments: "{}"}},
+		},
+		{
 			name:        "context window exceeded returns the message",
 			events:      []string{evMessageStart, evTextStart(0), evText(0, "long"), evStop(0), evMessageDelta("model_context_window_exceeded"), evMessageStop},
 			wantContent: "long",
@@ -254,6 +267,18 @@ func TestConsumeAnthropicStreamFailures(t *testing.T) {
 		{
 			name:    "max_tokens with a half-written tool input",
 			events:  []string{evMessageStart, evToolStart(0, "t1", "write"), evInput(0, `{"path":"a","content":"x`), evMessageDelta("max_tokens"), evMessageStop},
+			wantErr: "incomplete structured tool call at index 0",
+		},
+		{
+			// No input streamed before the limit: the empty input must not
+			// read as {} and run the tool with no arguments.
+			name:    "max_tokens right after a tool_use starts",
+			events:  []string{evMessageStart, evTextStart(0), evText(0, "Running it."), evStop(0), evToolStart(1, "t1", "run_command"), evStop(1), evMessageDelta("max_tokens"), evMessageStop},
+			wantErr: "incomplete structured tool call at index 1",
+		},
+		{
+			name:    "context window exceeded inside a tool input",
+			events:  []string{evMessageStart, evToolStart(0, "t1", "glob"), evInput(0, `{"pattern":"*.g`), evMessageDelta("model_context_window_exceeded"), evMessageStop},
 			wantErr: "incomplete structured tool call at index 0",
 		},
 		{

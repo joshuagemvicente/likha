@@ -181,8 +181,9 @@ func buildModelsTargets(stateDir, activeBase, activeCanonical, activeKey, active
 			}
 			continue
 		}
-		if creds != nil && creds[p.Name].Key != "" {
-			targets = append(targets, modelsTarget{provider: p, key: creds[p.Name].Key})
+		// Trimmed like every key source: a pasted newline would 401 here.
+		if key := strings.TrimSpace(creds[p.Name].Key); key != "" {
+			targets = append(targets, modelsTarget{provider: p, key: key})
 		}
 	}
 	activeIdx := -1
@@ -249,7 +250,7 @@ func (m *ui) modelsSources() (apis []model.Provider, oauth []model.Provider) {
 			}
 			continue
 		}
-		if creds[p.Name].Key != "" {
+		if strings.TrimSpace(creds[p.Name].Key) != "" {
 			apis = append(apis, p)
 		}
 	}
@@ -319,7 +320,7 @@ func (m *ui) startModelsFetch() tea.Cmd {
 		m.applyModelsSections(cached)
 		m.dialog.loading = false
 	}
-	m.status = "Listing models"
+	m.status = modelsListingStatus
 	if len(targets) == 0 {
 		m.rebuildModelsRows()
 		return nil
@@ -600,6 +601,13 @@ func (m *ui) applyModelRow(row modelsRow, effort *string) {
 // The swap mirrors activateProvider: stream buffers reset so no bytes from
 // the previous provider bleed into the next turn.
 func (m *ui) activateModelClient(p model.Provider, client *model.Client, modelID string, live liveEffort, effort *string) {
+	notice, err := providers.ApplyVariant(context.Background(), m.stateDir, client, p, live.reasoning(), effort)
+	if err != nil {
+		// The candidate never became live; release its ChatGPT session.
+		client.InvalidateOAuth()
+		m.entries = append(m.entries, entry{role: "Error", content: "Select model: " + err.Error()})
+		return
+	}
 	sameProvider := m.isLiveProvider(p)
 	if p.SessionHeader != "" {
 		client.SetSessionHeader(p.SessionHeader)
@@ -609,6 +617,7 @@ func (m *ui) activateModelClient(p model.Provider, client *model.Client, modelID
 		m.client.InvalidateOAuth()
 	}
 	m.client = client
+	m.selectionRevision++
 	m.modelName = modelID
 	m.streamBuf.Reset()
 	m.streaming = -1
@@ -618,21 +627,20 @@ func (m *ui) activateModelClient(p model.Provider, client *model.Client, modelID
 	m.jumpBottom()
 	m.conn.Provider = p.DisplayName
 	m.conn.ProviderCanonical = p.Name
-	m.conn.Verified = true
+	m.conn.Verified = providers.EndpointVerified(p, client.Base())
 	m.setActiveContextWindows(p, modelID, m.rowContextWindow(p.Name, modelID), sameProvider)
+	m.adoptReplacedClient()
 	m.status = "Connected"
 	m.layoutWidth = 0
-	effortNote := m.applyEffort(p, modelID, live, effort)
-	m.entries = append(m.entries, entry{role: "Likha", content: "Model switched to " + modelID + " on " + p.DisplayName + " and stored for later runs." + effortNote})
-	cfg, err := providers.LoadStoredConfig(m.stateDir)
-	if err != nil {
-		m.entries = append(m.entries, entry{role: "Error", content: "Store model: " + err.Error()})
+	m.activeLive = live
+	if notice != "" {
+		m.entries = append(m.entries, entry{role: "Likha", content: notice})
+	}
+	if err := providers.UpdateStoredConfig(context.Background(), m.stateDir, func(cfg *providers.StoredProviderConfig) error { cfg.Provider, cfg.Model = p.Name, modelID; return nil }); err != nil {
+		m.entries = append(m.entries, entry{role: "Error", content: "Model changed but was not saved: " + err.Error()})
 		return
 	}
-	cfg.Provider, cfg.Model = p.Name, modelID
-	if err := providers.SaveStoredConfig(m.stateDir, cfg); err != nil {
-		m.entries = append(m.entries, entry{role: "Error", content: "Store model: " + err.Error()})
-	}
+	m.entries = append(m.entries, entry{role: "Likha", content: "Model switched to " + modelID + " on " + p.DisplayName + " and stored for later runs."})
 }
 
 // rowContextWindow returns metadata carried by the most recently fetched
@@ -675,4 +683,15 @@ func (m *ui) setActiveContextWindows(p model.Provider, modelID string, window in
 	// different request. Re-estimate the unchanged conversation under the new
 	// model until its next request reports fresh usage.
 	m.recalculateContext(m.history)
+}
+
+// modelsListingStatus is the status while the /models dialog is open.
+const modelsListingStatus = "Listing models"
+
+// settleModelsStatus clears the dialog's listing status once the dialog is
+// gone; a status set by the chosen action (Connected, Error) stays.
+func (m *ui) settleModelsStatus() {
+	if m.status == modelsListingStatus {
+		m.status = m.settledStatus()
+	}
 }

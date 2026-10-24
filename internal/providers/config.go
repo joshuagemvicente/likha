@@ -1,10 +1,15 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
+
+	"likha/internal/model"
 )
 
 type StoredComposerConfig struct {
@@ -40,7 +45,13 @@ type StoredProviderConfig struct {
 	ContextWindows map[string]map[string]int64 `json:"context_windows,omitempty"`
 	// Efforts records the reasoning-effort level chosen per provider and model
 	// (specs/model-effort). A missing pair means Default: no effort is sent.
-	Efforts map[string]map[string]string `json:"efforts,omitempty"`
+	Efforts         map[string]map[string]string          `json:"efforts,omitempty"`
+	Variants        map[string]map[string]string          `json:"variants,omitempty"`
+	DefaultVariants map[string]map[string]string          `json:"default_variants,omitempty"`
+	VariantPresets  map[string]map[string][]model.Variant `json:"variant_presets,omitempty"`
+	ProviderOptions map[string]model.Overlay              `json:"provider_options,omitempty"`
+	ModelOptions    map[string]map[string]model.Overlay   `json:"model_options,omitempty"`
+	extra           map[string]json.RawMessage
 	// CommandTrust records, per canonical repository path, the verification
 	// checks the user trusted and their fingerprints at that time
 	// (specs/command-permissions). It is never read from a repository.
@@ -114,9 +125,16 @@ func ConfigFilePath(stateDir string) string {
 // is stored. A missing file is not an error; a corrupt file is.
 func LoadStoredConfig(stateDir string) (StoredProviderConfig, error) {
 	var cfg StoredProviderConfig
-	data, err := os.ReadFile(ConfigFilePath(stateDir))
-	if os.IsNotExist(err) {
+	path := ConfigFilePath(stateDir)
+	data, err := readPrivateFile(path)
+	if errors.Is(err, os.ErrNotExist) {
 		return cfg, nil
+	}
+	if errors.Is(err, syscall.ELOOP) {
+		// Overlay headers in config.json may carry private gateway
+		// credentials, so it is opened like a credential file: never through
+		// a link whose target someone else could control.
+		return cfg, fmt.Errorf("config.json must not be a symlink: %s: %w", path, err)
 	}
 	if err != nil {
 		return cfg, fmt.Errorf("reading stored provider config: %w", err)
@@ -129,14 +147,120 @@ func LoadStoredConfig(stateDir string) (StoredProviderConfig, error) {
 
 // saveStoredConfig persists the configuration with user-only permissions.
 func SaveStoredConfig(stateDir string, cfg StoredProviderConfig) error {
+	unlock, err := lockCredentials(context.Background(), stateDir)
+	if err != nil {
+		return fmt.Errorf("lock configuration: %w", err)
+	}
+	defer unlock()
+	if _, err := LoadStoredConfig(stateDir); err != nil {
+		return err
+	}
+	return saveConfigLocked(stateDir, cfg)
+}
+
+func saveConfigLocked(stateDir string, cfg StoredProviderConfig) error {
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("encoding stored provider config: %w", err)
 	}
-	if err := os.WriteFile(ConfigFilePath(stateDir), data, 0600); err != nil {
+	if err := writePrivateFile(ConfigFilePath(stateDir), data); err != nil {
 		return fmt.Errorf("writing stored provider config: %w", err)
 	}
 	return nil
+}
+
+// UpdateStoredConfig locks the whole read-modify-write transaction. A corrupt
+// existing file is never replaced with an empty configuration.
+func UpdateStoredConfig(ctx context.Context, stateDir string, update func(*StoredProviderConfig) error) error {
+	unlock, err := lockCredentials(ctx, stateDir)
+	if err != nil {
+		return fmt.Errorf("lock configuration: %w", err)
+	}
+	defer unlock()
+	cfg, err := LoadStoredConfig(stateDir)
+	if err != nil {
+		return err
+	}
+	if err := update(&cfg); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return saveConfigLocked(stateDir, cfg)
+}
+
+// UnmarshalJSON retains unrecognized private settings across later updates.
+func (c *StoredProviderConfig) UnmarshalJSON(data []byte) error {
+	type plain StoredProviderConfig
+	var decoded plain
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if fields == nil {
+		return errors.New("configuration must be a JSON object")
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	// Omitted known fields must not reappear from the preserved extras.
+	for key := range fields {
+		switch key {
+		case "provider", "model", "theme", "composer", "status_line", "context_windows", "efforts", "variants", "default_variants", "variant_presets", "provider_options", "model_options", "command_trust", "web", "auto_compact", "attention":
+			delete(fields, key)
+		}
+	}
+	*c = StoredProviderConfig(decoded)
+	c.extra = fields
+	return nil
+}
+
+// MarshalJSON writes known settings and preserves unknown JSON values verbatim.
+func (c StoredProviderConfig) MarshalJSON() ([]byte, error) {
+	type plain StoredProviderConfig
+	raw, err := json.Marshal(plain(c))
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	for key, value := range c.extra {
+		if _, known := fields[key]; !known {
+			fields[key] = value
+		}
+	}
+	return json.Marshal(fields)
+}
+
+// StoredVariant distinguishes a missing preference from explicit Default.
+func (c StoredProviderConfig) StoredVariant(provider, id string) (string, bool) {
+	choice, ok := c.Variants[provider][id]
+	if choice == "default" {
+		choice = ""
+	}
+	return choice, ok
+}
+
+// SetStoredVariant records Default explicitly, never as a missing pair.
+func (c *StoredProviderConfig) SetStoredVariant(provider, id, choice string) {
+	if choice == "" {
+		choice = "default"
+	}
+	if c.Variants == nil {
+		c.Variants = make(map[string]map[string]string)
+	}
+	if c.Variants[provider] == nil {
+		c.Variants[provider] = make(map[string]string)
+	}
+	c.Variants[provider][id] = choice
+}
+
+// VariantConfig returns the overlays and ordered definitions for an exact pair.
+func (c StoredProviderConfig) VariantConfig(provider, id string) model.VariantConfig {
+	return model.VariantConfig{Provider: c.ProviderOptions[provider], Model: c.ModelOptions[provider][id], Presets: c.VariantPresets[provider][id]}
 }
 
 // StoredEffort returns the effort level stored for the provider and model,

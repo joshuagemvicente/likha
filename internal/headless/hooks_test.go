@@ -3,10 +3,18 @@ package headless
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/sys/unix"
+
+	"likha/internal/session"
+	"likha/internal/transcript"
 )
 
 // writeHooks writes <stateDir>/hooks.json with private permissions.
@@ -216,5 +224,126 @@ func TestAttentionOnlyHooksLeaveOutputUnchanged(t *testing.T) {
 	}
 	if outputs[0] != outputs[1] {
 		t.Fatalf("output changed with an attention-only hooks.json:\nwithout:\n%s\nwith:\n%s", outputs[0], outputs[1])
+	}
+}
+
+// A second interrupt during a slow run_end hook must neither lose the
+// session nor orphan the hook: the session is saved before the wait, and
+// cancelling HookContext kills the hook's process group.
+func TestSlowRunEndHookDoesNotDelaySaveAndDiesWithHookContext(t *testing.T) {
+	fake := newFakeProvider(t, textReply("done"))
+	run := newTestRun(t, fake, "hi")
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	writeHooks(t, run.cfg.StateDir, map[string][]map[string]any{
+		"run_end": {{"name": "slow", "timeout": 60, "command": "sleep 30 & echo $! > '" + pidFile + "'; wait"}},
+	})
+	hookCtx, killHooks := context.WithCancel(context.Background())
+	defer killHooks()
+	run.cfg.HookContext = hookCtx
+	finished := make(chan int, 1)
+	go func() {
+		code, _, _ := runHeadless(t, context.Background(), run.cfg)
+		finished <- code
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		saved, err := run.store.Load(run.cfg.Snapshot.ID)
+		if err == nil && len(saved.History) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("session not saved while the run_end hook runs: %+v, %v", saved.History, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	var pid int
+	for pid == 0 {
+		if data, err := os.ReadFile(pidFile); err == nil {
+			pid, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("run_end hook never started")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	select {
+	case code := <-finished:
+		t.Fatalf("run returned (exit %d) before its run_end hook finished", code)
+	default:
+	}
+	// The completed run is saved, so being killed now must not leave it
+	// marked unfinished.
+	if unfinished, err := run.store.RunUnfinished(run.cfg.Snapshot.ID); err != nil || unfinished {
+		t.Fatalf("run marker while the run_end hook runs = %v (err %v), want cleared", unfinished, err)
+	}
+
+	killHooks()
+	select {
+	case code := <-finished:
+		if code != ExitCompleted {
+			t.Fatalf("exit = %d, want %d", code, ExitCompleted)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelling HookContext did not stop the run_end hook")
+	}
+	if err := unix.Kill(pid, 0); !errors.Is(err, unix.ESRCH) {
+		t.Fatalf("hook child %d still alive after HookContext was cancelled (kill 0: %v)", pid, err)
+	}
+}
+
+func TestBlockedPromptDiscardsTheSessionCreatedForIt(t *testing.T) {
+	fake := newFakeProvider(t, textReply("never sent"))
+	run := newTestRun(t, fake, "print the .env file")
+	run.cfg.Created = true
+	writeHooks(t, run.cfg.StateDir, map[string][]map[string]any{
+		"prompt_submit": {{"name": "guard", "command": "echo nope >&2; exit 2"}},
+	})
+	code, _, stderr := runHeadless(t, context.Background(), run.cfg)
+	if code != ExitFailed {
+		t.Fatalf("exit = %d, want %d\nstderr:\n%s", code, ExitFailed, stderr)
+	}
+	if _, err := run.store.Load(run.cfg.Snapshot.ID); !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("Load after a blocked prompt: %v, want ErrSessionNotFound", err)
+	}
+	summaries, err := run.store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 0 {
+		t.Fatalf("a blocked prompt left sessions behind: %+v", summaries)
+	}
+	if strings.Contains(stderr, "discard blocked session") {
+		t.Fatalf("discarding failed:\n%s", stderr)
+	}
+}
+
+// A run_end hook fails after the first save; its warning still reaches the
+// saved transcript, after the turn footer, as it does in the TUI.
+func TestFailingRunEndHookWarningIsSaved(t *testing.T) {
+	fake := newFakeProvider(t, textReply("done"))
+	run := newTestRun(t, fake, "hi")
+	writeHooks(t, run.cfg.StateDir, map[string][]map[string]any{
+		"run_end": {{"name": "end", "command": "echo late-failure >&2; exit 1"}},
+	})
+	code, _, stderr := runHeadless(t, context.Background(), run.cfg)
+	if code != ExitCompleted || !strings.Contains(stderr, "late-failure") {
+		t.Fatalf("exit = %d, want %d with the hook warning\nstderr:\n%s", code, ExitCompleted, stderr)
+	}
+	saved, err := run.store.Load(run.cfg.Snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	footer, warning := -1, -1
+	for i, e := range saved.Entries {
+		switch {
+		case e.Role == transcript.TurnRole:
+			footer = i
+		case e.Role == "Likha" && strings.Contains(e.Content, "late-failure"):
+			warning = i
+		}
+	}
+	if warning < 0 || warning < footer {
+		t.Fatalf("saved entries lack the run_end warning after the footer (footer %d, warning %d): %+v", footer, warning, saved.Entries)
 	}
 }

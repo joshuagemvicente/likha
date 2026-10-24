@@ -402,3 +402,37 @@ func TestRepositoryHookFilesAreIgnored(t *testing.T) {
 		t.Fatal("a repository hook file ran a command")
 	}
 }
+
+// Deleting the current session continues in a fresh one; its session_start
+// reports a new session, not a resumed one.
+func TestSessionStartAfterDeletingTheCurrentSessionIsNotResumed(t *testing.T) {
+	root, stateDir := t.TempDir(), t.TempDir()
+	log := filepath.Join(t.TempDir(), "events.jsonl")
+	writeHooks(t, stateDir, hooksJSON(t, "session_start", "recorder", hookShell(t, `cat >>"`+log+`"; echo >>"`+log+`"`), ""))
+	store, err := session.Open(stateDir, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	snapshot, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := hookUI(t, root, stateDir, nil, store, snapshot)
+	_, cmd := m.Update(sessionDeleteRequestedMsg{ID: snapshot.ID, Current: true})
+	runHookCmds(m, cmd)
+	if m.snapshot.ID == snapshot.ID || m.snapshot.ID == "" {
+		t.Fatalf("no fresh session replaced the deleted one: %q", m.snapshot.ID)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ev hooks.Event
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &ev); err != nil {
+		t.Fatalf("session_start payload %q: %v", data, err)
+	}
+	if ev.SessionID != m.snapshot.ID || ev.Resumed == nil || *ev.Resumed {
+		t.Fatalf("session_start = %+v (resumed %v), want the fresh session reported as not resumed", ev, ev.Resumed)
+	}
+}

@@ -23,8 +23,9 @@ stays honestly labeled unverified in the phase evidence files.
   question, then let the run continue. Expect: the queued row survives
   untouched and delivers after the tool group settles.
 - [ ] **Consent dialogs (web)** — **Deferred 2026-10-04 — user terminal required** (interactive TUI; not drivable headlessly by the coordinator). Include DuckDuckGo's first-use fragility copy. — with `web_search` enabled in
-  `tools.json`, first search shows backend + query + privacy copy; y allows,
-  n/Esc declines (no request is issued); the grant lasts the conversation and
+  `tools.json`, first search shows backend + query + privacy copy; focus starts on
+  Decline, ←/→ or Tab choose Allow/Decline, Enter confirms, Esc declines (no
+  request is issued), and no letter key decides; the grant lasts the conversation and
   resets after switching sessions or restarting.
 - [ ] **Edit recovery** — **Deferred 2026-10-04 — user terminal required** (interactive TUI; not drivable headlessly by the coordinator). Headless crash drill passed (see §3). — start an edit approval, kill the app mid-review,
   relaunch, run `/tools recovery`. Expect: the journal is offered read-only,

@@ -109,7 +109,7 @@ func TestSetupFlowPicksProviderKeyAndModel(t *testing.T) {
 	if m.setup.stage != setupChecking || !m.setup.checking {
 		t.Fatalf("check not started: stage=%d checking=%t", m.setup.stage, m.setup.checking)
 	}
-	check := setupCheckMsg{models: []string{"zeta-model"}}
+	check := setupCheckMsg{attempt: m.setup.checkAttempt, models: []string{"zeta-model"}}
 	m.Update(check)
 	// A single reported model auto-selects; setup then offers the theme stage.
 	if m.setup.stage != setupTheme {
@@ -172,7 +172,7 @@ func TestSetupCheckFailureShowsClassifiedErrorAndRetries(t *testing.T) {
 	if m.setup.stage != setupChecking {
 		t.Fatalf("check stage not reached: %d", m.setup.stage)
 	}
-	m.Update(setupCheckMsg{err: fmt.Errorf("%w: HTTP 401 Unauthorized", model.ErrUnauthorized)})
+	m.Update(setupCheckMsg{attempt: m.setup.checkAttempt, err: fmt.Errorf("%w: HTTP 401 Unauthorized", model.ErrUnauthorized)})
 	if !strings.Contains(m.View(), "rejected the credentials") {
 		t.Fatalf("failure not surfaced: %q", m.View())
 	}

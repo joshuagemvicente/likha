@@ -2,7 +2,9 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,7 +13,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
+
+	"likha/internal/headless"
+	"likha/internal/model"
 )
 
 const headlessTestKey = "sk-app-headless-456"
@@ -206,5 +213,151 @@ func TestInteractiveLaunchStillNeedsTerminal(t *testing.T) {
 	}
 	if fake.posts.Load() != 0 {
 		t.Fatal("an interactive launch without a terminal sent a prompt")
+	}
+}
+
+func TestHeadlessInterruptDuringConnectionCheckExits130(t *testing.T) {
+	headlessEnv(t)
+	release := make(chan struct{})
+	listing := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case listing <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
+	go func() {
+		<-listing
+		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+	}()
+	code, stdout, stderr := runApp("--endpoint", server.URL+"/v1", "--model", "test-model", "-p", "hi", t.TempDir())
+	if code != 130 || stdout != "" {
+		t.Fatalf("exit = %d stdout = %q stderr = %q; want 130", code, stdout, stderr)
+	}
+	if strings.Contains(stderr, "connection check failed") || !strings.Contains(stderr, "likha: interrupted by signal") {
+		t.Fatalf("stderr = %q, want only the interrupt", stderr)
+	}
+}
+
+func TestInterruptContextEscalatesOnRepeatedSignals(t *testing.T) {
+	exits := make(chan int, 1)
+	ctx, hookCtx, stop := interruptContext(context.Background(), func(code int) { exits <- code })
+	defer stop()
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("first SIGINT did not cancel the run")
+	}
+	if !errors.Is(context.Cause(ctx), headless.ErrInterrupted) {
+		t.Fatalf("cause = %v, want ErrInterrupted", context.Cause(ctx))
+	}
+	if hookCtx.Err() != nil {
+		t.Fatal("first SIGINT cancelled the hooks; run_end must still fire")
+	}
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-hookCtx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("second SIGINT did not cancel the hooks")
+	}
+	select {
+	case code := <-exits:
+		t.Fatalf("second SIGINT exited at once with %d; the run gets a grace period", code)
+	default:
+	}
+	// A third signal does not wait out the grace period.
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case code := <-exits:
+		if code != headless.ExitInterrupted {
+			t.Fatalf("third SIGINT exited with %d, want %d", code, headless.ExitInterrupted)
+		}
+	case <-time.After(forceExitGrace / 2):
+		t.Fatal("third SIGINT did not exit before the grace period ran out")
+	}
+}
+
+func TestHeadlessBlockedPromptSavesNoSession(t *testing.T) {
+	state := headlessEnv(t)
+	hooksJSON := `{"hooks":{"prompt_submit":[{"name":"guard","command":"echo no >&2; exit 2"}]}}`
+	if err := os.WriteFile(filepath.Join(state, "hooks.json"), []byte(hooksJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake := newHeadlessProvider(t, http.StatusOK)
+	repo := t.TempDir()
+	code, _, stderr := runApp("--endpoint", fake.server.URL+"/v1", "--model", "test-model", "-p", "hi", repo)
+	if code != 1 || !strings.Contains(stderr, `Prompt blocked by hook "guard"`) {
+		t.Fatalf("exit = %d stderr = %q", code, stderr)
+	}
+	if fake.posts.Load() != 0 {
+		t.Fatal("a blocked prompt was sent")
+	}
+	code, stdout, stderr := runApp("--sessions", repo)
+	if code != 0 || strings.Contains(stdout, "Untitled session") {
+		t.Fatalf("sessions after a blocked prompt: exit = %d stdout = %q stderr = %q", code, stdout, stderr)
+	}
+}
+
+// D10: a headless run compacts automatically as the TUI does, against the
+// window the provider's /models reports, unless config.json's auto_compact
+// turns it off. The resumed run's first request exceeds 85% of the tiny
+// window, so with compaction on it is preceded by one summarize request.
+func TestHeadlessAutoCompactsWithTheResolvedWindow(t *testing.T) {
+	cases := []struct {
+		name      string
+		config    string
+		wantPosts int32
+		wantNote  bool
+	}{
+		{"on by default", "", 2, true},
+		{"turned off in config.json", `{"auto_compact": false}`, 1, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state := headlessEnv(t)
+			if tc.config != "" {
+				if err := os.WriteFile(filepath.Join(state, "config.json"), []byte(tc.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			withModelDetailsFunc(t, func(context.Context, string, string) ([]model.ModelDetails, error) {
+				return []model.ModelDetails{{ID: "test-model", ContextWindow: 100}}, nil
+			})
+			fake := newHeadlessProvider(t, http.StatusOK)
+			repo := t.TempDir()
+			args := []string{"--endpoint", fake.server.URL + "/v1", "--model", "test-model"}
+			code, stdout, stderr := runApp(append(args, "--json", "-p", "one", repo)...)
+			var start struct {
+				SessionID string `json:"session_id"`
+			}
+			first, _, _ := strings.Cut(stdout, "\n")
+			if err := json.Unmarshal([]byte(first), &start); code != 0 || err != nil || start.SessionID == "" {
+				t.Fatalf("first run exit = %d start = %q (%v)\n%s", code, first, err, stderr)
+			}
+			before := fake.posts.Load()
+			code, stdout, stderr = runApp(append(args, "--resume", start.SessionID, "-p", "two", repo)...)
+			if code != 0 || stdout != "pong\n" {
+				t.Fatalf("resumed run exit = %d stdout = %q\n%s", code, stdout, stderr)
+			}
+			if posts := fake.posts.Load() - before; posts != tc.wantPosts {
+				t.Fatalf("resumed run sent %d POSTs, want %d\n%s", posts, tc.wantPosts, stderr)
+			}
+			if note := strings.Contains(stderr, "likha: note: Conversation compacted automatically at ~"); note != tc.wantNote {
+				t.Fatalf("compaction note = %t, want %t\n%s", note, tc.wantNote, stderr)
+			}
+		})
 	}
 }

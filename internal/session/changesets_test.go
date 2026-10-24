@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func changeSetPayload(n int) json.RawMessage {
@@ -228,5 +229,35 @@ func TestDatabaseWithoutUndoHistoryMigrates(t *testing.T) {
 	var version int
 	if err := reopened.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != schemaVersion {
 		t.Fatalf("schema version changed to %d: %v", version, err)
+	}
+}
+
+// /undo must take the most recently saved set even when the wall clock
+// stepped back between two edits (NTP correction, VM resume).
+func TestChangeSetsStayNewestFirstWhenClockStepsBack(t *testing.T) {
+	store, _, _ := testStore(t)
+	snapshot, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.SaveChangeSet(snapshot.ID, "call_1", changeSetPayload(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Record the first set as saved an hour ahead of the clock used next.
+	ahead := time.Now().Add(time.Hour).UTC().UnixNano()
+	if _, err := store.db.Exec(`UPDATE edit_changesets SET created_ns = ? WHERE id = ?`, ahead, first); err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.SaveChangeSet(snapshot.ID, "call_2", changeSetPayload(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest, ok, err := store.LatestChangeSet(snapshot.ID)
+	if err != nil || !ok {
+		t.Fatalf("LatestChangeSet: ok %v, err %v", ok, err)
+	}
+	if latest.ID != second {
+		t.Fatalf("latest change set = %q (call %s), want the later save %q", latest.ID, latest.ToolCallID, second)
 	}
 }

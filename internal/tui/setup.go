@@ -46,8 +46,9 @@ type setupState struct {
 	modelCursor    int                   // model index into models (not into the filtered rows)
 	err            string
 	checking       bool
-	spin           int  // spinner frame while checking or waiting for sign-in
-	ticking        bool // a setupTickMsg loop is armed
+	checkAttempt   uint64 // identity of the latest connection check; older results are stale
+	spin           int    // spinner frame while checking or waiting for sign-in
+	ticking        bool   // a setupTickMsg loop is armed
 }
 
 // updateSetup drives the first-run setup stages. It runs while ui.mode is
@@ -375,6 +376,11 @@ func (m *ui) setupWindow() int {
 func (m *ui) startSetupCheck(p model.Provider, key string, fromEnv bool) tea.Cmd {
 	m.setup.stage = setupChecking
 	m.setup.err, m.setup.checking = "", true
+	// Each check gets its own identity, like a browser sign-in attempt: a
+	// result for a key abandoned with Esc must never complete setup with
+	// the key typed since.
+	m.setup.checkAttempt++
+	attempt := m.setup.checkAttempt
 	m.setup.envKey = fromEnv
 	m.setup.models = nil
 	m.setup.contextWindows, m.setup.efforts = nil, nil
@@ -395,11 +401,12 @@ func (m *ui) startSetupCheck(p model.Provider, key string, fromEnv bool) tea.Cmd
 				windows[detail.ID] = detail.ContextWindow
 			}
 		}
-		return setupCheckMsg{provider: p, key: key, models: ids, contextWindows: windows, efforts: liveEffortsByModel(details), err: err}
+		return setupCheckMsg{attempt: attempt, provider: p, key: key, models: ids, contextWindows: windows, efforts: liveEffortsByModel(details), err: err}
 	})
 }
 
 type setupCheckMsg struct {
+	attempt        uint64 // the check's setupState.checkAttempt
 	provider       model.Provider
 	key            string
 	models         []string
@@ -457,6 +464,13 @@ func (m *ui) finishSetup(modelID string) tea.Cmd {
 		m.setup.err = err.Error()
 		return nil
 	}
+	live := m.setup.efforts[modelID]
+	notice, err := providers.ApplyVariant(context.Background(), m.stateDir, client, p, live.reasoning(), nil)
+	if err != nil {
+		client.InvalidateOAuth()
+		m.setup.err = "Select variant: " + err.Error()
+		return nil
+	}
 	if p.Auth == model.AuthOAuth {
 		bindOAuthStorage(client, m.stateDir, p.Name)
 	} else if key, fromEnv := m.setupAPIKey(); key != "" && !fromEnv {
@@ -466,13 +480,10 @@ func (m *ui) finishSetup(modelID string) tea.Cmd {
 			return nil
 		}
 	}
-	cfg, err := providers.LoadStoredConfig(m.stateDir)
-	if err != nil {
-		m.setup.err = err.Error()
+	if err := providers.UpdateStoredConfig(context.Background(), m.stateDir, func(cfg *providers.StoredProviderConfig) error {
+		cfg.Provider, cfg.Model, cfg.Theme = p.Name, modelID, m.themeName
 		return nil
-	}
-	cfg.Provider, cfg.Model, cfg.Theme = p.Name, modelID, m.themeName
-	if err := providers.SaveStoredConfig(m.stateDir, cfg); err != nil {
+	}); err != nil {
 		m.setup.err = err.Error()
 		return nil
 	}
@@ -490,9 +501,10 @@ func (m *ui) finishSetup(modelID string) tea.Cmd {
 	m.conn.Theme, m.conn.ComposerStyle = m.themeName, m.composerStyle
 	m.conn.ContextWindows = m.setup.contextWindows
 	m.resolveContextWindow()
-	// Setup never asks for effort; a stored level for the pair still applies,
-	// checked against the live levels the setup model list published.
-	m.applyEffort(p, modelID, m.setup.efforts[modelID], nil)
+	m.activeLive = live
+	if notice != "" {
+		m.entries = append(m.entries, entry{role: "Likha", content: notice})
+	}
 	m.setup.stage = setupTheme
 	m.setup.filter = nil
 	m.setup.themeCursor = 0
@@ -522,13 +534,12 @@ func (m *ui) applySetupTheme() tea.Cmd {
 	}
 	m.themeName = names[m.setup.themeCursor]
 	m.theme = likhaui.Resolve(m.themeName, likhaui.HasDarkBackground())
-	cfg, err := providers.LoadStoredConfig(m.stateDir)
-	if err == nil && cfg.Provider != "" {
+	if err := providers.UpdateStoredConfig(context.Background(), m.stateDir, func(cfg *providers.StoredProviderConfig) error {
 		cfg.Theme = m.themeName
-		if err := providers.SaveStoredConfig(m.stateDir, cfg); err != nil {
-			m.setup.err = err.Error()
-			return nil
-		}
+		return nil
+	}); err != nil {
+		m.setup.err = err.Error()
+		return nil
 	}
 	m.mode = modeMain
 	m.status = "Connected"

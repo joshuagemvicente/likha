@@ -29,7 +29,7 @@ type ChangeSetRecord struct {
 	Payload    json.RawMessage
 }
 
-func configureChangeSets(tx *sql.Tx) error {
+func configureChangeSets(tx schemaExecer) error {
 	for _, statement := range []string{
 		`CREATE TABLE IF NOT EXISTS edit_changesets (
 			id TEXT PRIMARY KEY NOT NULL,
@@ -78,9 +78,13 @@ func (s *Store) SaveChangeSet(sessionID, toolCallID string, payload json.RawMess
 		return "", fmt.Errorf("begin undo history save: %w", err)
 	}
 	defer tx.Rollback()
+	// /undo takes the set with the greatest created_ns, so it must grow with
+	// every save even if the wall clock steps back between two edits.
 	result, err := tx.Exec(`INSERT INTO edit_changesets(id, session_id, repository, created_ns, tool_call_id, size, payload)
-		SELECT ?, id, repository, ?, ?, ?, ? FROM sessions WHERE id = ? AND repository = ?`,
-		id, time.Now().UTC().UnixNano(), toolCallID, len(payload), []byte(payload), sessionID, s.root)
+		SELECT ?, id, repository,
+			max(?, coalesce((SELECT max(created_ns) FROM edit_changesets WHERE session_id = ?), 0) + 1),
+			?, ?, ? FROM sessions WHERE id = ? AND repository = ?`,
+		id, time.Now().UTC().UnixNano(), sessionID, toolCallID, len(payload), []byte(payload), sessionID, s.root)
 	if err != nil {
 		return "", fmt.Errorf("save undo history: %w", err)
 	}

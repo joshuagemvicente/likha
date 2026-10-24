@@ -370,7 +370,10 @@ func (m *ui) statusIdentity(maxWidth int, usage string) []statusSegment {
 	}
 	// The effort level (specs/model-effort) follows the model name; Default
 	// shows nothing.
-	effort := statusField(m.client.Effort(), m.width)
+	effort := statusField(m.client.Variant(), m.width)
+	if m.working && m.runClient != nil && m.client.ExecutionKey() != m.runClient.ExecutionKey() {
+		effort = "next: " + variantLabel(m.client.Variant())
+	}
 	usage = statusField(usage, m.width)
 	ctx := m.contextSegment()
 	makeParts := func(p, name, effort string) []statusSegment {
@@ -424,10 +427,7 @@ func (m *ui) statusIdentity(maxWidth int, usage string) []statusSegment {
 }
 
 func (m *ui) statusLeft(maxWidth int) []statusSegment {
-	usage := ""
-	if m.client != nil {
-		usage = m.client.Usage()
-	}
+	usage := m.rateLimitUsage()
 	parts := m.statusIdentity(maxWidth, "")
 	if usage != "" {
 		// A reported rate window rides along whenever its identity variant
@@ -528,10 +528,7 @@ func (m *ui) statusLineRows(page, pages int) []string {
 	// retire, so every width computation below happens inside the
 	// mark-reserving budget. A rate-window summary is retained before
 	// optional decorations whenever a compact mode hint makes it fit.
-	usage := ""
-	if m.client != nil {
-		usage = m.client.Usage()
-	}
+	usage := m.rateLimitUsage()
 	markWidth := m.statusMarkWidth()
 	right := hints[len(hints)-1]
 	if usage != "" {

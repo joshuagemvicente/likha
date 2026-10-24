@@ -19,7 +19,6 @@ type agentInspectionState struct {
 	cursor, scroll         int // -1 selects the built-in profile; tasks start at 0
 	sessionID, taskID      string
 	generation             uint64
-	reader                 toolOutputInspectionReader
 	detail                 agentDetailState
 
 	// Bind confirmation to the original runtime and task run, not whichever
@@ -30,17 +29,11 @@ type agentInspectionState struct {
 	runtimeRunID   string
 }
 
-func (m *ui) setAgentOutputReader(reader toolOutputInspectionReader) {
-	m.agentInspector.reader = reader
-	m.resetAgentDetail()
-}
-
-// resetAgentInspection is the session-switch/compaction hook. The attached
-// reader enforces session ownership; late detail pages are invalidated here.
+// resetAgentInspection is the session-switch/compaction hook; late detail
+// pages are invalidated here.
 func (m *ui) resetAgentInspection() {
 	m.resetAgentDetail()
-	reader, generation := m.agentInspector.reader, m.agentInspector.generation+1
-	m.agentInspector = agentInspectionState{cursor: -1, reader: reader, generation: generation}
+	m.agentInspector = agentInspectionState{cursor: -1, generation: m.agentInspector.generation + 1}
 	m.layoutWidth = 0
 }
 
@@ -77,9 +70,6 @@ func (m *ui) openAgentTaskInspection(taskID string) tea.Cmd {
 func (m *ui) beginAgentInspection() {
 	m.resetAgentInspection()
 	state := &m.agentInspector
-	if state.reader == nil {
-		state.reader = m.toolInspector.reader
-	}
 	state.open, state.sessionID = true, m.snapshot.ID
 	// There is only one historical inspector on screen. Closing the tool
 	// inspector changes no transcript focus, draft, or pending approval.
@@ -92,7 +82,7 @@ func (m *ui) beginAgentInspection() {
 // No inspector action marks reviewSeen or replies to an approval request.
 func (m *ui) agentInspectionVisible() bool {
 	return m.agentInspector.open && m.agentInspector.sessionID == m.snapshot.ID &&
-		m.pending == nil && m.mode != modeSetup && !m.keyModal.open && !m.dialog.open
+		m.pending == nil && m.mode != modeSetup && !m.keyModal.open && !m.dialog.open && !m.consentVisible()
 }
 
 // handleAgentInspection belongs after popup/modal/review handling and before

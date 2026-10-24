@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"likha/internal/model"
@@ -197,6 +200,9 @@ func validatePlanSteps(steps []PlanStep) error {
 		if n := utf8.RuneCountInString(step.Title); n < 1 || n > planMaxTitle {
 			return fmt.Errorf("plan_update step title must contain 1 to %d characters", planMaxTitle)
 		}
+		if !PlainPlanText(step.ID) || !PlainPlanText(step.Title) {
+			return errors.New("plan_update step id and title must be plain single-line text without control or format characters")
+		}
 		switch PlanStepStatus(step.Status) {
 		case PlanPending, PlanInProgress, PlanCompleted, PlanBlocked:
 		default:
@@ -204,6 +210,57 @@ func validatePlanSteps(steps []PlanStep) error {
 		}
 	}
 	return nil
+}
+
+// PlainPlanText reports whether text can be shown as one checklist row as
+// it is: no line breaks, terminal controls or invisible format characters.
+// The checklist renders one line per step, so an embedded line break could
+// forge an extra step and its status in the user's view.
+func PlainPlanText(text string) bool {
+	return strings.IndexFunc(emojiTagSequence.ReplaceAllString(text, "\U0001F3F4"), notPlainRune) < 0
+}
+
+// SanitizePlanText replaces every character PlainPlanText refuses with a
+// space. It serves steps stored before plan_update refused them: such a step
+// stays visible, on its own line. text must be valid UTF-8.
+func SanitizePlanText(text string) string {
+	var out strings.Builder
+	last := 0
+	for _, loc := range emojiTagSequence.FindAllStringIndex(text, -1) {
+		out.WriteString(strings.Map(plainRune, text[last:loc[0]]))
+		out.WriteString(text[loc[0]:loc[1]])
+		last = loc[1]
+	}
+	out.WriteString(strings.Map(plainRune, text[last:]))
+	return out.String()
+}
+
+// emojiTagSequence is one of the three subdivision flags Unicode recommends
+// for general interchange (RGI): England, Scotland and Wales, each a black
+// flag, the subdivision code (gbeng, gbsct, gbwls) in tag characters, and a
+// cancel tag. Tag characters anywhere else, or in any other code, could
+// carry text the user never sees ("IGNORE PREVIOUS INSTRUCTIONS" spelled in
+// tags renders as nothing, and even a well-formed code renders as a plain
+// black flag that hides its letters), so only these three keep them. The
+// plain black flag holds no tag characters and is always allowed.
+var emojiTagSequence = regexp.MustCompile(`\x{1F3F4}\x{E0067}\x{E0062}(?:\x{E0065}\x{E006E}\x{E0067}|\x{E0073}\x{E0063}\x{E0074}|\x{E0077}\x{E006C}\x{E0073})\x{E007F}`)
+
+func notPlainRune(r rune) bool {
+	// The zero-width joiner only fuses emoji sequences such as a
+	// technologist (man, ZWJ, laptop); unlike bidi and other format
+	// controls it cannot reorder or hide text, so it stays allowed.
+	if r == '\u200d' {
+		return false
+	}
+	return unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r) ||
+		unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r)
+}
+
+func plainRune(r rune) rune {
+	if notPlainRune(r) {
+		return ' '
+	}
+	return r
 }
 
 // planSummaryContent encodes the internal bounded counts for one accepted

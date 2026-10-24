@@ -1,10 +1,15 @@
 package cmdpolicy
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"unicode"
 )
 
@@ -27,7 +32,9 @@ var refusePatterns = []struct {
 const segmentSeparators = ";&|\n\r()`{}"
 
 // scanDanger returns Refuse or AlwaysAsk with a reason, or Ask when nothing
-// dangerous was found (Ask here means "no objection", not "prompt").
+// dangerous was found (Ask here means "no objection", not "prompt"). Ask
+// with a reason is a milder finding: the command may be remembered, but it
+// must not run in an automatic tier.
 func scanDanger(command string, sc scope) (Tier, string) {
 	for _, rule := range refusePatterns {
 		if rule.pattern.MatchString(command) {
@@ -37,11 +44,18 @@ func scanDanger(command string, sc scope) (Tier, string) {
 	command = strings.NewReplacer("${HOME}", "$HOME", "${home}", "$HOME").Replace(command)
 	best, reason := Ask, ""
 	for _, part := range strings.FieldsFunc(command, func(r rune) bool { return strings.ContainsRune(segmentSeparators, r) }) {
-		if tier, why := analyzeSegment(dangerWords(part), sc, 0); tier < best {
+		if tier, why := analyzeSegment(dangerWords(part), sc, 0); stricter(tier, why, best, reason) {
 			best, reason = tier, why
 		}
 	}
 	return best, reason
+}
+
+// stricter reports whether a finding should replace the current one: a
+// stricter tier wins, and at the same tier a stated reason beats none,
+// because an Ask with a reason rules out the automatic tiers.
+func stricter(tier Tier, why string, best Tier, reason string) bool {
+	return tier < best || tier == best && reason == "" && why != ""
 }
 
 // dangerWords splits one segment into words with quotes and backslashes
@@ -69,17 +83,29 @@ const maxNesting = 4
 func analyzeSegment(words []string, sc scope, depth int) (Tier, string) {
 	best, reason := Ask, ""
 	note := func(tier Tier, why string) {
-		if tier < best {
+		if stricter(tier, why, best, reason) {
 			best, reason = tier, why
 		}
 	}
-	for _, word := range words {
-		note(pathDanger(word, sc))
+	executable := executableIndex(words)
+	for i, word := range words {
+		note(pathDanger(word, i == executable, sc))
 	}
 	if depth <= maxNesting {
 		note(commandDanger(words, sc, depth))
 	}
 	return best, reason
+}
+
+// executableIndex returns the position of the word the shell runs: the
+// first one that is not a variable assignment, or -1 when there is none.
+func executableIndex(words []string) int {
+	for i, word := range words {
+		if !isAssignment(word) {
+			return i
+		}
+	}
+	return -1
 }
 
 func isAssignment(word string) bool {
@@ -127,7 +153,7 @@ func commandDanger(words []string, sc scope, depth int) (Tier, string) {
 			// match only costs a prompt.
 			best, reason := Ask, ""
 			for j := i + 1; j < len(words) && j <= i+8; j++ {
-				if tier, why := commandDanger(words[j:], sc, depth+1); tier < best {
+				if tier, why := commandDanger(words[j:], sc, depth+1); stricter(tier, why, best, reason) {
 					best, reason = tier, why
 				}
 			}
@@ -194,7 +220,7 @@ func programDanger(name string, args []string, sc scope, depth int) (Tier, strin
 			case "-delete":
 				return AlwaysAsk, "deletes files (find -delete)"
 			case "-exec", "-execdir", "-ok", "-okdir":
-				if tier, why := analyzeSegment(args[j+1:], sc, depth+1); tier < best {
+				if tier, why := analyzeSegment(args[j+1:], sc, depth+1); stricter(tier, why, best, reason) {
 					best, reason = tier, why
 				}
 			}
@@ -391,7 +417,9 @@ func gitDanger(args []string) (Tier, string) {
 
 // pathDanger flags credentials and anything outside the repository. Flag
 // values (`--out=/x`) and assignment values (`DIR=~/x`) are checked too.
-func pathDanger(word string, sc scope) (Tier, string) {
+// executable marks the word the shell runs, which may be a symlink out of
+// the repository (a virtualenv's bin/python) without that being a finding.
+func pathDanger(word string, executable bool, sc scope) (Tier, string) {
 	value := word
 	if strings.HasPrefix(value, "-") || isAssignment(value) {
 		eq := strings.IndexByte(value, '=')
@@ -406,27 +434,161 @@ func pathDanger(word string, sc scope) (Tier, string) {
 	if secretPath(value) {
 		return AlwaysAsk, "touches credentials or secrets (" + value + ")"
 	}
+	if strings.HasPrefix(value, "/") {
+		clean := filepath.Clean(value)
+		if safeDevices[clean] {
+			return Ask, ""
+		}
+		if endlessDevices[clean] {
+			return Ask, "reads an endless or interactive device (" + value + ")"
+		}
+	}
 	if outsidePath(value, sc) {
 		return AlwaysAsk, "reaches outside the repository (" + value + ")"
 	}
-	return Ask, ""
+	return resolvedDanger(value, executable, sc)
 }
 
-var safeDevices = map[string]bool{"/dev/null": true, "/dev/stdout": true, "/dev/stderr": true, "/dev/stdin": true, "/dev/tty": true, "/dev/zero": true}
+// safeDevices are the device paths a command may name without a prompt.
+// Commands run with stdin on /dev/null and output captured, so the standard
+// streams neither wait on input nor reach other files.
+var safeDevices = map[string]bool{
+	"/dev/null": true, "/dev/stdin": true, "/dev/stdout": true, "/dev/stderr": true,
+	"/dev/fd/0": true, "/dev/fd/1": true, "/dev/fd/2": true,
+}
+
+// endlessDevices never reach end of input or wait on the terminal, so a
+// command naming one may hang; it may still run once the user agrees.
+var endlessDevices = map[string]bool{
+	"/dev/zero": true, "/dev/random": true, "/dev/urandom": true, "/dev/tty": true,
+}
 
 func outsidePath(value string, sc scope) bool {
 	if strings.HasPrefix(value, "~") || strings.Contains(value, "$HOME") {
 		return true
 	}
 	if strings.HasPrefix(value, "/") {
-		clean := filepath.Clean(value)
-		if safeDevices[clean] || strings.HasPrefix(clean, "/dev/fd/") {
-			return false
-		}
-		return !sc.inside(clean)
+		return !sc.inside(filepath.Clean(value))
 	}
 	clean := filepath.ToSlash(filepath.Clean(value))
 	return clean == ".." || strings.HasPrefix(clean, "../")
+}
+
+// resolvedDanger repeats the outside and secret checks on the path a word
+// names once symlinks are followed. A link onto a credential file always
+// asks. A link out of the repository only rules out the automatic tiers,
+// so `cat notes.txt` prompts but may be remembered; for the executable word
+// it is not a finding at all, since interpreters often live elsewhere.
+func resolvedDanger(value string, executable bool, sc scope) (Tier, string) {
+	resolved, err := sc.resolve(value)
+	if errors.Is(err, errDanglingSymlink) {
+		return AlwaysAsk, "names a dangling symlink that cannot be resolved (" + value + ")"
+	}
+	if err != nil {
+		return AlwaysAsk, "names a path whose symlinks cannot be resolved (" + value + ")"
+	}
+	rel, inside := sc.relative(resolved)
+	// Only the repository-relative part of an inside path counts: a
+	// checkout under a directory named .aws is not itself a secret.
+	target := resolved
+	if inside {
+		target = rel
+	}
+	if secretPath(target) {
+		return AlwaysAsk, "touches credentials or secrets through a symlink (" + value + ")"
+	}
+	if !inside && !executable {
+		return Ask, "reaches outside the repository through a symlink (" + value + ")"
+	}
+	return Ask, ""
+}
+
+// maxSymlinkHops bounds how many dangling links resolve follows, like the
+// kernel's own symlink loop limit.
+const maxSymlinkHops = 32
+
+// errDanglingSymlink reports a chain of dangling links resolve gave up on.
+var errDanglingSymlink = errors.New("dangling symlink")
+
+// resolve follows symlinks in value the way the command will, from the
+// repository root, through the longest prefix that exists. A dangling link
+// on the way is followed to the target it names, because writing through it
+// creates that target. The missing rest is appended unchanged, so a new name
+// below an escaping link still escapes. The path is never cleaned before
+// resolution: "link/.." is the parent of the link's target, not the
+// directory holding the link.
+func (sc scope) resolve(value string) (string, error) {
+	path := value
+	if !strings.HasPrefix(path, "/") {
+		path = sc.primary() + "/" + value
+	}
+	for hops := 0; hops <= maxSymlinkHops; hops++ {
+		resolved, next, err := resolveExisting(path)
+		if err != nil {
+			return "", fmt.Errorf("resolve %s: %w", value, err)
+		}
+		if next == "" {
+			return resolved, nil
+		}
+		path = next
+	}
+	return "", fmt.Errorf("resolve %s: %w", value, errDanglingSymlink)
+}
+
+// resolveExisting resolves the longest existing prefix of path. When that
+// prefix ends at a dangling symlink, it returns instead the path spelled
+// through the link's target, for the caller to resolve again.
+func resolveExisting(path string) (resolved, next string, err error) {
+	for end := len(path); end >= 0; end = strings.LastIndexByte(path[:end], '/') {
+		prefix := path[:end]
+		if prefix == "" {
+			prefix = "/"
+		}
+		real, err := filepath.EvalSymlinks(prefix)
+		if err == nil {
+			return filepath.Join(real, path[end:]), "", nil
+		}
+		if !missingPath(err) {
+			return "", "", err
+		}
+		target, ok, err := danglingTarget(prefix)
+		if err != nil {
+			return "", "", err
+		}
+		if ok {
+			return "", target + path[end:], nil
+		}
+	}
+	return filepath.Clean(path), "", nil
+}
+
+// danglingTarget reports the target of prefix when prefix is itself a
+// symlink, spelled from the link's directory when the target is relative.
+func danglingTarget(prefix string) (string, bool, error) {
+	info, err := os.Lstat(prefix)
+	if missingPath(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if info.Mode()&fs.ModeSymlink == 0 {
+		return "", false, nil
+	}
+	target, err := os.Readlink(prefix)
+	if err != nil {
+		return "", false, err
+	}
+	if !strings.HasPrefix(target, "/") {
+		target = filepath.Dir(prefix) + "/" + target
+	}
+	return target, true, nil
+}
+
+// missingPath reports errors meaning the path names nothing yet, as opposed
+// to a symlink loop or an unreadable directory.
+func missingPath(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.ENAMETOOLONG)
 }
 
 var secretDirs = map[string]bool{".ssh": true, ".aws": true, ".gnupg": true, ".kube": true}

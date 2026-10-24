@@ -16,6 +16,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -51,6 +53,59 @@ const (
 
 	fetchMaxNote = 512
 )
+
+// fetchTimeout bounds the network work of one fetch, matching the search
+// backends' cap. The transport sets no per-phase timeouts, so without it a
+// server that stalls the handshake, the headers or the body holds the turn
+// forever. It is a variable so tests can shorten it.
+var fetchTimeout = 30 * time.Second
+
+// fetchDial connects to an already policy-checked address; the dialer control
+// hook validates every resolved address at connection time. It is a variable
+// only so tests can reach a stalled in-memory peer; production never
+// reassigns it.
+var fetchDial = (&net.Dialer{Control: fetchDialControl}).DialContext
+
+// fetchRootCAs replaces the system roots only in tests, which serve TLS from
+// a local certificate; production never sets it.
+var fetchRootCAs *x509.CertPool
+
+// errFetchTimedOut is the cancellation cause when fetchTimeout fires.
+var errFetchTimedOut = errors.New("web_fetch timed out")
+
+// fetchBudget is the network time one fetch may still spend. It pauses while
+// a redirect's consent prompt waits on the user, and resumes with what was
+// left, so prompts neither count against it nor refill it.
+type fetchBudget struct {
+	timer     *time.Timer
+	deadline  time.Time
+	remaining time.Duration
+}
+
+// startFetchBudget starts the clock; expire runs once limit is spent.
+func startFetchBudget(limit time.Duration, expire func()) *fetchBudget {
+	return &fetchBudget{timer: time.AfterFunc(limit, expire), deadline: time.Now().Add(limit)}
+}
+
+// pause stops the clock. It reports false when the budget already ran out,
+// in which case expire has run or is about to.
+func (b *fetchBudget) pause() bool {
+	if !b.timer.Stop() {
+		return false
+	}
+	b.remaining = time.Until(b.deadline)
+	return true
+}
+
+// resume restarts the clock with the time pause left.
+func (b *fetchBudget) resume() {
+	b.deadline = time.Now().Add(b.remaining)
+	b.timer.Reset(b.remaining)
+}
+
+func (b *fetchBudget) stop() {
+	b.timer.Stop()
+}
 
 // fetchIDNA is deliberately local: x/text ships no public idna package and no
 // new dependency is permitted, so canonicalization is case folding plus NFKC
@@ -274,18 +329,40 @@ func Fetch(ctx context.Context, consent func(ctx context.Context, scope ConsentS
 	}
 	outcome.Notes = append(outcome.Notes, fetchNote(fmt.Sprintf("Consent granted for origin %s; the fetch may proceed.", target.origin)))
 
+	// The budget starts after consent and pauses for a redirect's consent
+	// prompt: the user may take as long as they need to decide, and only
+	// network time counts. An earlier caller deadline still wins, because
+	// fetchCtx derives from ctx.
+	fetchCtx, cancelFetch := context.WithCancelCause(ctx)
+	defer cancelFetch(nil)
+	budget := startFetchBudget(fetchTimeout, func() { cancelFetch(errFetchTimedOut) })
+	defer budget.stop()
+	// contextFailure names why the fetch context ended: the caller's own
+	// cancellation or deadline wins, otherwise the fetch budget ran out.
+	contextFailure := func() error {
+		if cancelErr := ctx.Err(); cancelErr != nil {
+			return cancelErr
+		}
+		if errors.Is(context.Cause(fetchCtx), errFetchTimedOut) {
+			return fmt.Errorf("%w after %s; the server did not finish answering", errFetchTimedOut, fetchTimeout)
+		}
+		return nil
+	}
+
 	// Transport: no proxy, no cookie jar, exactly the curated headers, and a
 	// dialer control hook validating every resolved address at connection
 	// time. The transport does its own TLS using the URL host as server name
 	// with system roots and full-chain verification.
-	dialer := &net.Dialer{Control: fetchDialControl}
 	transport := &http.Transport{
 		Proxy:                 nil,
-		DialContext:           dialer.DialContext,
+		DialContext:           fetchDial,
 		MaxIdleConns:          1,
 		IdleConnTimeout:       30 * time.Second,
-		TLSHandshakeTimeout:   0, // bounded by the caller's context
-		ResponseHeaderTimeout: 0, // bounded by the caller's context
+		TLSHandshakeTimeout:   0, // bounded by fetchCtx
+		ResponseHeaderTimeout: 0, // bounded by fetchCtx
+	}
+	if fetchRootCAs != nil {
+		transport.TLSClientConfig = &tls.Config{RootCAs: fetchRootCAs}
 	}
 	permitted := map[string]bool{target.origin: true}
 	var fetchState struct {
@@ -307,7 +384,17 @@ func Fetch(ctx context.Context, consent func(ctx context.Context, scope ConsentS
 			// A new canonical origin needs its own consent before that
 			// connection is made. Already-completed hops stay recorded.
 			if !permitted[next.origin] {
+				if !budget.pause() {
+					// Settle the cause now rather than race the timer's own
+					// callback to it.
+					cancelFetch(errFetchTimedOut)
+				}
+				// Nobody is asked to approve a fetch that cannot continue.
+				if failure := contextFailure(); failure != nil {
+					return failure
+				}
 				okOrigin, originErr := consent(ctx, ConsentScope{Kind: "fetch-origin", Origin: next.origin, URL: next.canonical})
+				budget.resume()
 				if originErr != nil {
 					return originErr
 				}
@@ -325,7 +412,7 @@ func Fetch(ctx context.Context, consent func(ctx context.Context, scope ConsentS
 	}
 	defer transport.CloseIdleConnections()
 
-	request, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, target.canonical, nil)
+	request, requestErr := http.NewRequestWithContext(fetchCtx, http.MethodGet, target.canonical, nil)
 	if requestErr != nil {
 		return finish(fmt.Errorf("the web_fetch request could not be constructed: %w", requestErr))
 	}
@@ -337,8 +424,8 @@ func Fetch(ctx context.Context, consent func(ctx context.Context, scope ConsentS
 
 	response, doErr := client.Do(request)
 	if doErr != nil {
-		if cancelErr := ctx.Err(); cancelErr != nil {
-			return finish(cancelErr)
+		if ctxErr := contextFailure(); ctxErr != nil {
+			return finish(ctxErr)
 		}
 		var declined *FetchDeclinedError
 		var policy *FetchPolicyError
@@ -390,8 +477,11 @@ func Fetch(ctx context.Context, consent func(ctx context.Context, scope ConsentS
 			return finish(fmt.Errorf("web_fetch discarded the response body: Content-Length %d exceeds the %d-byte fetch cap", parsed, fetchContentLimit))
 		}
 	}
-	encoded, overCap, readErr := fetchReadCapped(ctx, response.Body, fetchContentLimit)
+	encoded, overCap, readErr := fetchReadCapped(fetchCtx, response.Body, fetchContentLimit)
 	if readErr != nil {
+		if ctxErr := contextFailure(); ctxErr != nil {
+			return finish(ctxErr)
+		}
 		return finish(readErr)
 	}
 	if overCap {

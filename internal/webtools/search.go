@@ -237,13 +237,18 @@ func validateSearchRequest(req SearchRequest) (string, int, error) {
 }
 
 // sanitizeText strips terminal/presentation control sequences from provider
-// strings without executing anything.
+// strings without executing anything. Whitespace controls (newline, tab,
+// carriage return, ...) become a plain space instead of vanishing, so a
+// multi-line snippet keeps its word boundaries.
 func sanitizeText(text string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
+		if !unicode.IsControl(r) {
+			return r
 		}
-		return r
+		if unicode.IsSpace(r) {
+			return ' '
+		}
+		return -1
 	}, strings.ToValidUTF8(text, "\uFFFD"))
 }
 

@@ -299,7 +299,7 @@ func (t *httpTransport) readStream(ctx context.Context, body io.Reader, id int) 
 		}
 		if message.Method != "" {
 			if message.isRequest() {
-				t.refuseServerRequest(ctx, message.ID)
+				t.answerServerRequest(ctx, message)
 			}
 			return rpcResponse{}, false, nil
 		}
@@ -358,16 +358,12 @@ func (t *httpTransport) response(message rpcMessage, id int) (rpcResponse, bool,
 	return reply, true, nil
 }
 
-// refuseServerRequest answers sampling, roots or elicitation requests with
-// "method not found" so the server is not left waiting.
-func (t *httpTransport) refuseServerRequest(ctx context.Context, id json.RawMessage) {
-	payload, err := json.Marshal(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"error":   rpcError{Code: -32601, Message: "method not found"},
-	})
+// answerServerRequest answers a request arriving on a response stream (see
+// serverRequestReply) so the server is not left waiting.
+func (t *httpTransport) answerServerRequest(ctx context.Context, request rpcMessage) {
+	payload, err := serverRequestReply(request)
 	if err != nil {
-		return
+		return // best effort: the response we wait for still bounds the call
 	}
 	resp, _, err := t.post(ctx, payload)
 	if err != nil {

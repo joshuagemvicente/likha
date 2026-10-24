@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -92,9 +93,12 @@ func commandExitCode(content string) *int {
 	return &code
 }
 
-// promptBlocked fires prompt_submit for a steering prompt at delivery. A
-// block returns the hook's refusal; warnings are emitted either way.
-func promptBlocked(ctx context.Context, runner *hooks.Runner, sessionID, root, text string, emit func(TurnEvent)) *hooks.BlockError {
+// screenSteeringPrompt fires prompt_submit for a steering prompt at delivery.
+// It returns nil when the prompt may be delivered, the hook's
+// *hooks.BlockError when a hook refused it, and a cancellation error when the
+// run was cancelled before every hook answered: a screen that never finished
+// must not let the prompt through. Warnings are emitted in every case.
+func screenSteeringPrompt(ctx context.Context, runner *hooks.Runner, sessionID, root, text string, emit func(TurnEvent)) error {
 	if !runner.Has(hooks.PromptSubmit) {
 		return nil
 	}
@@ -102,5 +106,11 @@ func promptBlocked(ctx context.Context, runner *hooks.Runner, sessionID, root, t
 	for _, warning := range outcome.Warnings {
 		emit(TurnEvent{Kind: "hook", Text: warning})
 	}
-	return outcome.Block
+	if outcome.Block != nil {
+		return outcome.Block
+	}
+	if outcome.Cancelled {
+		return fmt.Errorf("prompt_submit hooks did not finish: %w", ctx.Err())
+	}
+	return nil
 }

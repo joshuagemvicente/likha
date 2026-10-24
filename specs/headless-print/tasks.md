@@ -17,6 +17,37 @@ implementation:
   driver only reads the cancellation cause.
 - T11: integration tests run a binary built once in `TestMain`, because
   `go run` reports every child exit status as 1.
+- Follow-up fixes (2026-10-19, automated checks only): D10 automatic
+  compaction is wired (`internal/app` resolves the window like the TUI and
+  passes `auto_compact`; the recorder stores the TUI divider and the
+  `compacted` footer flag; renderers report a notice plus the summarize
+  `usage`). A stopped run (signal, time limit, unwritable output) stores a
+  Likha stop notice in place of the cancellation error, the TUI's
+  `Run cancelled; …` wording for a signal. The first failed output write
+  cancels the run (`errOutputFailed`). `session.Store.Save` names the
+  session once, so callers no longer re-wrap it. `redact` ignores secrets
+  shorter than 8 bytes.
+- Follow-up (2026-10-19, automated checks only): the `--json` delta
+  redactor releases each stream only up to its last whitespace not after
+  "bearer" (`deltaRedactor`, `internal/headless/render.go`), so every chunk
+  redacts as the whole response; tool_start, tool_result, usage,
+  auto_compacted, done, error and stream_interrupted end a response and
+  release the rest. A secret form holding whitespace makes the stream wait
+  for the response's end; 64 KiB without whitespace releases through
+  `redact.SplitBefore`. `redact.Secrets` merges overlapping occurrences and
+  treats a byte another redaction replaces as a word edge.
+- Follow-up (2026-10-19, automated checks only): the `auto_approved` reason
+  and the text label come from `tools.Result.AutoApproved`, which the agent
+  sets where it writes the `Approval: auto-approved (…)` line, and are
+  redacted; tool names and call IDs are redacted in both renderers. The
+  redaction list is dynamic: `Config.secrets` adds every token the client's
+  sign-in has held (`model.Client.OAuthTokens`, append-only, shared by
+  forks), and `deltaRedactor` recomputes its forms when the list grows.
+  `redact` also matches lowercase-hex percent escapes and JSON with `\/`
+  (not partly or doubly escaped spellings). `redact.SplitBefore` searches as
+  if an open bearer's value had arrived, so a short key right before
+  "bearer" and a long run of spaces is never split by a cap release; its
+  tail must exceed the longest whole-token form plus the longest form.
 
 Ordered implementation tasks. Behavior wording lives in [spec.md](spec.md);
 code paths in [context.md](context.md). Each milestone leaves `go test ./...`
@@ -69,7 +100,9 @@ Fixed values (spec decisions and drafting defaults):
       `RunOptions` from T3 with `NoReviewer` set, `Ask`/`WebSearch`/
       `WebFetch` nil, `servers` nil, `steer` nil, then calls
       `agent.RunTurnWithOptions`. Context carries `--max-time` and signal
-      cancellation (SIGINT/SIGTERM; a second signal exits at once).
+      cancellation (SIGINT/SIGTERM; a second signal kills hook process
+      groups and exits within 2 seconds, the session already saved; a
+      third exits at once).
       *Verify:* unit test with a fake `model.Client` endpoint (`httptest`)
       covering completed, failed, cancelled, time limit.
 - [x] **T5. Text renderer.** stderr progress lines (start, tool start and

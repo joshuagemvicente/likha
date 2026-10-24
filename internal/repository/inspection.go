@@ -148,6 +148,9 @@ func (r *Repository) GlobPage(ctx context.Context, pattern string, opts QueryOpt
 	}
 	var paths []string
 	body := newInspectionBuffer(inspectionContentBytes - 1024)
+	if !visible {
+		state.excludedScope(scope)
+	}
 	if visible {
 		err = state.walk(ctx, dir, inspectionPrefix(scope), ignores, opts, include, func(parent *os.File, name, path string) error {
 			if !globMatch(segments, strings.Split(path, string(os.PathSeparator))) {
@@ -297,6 +300,9 @@ func (r *Repository) GrepPage(ctx context.Context, pattern string, opts QueryOpt
 			rest = next
 		}
 		return nil
+	}
+	if !visible {
+		state.excludedScope(scope)
 	}
 	if visible {
 		if info.IsDir() {

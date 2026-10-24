@@ -890,3 +890,19 @@ func TestProvidersDialogOAuthRow(t *testing.T) {
 		t.Fatalf("signed-in chatgpt row = %q", row)
 	}
 }
+
+// A provider whose key variable holds only whitespace has no key: its row
+// opens key entry, not the configured auth view, matching startup, which
+// skips a blank variable.
+func TestProviderAuthBlankEnvKeyIsUnconfigured(t *testing.T) {
+	p, ok := model.LookupProvider("openrouter")
+	if !ok {
+		t.Fatal("openrouter missing from the predefined list")
+	}
+	t.Setenv(p.KeyEnv, " \n")
+	m := newProvidersUI(t, t.TempDir(), "https://gateway.example.net/v1")
+	m.openProviderAuth(p)
+	if !m.keyModal.open || m.keyModal.auth {
+		t.Fatalf("blank %s opened %+v, want the key-entry modal", p.KeyEnv, m.keyModal)
+	}
+}

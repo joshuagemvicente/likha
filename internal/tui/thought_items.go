@@ -163,6 +163,7 @@ func (m *ui) beginTurnFooter() {
 	m.turnStarted = m.now()
 	m.turnModel = m.modelName
 	m.turnEffort = m.client.Effort()
+	m.turnVariant = m.client.Variant()
 	m.turnThoughtBase = m.reasoningCount()
 	m.turnToolItems = 0
 	m.turnCompacted = false
@@ -180,6 +181,7 @@ func (m *ui) appendTurnFooter(tools int, cancelled bool) {
 	info := transcript.TurnInfo{
 		Model:     m.turnModel,
 		Effort:    m.turnEffort,
+		Variant:   m.turnVariant,
 		Duration:  max(m.now().Sub(m.turnStarted), 0),
 		Tools:     tools,
 		Compacted: m.turnCompacted,

@@ -383,8 +383,14 @@ func (d *responsesStreamDecoder) completed(payload string) error {
 		return err
 	}
 	var text, reasoning strings.Builder
+	var rawOutput []json.RawMessage
+	if err := json.Unmarshal(response.Output, &rawOutput); err != nil {
+		return err
+	}
+	var replayItems []json.RawMessage
+	phase := ""
 	hasFinalText := false
-	for _, item := range output {
+	for i, item := range output {
 		if item.Type == "" {
 			return errors.New("response.completed output item is missing its type")
 		}
@@ -393,6 +399,13 @@ func (d *responsesStreamDecoder) completed(payload string) error {
 		}
 		switch item.Type {
 		case "message":
+			var meta struct {
+				Phase string `json:"phase"`
+			}
+			if err := json.Unmarshal(rawOutput[i], &meta); err != nil {
+				return err
+			}
+			phase = meta.Phase
 			for _, part := range item.Content {
 				switch part.Type {
 				case "output_text":
@@ -404,6 +417,20 @@ func (d *responsesStreamDecoder) completed(payload string) error {
 				}
 			}
 		case "reasoning":
+			var raw struct {
+				Encrypted *string `json:"encrypted_content"`
+			}
+			if err := json.Unmarshal(rawOutput[i], &raw); err != nil {
+				return err
+			}
+			if !validResponsesID(item.ID) && raw.Encrypted != nil {
+				return errors.New("encrypted Responses reasoning is missing a valid item ID")
+			}
+			// Without encrypted state the item cannot be replayed under
+			// store:false; keeping it would make the next request fail.
+			if validResponsesID(item.ID) && raw.Encrypted != nil && *raw.Encrypted != "" {
+				replayItems = append(replayItems, rawOutput[i])
+			}
 			for _, part := range item.Summary {
 				if part.Type == "summary_text" {
 					reasoning.WriteString(part.Text)
@@ -430,6 +457,16 @@ func (d *responsesStreamDecoder) completed(payload string) error {
 		rawUsage = response.Usage
 	}
 	d.usage = parseCodexUsageDetailed(rawUsage)
-	d.message = Message{Role: "assistant", Content: d.text.String(), Reasoning: d.reasoning.String(), ToolCalls: calls}
+	d.message = Message{Role: "assistant", Content: d.text.String(), Reasoning: d.reasoning.String(), ToolCalls: calls, Phase: phase}
+	if len(replayItems) > 0 {
+		raw, err := json.Marshal(replayItems)
+		if err != nil {
+			return fmt.Errorf("encode Responses replay: %w", err)
+		}
+		if !validResponsesReplay(raw) {
+			return errors.New("completed Responses reasoning replay is invalid or exceeds limits")
+		}
+		d.message.Replay = &ReasoningReplay{Responses: raw}
+	}
 	return nil
 }

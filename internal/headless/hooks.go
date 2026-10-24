@@ -13,6 +13,8 @@ import (
 // delays the run; wait collects them before the run reports its result.
 // attention never fires: nobody is watching a headless run.
 type hookSet struct {
+	// ctx parents observe-only hooks; it is not the run's context.
+	ctx       context.Context
 	runner    *hooks.Runner
 	sessionID string
 	root      string
@@ -41,8 +43,8 @@ func (h *hookSet) event(name hooks.EventName) hooks.Event {
 }
 
 // observe fires an observe-only event in the background. Hooks get their
-// own timeouts, not the run's context, so run_end still runs after a
-// cancelled or timed-out run.
+// own timeouts under h.ctx, not the run's context, so run_end still runs
+// after a cancelled or timed-out run.
 func (h *hookSet) observe(ev hooks.Event) {
 	if !h.runner.Has(ev.Event) {
 		return
@@ -50,7 +52,7 @@ func (h *hookSet) observe(ev hooks.Event) {
 	h.pending.Add(1)
 	go func() {
 		defer h.pending.Done()
-		for _, warning := range h.runner.Fire(context.Background(), ev).Warnings {
+		for _, warning := range h.runner.Fire(h.ctx, ev).Warnings {
 			h.warn(warning)
 		}
 	}()

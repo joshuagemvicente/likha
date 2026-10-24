@@ -59,6 +59,9 @@ func TestListModelsWithDetailsAnthropicPages(t *testing.T) {
 		{ID: "claude-haiku-4-5", DisplayName: "Claude Haiku 4.5", ContextWindow: 200000, ContextWindowSource: "max_input_tokens"},
 		{ID: "claude-opus-4-7", DisplayName: "Claude Opus 4.7"},
 	}
+	adaptive, manual := true, false
+	want[0].Reasoning = &ReasoningCapabilities{EffortsKnown: true, Efforts: want[0].Efforts, Adaptive: &adaptive, Output: 128000}
+	want[1].Reasoning = &ReasoningCapabilities{EffortsKnown: true, Adaptive: &manual, Output: 64000}
 	if !reflect.DeepEqual(details, want) {
 		t.Fatalf("details\n got %+v\nwant %+v", details, want)
 	}

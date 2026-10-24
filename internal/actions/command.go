@@ -28,6 +28,12 @@ type CommandResult struct {
 	Captured  string
 	Truncated bool
 	Discarded int64
+
+	// BackgroundLeftRunning reports that a background process still held the
+	// output open after the shell exited. It was left running, as background
+	// jobs are, but output it wrote after the capture closed was not captured,
+	// and a further write to that closed output may end it (SIGPIPE).
+	BackgroundLeftRunning bool
 }
 
 // RunCommand runs the exact approved shell text in root. The working directory
@@ -35,34 +41,42 @@ type CommandResult struct {
 // A nonzero shell exit returns a result, not a launch error.
 func RunCommand(ctx context.Context, root, command string) (CommandResult, error) {
 	var output limitedOutput
-	exitCode, err := executeCommand(ctx, root, command, &output)
+	exit, err := executeCommand(ctx, root, command, &output)
 	if err != nil {
 		// Preserve the legacy result on cancellation or an execution error.
-		exitCode = 0
+		exit.code = 0
 	}
-	return CommandResult{Output: output.String(), ExitCode: exitCode}, err
+	return CommandResult{Output: output.String(), ExitCode: exit.code, BackgroundLeftRunning: exit.backgroundLeftRunning}, err
+}
+
+// commandExit is how one shell run ended.
+type commandExit struct {
+	code int
+	// backgroundLeftRunning reports that a background process kept the
+	// output open past the shell's exit; see CommandResult.BackgroundLeftRunning.
+	backgroundLeftRunning bool
 }
 
 // executeCommand shares the exact-shell execution and cancellation behavior.
 // Callers must validate and authorize the command before reaching this helper.
-func executeCommand(ctx context.Context, root, command string, output io.Writer) (int, error) {
+func executeCommand(ctx context.Context, root, command string, output io.Writer) (commandExit, error) {
 	canonical, err := filepath.Abs(root)
 	if err != nil {
-		return 0, fmt.Errorf("repository: %w", err)
+		return commandExit{}, fmt.Errorf("repository: %w", err)
 	}
 	canonical, err = filepath.EvalSymlinks(canonical)
 	if err != nil {
-		return 0, fmt.Errorf("repository: %w", err)
+		return commandExit{}, fmt.Errorf("repository: %w", err)
 	}
 	info, err := os.Stat(canonical)
 	if err != nil {
-		return 0, fmt.Errorf("repository: %w", err)
+		return commandExit{}, fmt.Errorf("repository: %w", err)
 	}
 	if !info.IsDir() {
-		return 0, fmt.Errorf("repository %q is not a directory", root)
+		return commandExit{}, fmt.Errorf("repository %q is not a directory", root)
 	}
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return commandExit{}, err
 	}
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = canonical
@@ -74,34 +88,69 @@ func executeCommand(ctx context.Context, root, command string, output io.Writer)
 		if cmd.Process == nil {
 			return os.ErrProcessDone
 		}
-		if err := unix.Kill(-cmd.Process.Pid, unix.SIGKILL); err != nil {
-			if errors.Is(err, unix.ESRCH) {
-				return os.ErrProcessDone
-			}
-			return err
-		}
-		return nil
+		return KillProcessGroup(cmd.Process.Pid)
 	}
 	// A child that inherits stdout/stderr must not keep Wait blocked forever
 	// after its parent has been cancelled or has exited.
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Stdout, cmd.Stderr = output, output
 	err = cmd.Run()
-	exitCode := 0
+	exit := commandExit{}
 	if cmd.ProcessState != nil {
-		exitCode = cmd.ProcessState.ExitCode()
+		exit.code = cmd.ProcessState.ExitCode()
 	}
 	if ctx.Err() != nil {
-		return exitCode, ctx.Err()
+		// Cancel only fires while the shell runs; a shell that exited just
+		// before the cancel can still leave its pipeline behind. A command
+		// that finished normally keeps its background jobs (`server &`).
+		if cmd.Process != nil {
+			if killErr := KillLeftoverProcessGroup(cmd.Process.Pid); killErr != nil {
+				return exit, fmt.Errorf("stop cancelled command: %w", killErr)
+			}
+		}
+		return exit, ctx.Err()
 	}
 	if err == nil {
-		return exitCode, nil
+		return exit, nil
 	}
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		return exit.ExitCode(), nil
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		exit.code = exitErr.ExitCode()
+		return exit, nil
 	}
-	return exitCode, fmt.Errorf("execute command: %w", err)
+	// Wait reports ErrWaitDelay only when the shell itself exited 0 but a
+	// background child still held the output pipes: the command succeeded,
+	// and the child keeps running with its output no longer captured.
+	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
+		exit.backgroundLeftRunning = true
+		return exit, nil
+	}
+	return exit, fmt.Errorf("execute command: %w", err)
+}
+
+// KillProcessGroup sends SIGKILL to every process in the group led by pid.
+// An already empty group reports os.ErrProcessDone.
+func KillProcessGroup(pid int) error {
+	if err := unix.Kill(-pid, unix.SIGKILL); err != nil {
+		if errors.Is(err, unix.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return fmt.Errorf("kill process group %d: %w", pid, err)
+	}
+	return nil
+}
+
+// KillLeftoverProcessGroup kills what remains of the group led by pid after
+// its leader has been reaped. Nothing left is not an error, and neither is
+// EPERM: Darwin reports it for a group holding only zombies that init has
+// yet to reap, and a live member this user may not signal could not be
+// stopped by a retry either.
+func KillLeftoverProcessGroup(pid int) error {
+	err := KillProcessGroup(pid)
+	if errors.Is(err, os.ErrProcessDone) || errors.Is(err, unix.EPERM) {
+		return nil
+	}
+	return err
 }
 
 // CommandEnv returns env without Likha's provider credentials: commands the

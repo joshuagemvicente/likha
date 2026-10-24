@@ -265,7 +265,7 @@ func targetedSnapshotParent(root string, parts []string, dirs map[string]*target
 			}
 		}
 		if previous, exists := dirs[path]; exists {
-			if (previous.before == nil) != (info == nil) || info != nil && !sameState(info, previous.before) {
+			if (previous.before == nil) != (info == nil) || info != nil && !sameDirectory(info, previous.before) {
 				if current != nil {
 					current.Close()
 				}
@@ -524,7 +524,7 @@ func (a *targetedApply) preflight() error {
 		if err != nil {
 			return err
 		}
-		if !sameState(d.info, plan.before) {
+		if !sameDirectory(d.info, plan.before) {
 			return fmt.Errorf("directory %q: %w", plan.path, ErrStaleEdit)
 		}
 	}

@@ -137,7 +137,7 @@ func (m *ui) openToolResultInspection() tea.Cmd {
 // toolInspectionVisible also keeps a newly arrived approval above historical
 // output. Inspection never marks reviewSeen or replies to an approval request.
 func (m *ui) toolInspectionVisible() bool {
-	return m.toolInspector.open && m.toolInspector.sessionID == m.snapshot.ID && m.pending == nil && m.mode != modeSetup && !m.keyModal.open && !m.dialog.open
+	return m.toolInspector.open && m.toolInspector.sessionID == m.snapshot.ID && m.pending == nil && m.mode != modeSetup && !m.keyModal.open && !m.dialog.open && !m.consentVisible()
 }
 
 // handleToolInspection belongs after popup/modal/review key handling and before

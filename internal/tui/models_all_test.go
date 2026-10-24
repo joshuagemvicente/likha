@@ -592,3 +592,71 @@ func TestAllModelsSectionDeduplicatesRepeatedIds(t *testing.T) {
 		t.Fatalf("intra-section duplicate labeled: %q", view)
 	}
 }
+
+// Picking another model of the live provider keeps the endpoint the run
+// started with: a Bedrock session pointed at another region must not fall
+// back to the catalog's us-east-1 base, and the region stays verified.
+func TestModelsSameProviderKeepsEndpointOverride(t *testing.T) {
+	stateDir := t.TempDir()
+	storedProviderKey(t, stateDir, "bedrock", "k-bedrock")
+	bedrock, ok := model.LookupProvider("bedrock")
+	if !ok {
+		t.Fatal("bedrock missing from the predefined list")
+	}
+	const regional = "https://bedrock-runtime.eu-west-1.amazonaws.com/openai/v1"
+	client, err := model.New(regional, "model-a", "k-bedrock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified := providers.EndpointVerified(bedrock, regional)
+	m := modelsTestUI(t, client, "model-a", providers.Connection{Provider: bedrock.DisplayName, ProviderCanonical: bedrock.Name, Verified: verified}, stateDir)
+	m.applyModelRow(modelsRow{provider: bedrock, model: "model-b"}, nil)
+	if m.modelName != "model-b" {
+		t.Fatalf("model = %q, want model-b", m.modelName)
+	}
+	if got := m.client.Base(); got != regional {
+		t.Fatalf("endpoint after switching models = %q, want the override %q", got, regional)
+	}
+	if !m.conn.Verified {
+		t.Fatal("a documented Bedrock region shows as unverified")
+	}
+}
+
+// A switch to another provider's model computes the marker from the
+// endpoint it actually uses, the provider's own base URL.
+func TestModelsForeignSwitchVerifiesItsEndpoint(t *testing.T) {
+	stateDir := t.TempDir()
+	storedProviderKey(t, stateDir, "openrouter", "k-router")
+	client, err := model.New("https://gateway.example.net/v1", "custom-a", "k-custom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := modelsTestUI(t, client, "custom-a", providers.Connection{Provider: "Custom endpoint", Verified: false}, stateDir)
+	router, ok := model.LookupProvider("openrouter")
+	if !ok {
+		t.Fatal("openrouter missing from the predefined list")
+	}
+	m.applyModelRow(modelsRow{provider: router, model: "router-a"}, nil)
+	if m.client.Base() != router.BaseURL || !m.conn.Verified {
+		t.Fatalf("after switching to OpenRouter: base %q verified %t, want %q verified", m.client.Base(), m.conn.Verified, router.BaseURL)
+	}
+}
+
+// /models lists each provider with its stored key trimmed, and a blank
+// stored key configures nothing, as at startup.
+func TestModelsTargetsTrimStoredKeys(t *testing.T) {
+	stateDir := t.TempDir()
+	if err := providers.WriteCredentials(stateDir, map[string]providers.StoredCredential{
+		"openrouter": {Type: "api", Key: "sk-router\n"},
+		"groq":       {Type: "api", Key: "  "},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]string{}
+	for _, target := range buildModelsTargets(stateDir, "", "", "", "") {
+		keys[target.provider.Name] = target.key
+	}
+	if want := map[string]string{"openrouter": "sk-router"}; !reflect.DeepEqual(keys, want) {
+		t.Fatalf("models targets = %q, want %q", keys, want)
+	}
+}

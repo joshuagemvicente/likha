@@ -20,7 +20,7 @@ import (
 
 func TestRejectedReplayTurnErrorCarriesHint(t *testing.T) {
 	const providerError = "model HTTP 400 Bad Request: missing reasoning_content"
-	replay := &model.ReplayRejectedError{Missing: 1, Err: errString(providerError)}
+	replay := &model.ReplayRejectedError{Missing: 1, Err: errors.New(providerError)}
 	cases := []struct {
 		name string
 		err  error
@@ -30,9 +30,9 @@ func TestRejectedReplayTurnErrorCarriesHint(t *testing.T) {
 		{
 			"replay and effort",
 			&model.EffortRejectedError{Level: "max", Err: replay},
-			providerError + "\nSent with effort max; /effort default sends none.\n" + replayRejectedHint,
+			providerError + "\nSent with effort max; use /variants → Default to remove the preset.\n" + replayRejectedHint,
 		},
-		{"neither", errString(providerError), providerError},
+		{"neither", errors.New(providerError), providerError},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

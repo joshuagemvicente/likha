@@ -38,7 +38,16 @@ approval flow, or session storage.
 5. **Precedence after setup:** flag > environment > stored config. Stored
    config only supplies what was not given explicitly. There is no built-in
    local default; an unconfigured run always starts setup (interactive) or
-   fails clearly (non-interactive).
+   fails clearly (non-interactive). Keys from `--api-key`, `LIKHA_API_KEY`,
+   `LIKHA_<NAME>_API_KEY` and `providers.json` are trimmed of surrounding
+   whitespace; a blank value counts as unset, and resolution continues to
+   the next source. Only a key passed with `--api-key` is ever stored. A
+   listed provider's `--endpoint` counts as verified when it is an `https`
+   URL equal to the provider's base URL (ignoring a trailing slash), or the
+   same path on one of the provider's documented regional hosts (Amazon
+   Bedrock: `bedrock-runtime.<region>.amazonaws.com`). Any other endpoint,
+   including one with user info, an explicit port, or a query, runs with
+   the visible unverified marker.
 6. **Re-running setup:** stored config is used until the user overrides it
    with flags; editing `config.json` (or removing it) re-triggers setup.
 

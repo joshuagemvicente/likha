@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"slices"
+
 	"likha/internal/explore"
 	"likha/internal/profiles"
 	"likha/internal/tools"
@@ -47,6 +49,19 @@ func builtinProfileByName(name string) (profiles.Profile, string, bool) {
 		return ReviewProfile, reviewInstructions, true
 	}
 	return profiles.Profile{}, "", false
+}
+
+// runTaskProfiles is the run's profile list with the built-in review profile
+// first when the task tool advertises it: review runs on the generic profile
+// runner with its compiled instructions, and without a runner every review
+// task would be refused as an unknown agent. Discovery reserves the name, so
+// no user profile can collide with it.
+func runTaskProfiles(options RunOptions) []TaskProfile {
+	if !slices.Contains(options.TaskAgents, ReviewProfile.Name) {
+		return options.TaskProfiles
+	}
+	review := TaskProfile{Profile: ReviewProfile, Instructions: reviewInstructions}
+	return append([]TaskProfile{review}, options.TaskProfiles...)
 }
 
 // ReviewInstructions exposes the built-in review profile's instruction text

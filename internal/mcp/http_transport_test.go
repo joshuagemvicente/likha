@@ -30,8 +30,8 @@ type fakeHTTPServer struct {
 	requests   []recorded
 	session    string
 	sessions   int
-	expireNext bool // answer the next tools/call with 404 (session expired)
-	samplingOn bool // tools/call first sends a server request on the stream
+	expireNext bool   // answer the next tools/call with 404 (session expired)
+	serverAsks string // tools/call first sends a server request with this method on the stream
 	hangDelete chan struct{}
 	answers    []string // responses Likha posted to server requests
 	replies    chan json.RawMessage
@@ -95,6 +95,7 @@ func (f *fakeHTTPServer) serve(w http.ResponseWriter, r *http.Request) {
 		ID     json.RawMessage `json:"id"`
 		Method string          `json:"method"`
 		Params json.RawMessage `json:"params"`
+		Result json.RawMessage `json:"result"`
 		Error  json.RawMessage `json:"error"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&message); err != nil {
@@ -118,7 +119,7 @@ func (f *fakeHTTPServer) serve(w http.ResponseWriter, r *http.Request) {
 
 	if message.Method == "" { // a response from Likha (to a server request)
 		f.mu.Lock()
-		f.answers = append(f.answers, string(message.Error))
+		f.answers = append(f.answers, fmt.Sprintf("id=%s result=%s error=%s", message.ID, message.Result, message.Error))
 		f.mu.Unlock()
 		f.replies <- message.Error
 		w.WriteHeader(http.StatusAccepted)
@@ -197,10 +198,10 @@ func (f *fakeHTTPServer) raw(w http.ResponseWriter, message string) {
 	fmt.Fprint(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{\"level\":\"info\",\"data\":\"working\"}}\n\n")
 	flusher.Flush()
 	f.mu.Lock()
-	sampling := f.samplingOn
+	asks := f.serverAsks
 	f.mu.Unlock()
-	if sampling && strings.Contains(message, `"content"`) {
-		fmt.Fprint(w, "data: {\"jsonrpc\":\"2.0\",\"id\":\"srv-1\",\"method\":\"sampling/createMessage\",\"params\":{}}\n\n")
+	if asks != "" && strings.Contains(message, `"content"`) {
+		fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":\"srv-1\",\"method\":%q,\"params\":{}}\n\n", asks)
 		flusher.Flush()
 		select {
 		case <-f.replies:
@@ -224,7 +225,7 @@ func TestHTTPServerHandshakeAndCall(t *testing.T) {
 		t.Run(fmt.Sprintf("sse=%t", sse), func(t *testing.T) {
 			t.Setenv("LIKHA_TEST_MCP_TOKEN", testToken)
 			fake, server := newFakeHTTPServer(t, sse)
-			client, err := Start("docs", httpConfig(server.URL), "likha/1.2.3")
+			client, err := Start(context.Background(), "docs", httpConfig(server.URL), "likha/1.2.3")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -257,32 +258,43 @@ func TestHTTPServerHandshakeAndCall(t *testing.T) {
 	}
 }
 
-func TestHTTPServerRequestOnStreamIsRefused(t *testing.T) {
-	t.Setenv("LIKHA_TEST_MCP_TOKEN", testToken)
-	fake, server := newFakeHTTPServer(t, true)
-	client, err := Start("docs", httpConfig(server.URL), "likha/1.2.3")
-	if err != nil {
-		t.Fatal(err)
+func TestHTTPServerRequestOnStreamIsAnswered(t *testing.T) {
+	cases := []struct {
+		method string
+		want   string
+	}{
+		{"sampling/createMessage", `id="srv-1" result=null error={"code":-32601,"message":"method not found"}`},
+		{"ping", `id="srv-1" result={} error=null`},
 	}
-	defer client.Close()
-	fake.mu.Lock()
-	fake.samplingOn = true
-	fake.mu.Unlock()
-	if _, _, err := client.Call(context.Background(), "echo", json.RawMessage(`{}`)); err != nil {
-		t.Fatal(err)
-	}
-	fake.mu.Lock()
-	answers := append([]string(nil), fake.answers...)
-	fake.mu.Unlock()
-	if len(answers) != 1 || !strings.Contains(answers[0], "-32601") {
-		t.Fatalf("server request answered with %q, want one method-not-found error", answers)
+	for _, tc := range cases {
+		t.Run(tc.method, func(t *testing.T) {
+			t.Setenv("LIKHA_TEST_MCP_TOKEN", testToken)
+			fake, server := newFakeHTTPServer(t, true)
+			client, err := Start(context.Background(), "docs", httpConfig(server.URL), "likha/1.2.3")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			fake.mu.Lock()
+			fake.serverAsks = tc.method
+			fake.mu.Unlock()
+			if _, _, err := client.Call(context.Background(), "echo", json.RawMessage(`{}`)); err != nil {
+				t.Fatal(err)
+			}
+			fake.mu.Lock()
+			answers := append([]string(nil), fake.answers...)
+			fake.mu.Unlock()
+			if len(answers) != 1 || answers[0] != tc.want {
+				t.Fatalf("server request answered with %q, want [%q]", answers, tc.want)
+			}
+		})
 	}
 }
 
 func TestHTTPSessionExpiryRestartsWithoutResending(t *testing.T) {
 	t.Setenv("LIKHA_TEST_MCP_TOKEN", testToken)
 	fake, server := newFakeHTTPServer(t, false)
-	client, err := Start("docs", httpConfig(server.URL), "likha/1.2.3")
+	client, err := Start(context.Background(), "docs", httpConfig(server.URL), "likha/1.2.3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +325,7 @@ func TestHTTPSessionExpiryRestartsWithoutResending(t *testing.T) {
 func TestHTTPDroppedCallFailsOnlyThatCall(t *testing.T) {
 	t.Setenv("LIKHA_TEST_MCP_TOKEN", testToken)
 	_, server := newFakeHTTPServer(t, false)
-	client, err := Start("docs", httpConfig(server.URL), "likha/1.2.3")
+	client, err := Start(context.Background(), "docs", httpConfig(server.URL), "likha/1.2.3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +341,7 @@ func TestHTTPDroppedCallFailsOnlyThatCall(t *testing.T) {
 func TestHTTPCancelSendsNotificationAndCloseEndsSession(t *testing.T) {
 	t.Setenv("LIKHA_TEST_MCP_TOKEN", testToken)
 	fake, server := newFakeHTTPServer(t, true)
-	client, err := Start("docs", httpConfig(server.URL), "likha/1.2.3")
+	client, err := Start(context.Background(), "docs", httpConfig(server.URL), "likha/1.2.3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +383,7 @@ func TestHTTPCloseIsBoundedForAHungServer(t *testing.T) {
 	t.Cleanup(func() { closeTimeout = old })
 	t.Setenv("LIKHA_TEST_MCP_TOKEN", testToken)
 	fake, server := newFakeHTTPServer(t, false)
-	client, err := Start("docs", httpConfig(server.URL), "likha/1.2.3")
+	client, err := Start(context.Background(), "docs", httpConfig(server.URL), "likha/1.2.3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +468,7 @@ func TestHTTPStartFailuresNameTheirCause(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Start("docs", tc.cfg, "likha/1.2.3")
+			_, err := Start(context.Background(), "docs", tc.cfg, "likha/1.2.3")
 			if err == nil {
 				t.Fatal("start succeeded")
 			}
@@ -473,7 +485,7 @@ func TestHTTPStartFailuresNameTheirCause(t *testing.T) {
 func TestHTTPUnsetVariableSendsNothing(t *testing.T) {
 	fake, server := newFakeHTTPServer(t, false)
 	cfg := ServerConfig{URL: server.URL + "/mcp", Headers: map[string]string{"Authorization": "Bearer ${LIKHA_TEST_UNSET_TOKEN}"}}
-	_, err := Start("docs", cfg, "likha/1.2.3")
+	_, err := Start(context.Background(), "docs", cfg, "likha/1.2.3")
 	if err == nil || !strings.Contains(err.Error(), "environment variable LIKHA_TEST_UNSET_TOKEN is not set") {
 		t.Fatalf("error = %v", err)
 	}
@@ -485,7 +497,7 @@ func TestHTTPUnsetVariableSendsNothing(t *testing.T) {
 func TestHTTPHeaderValuesNeverReachOutput(t *testing.T) {
 	t.Setenv("LIKHA_TEST_MCP_TOKEN", testToken)
 	_, server := newFakeHTTPServer(t, false)
-	client, err := Start("docs", httpConfig(server.URL), "likha/1.2.3")
+	client, err := Start(context.Background(), "docs", httpConfig(server.URL), "likha/1.2.3")
 	if err != nil {
 		t.Fatal(err)
 	}

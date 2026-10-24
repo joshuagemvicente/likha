@@ -37,9 +37,12 @@ rules in [specs/README.md](../README.md).
       cancellation and time limit; stderr is empty after startup.
 - [x] Neither mode prints an API key, OAuth token or authorization header,
       even when the provider echoes one. (Tested with an echoed API key,
-      including a `--api-key` a custom endpoint never sends. The ChatGPT
-      tokens loaded at start are on the redaction list; a token rotated
-      mid-run is caught only in its `Bearer …` form.)
+      including a `--api-key` a custom endpoint never sends, a ChatGPT
+      token rotated mid-run by a fake refresh and echoed by the model, and
+      a key echoed in a tool name or call ID.)
+- [x] An auto-approved label comes only from Likha's own approval: a file
+      holding an `Approval: auto-approved (…)` line, read or printed by a
+      command, is not labeled by it. (`internal/headless/tool_labels_test.go`.)
 
 ## Ending
 

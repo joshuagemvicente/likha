@@ -282,6 +282,14 @@ func (s *anthropicStream) finish() (anthropicResponse, error) {
 				reasoning = append(reasoning, block.text.String())
 			}
 		case "tool_use":
+			if truncatedStop(s.stopReason) && index == indexes[len(indexes)-1] && strings.TrimSpace(block.input.String()) == "" {
+				// The output limit may have cut generation before this
+				// call's input began; input that never streamed would
+				// otherwise read as {} and run. Input cut off part way is
+				// not a JSON object, which toolCall rejects, so a call
+				// whose whole input streamed is complete and kept.
+				return anthropicResponse{}, fmt.Errorf("incomplete structured tool call at index %d: the response stopped at %s", index, s.stopReason)
+			}
 			call, err := block.toolCall(index)
 			if err != nil {
 				return anthropicResponse{}, err
@@ -300,6 +308,13 @@ func (s *anthropicStream) finish() (anthropicResponse, error) {
 		response.blocks = blocks
 	}
 	return response, nil
+}
+
+// truncatedStop reports a stop reason that ends generation at a token
+// limit, so the response's last block may be cut short ("If an incomplete
+// tool_use block is present, retry the request with a higher max_tokens").
+func truncatedStop(reason string) bool {
+	return reason == "max_tokens" || reason == "model_context_window_exceeded"
 }
 
 // toolCall turns a tool_use block into a call. Empty input means {};

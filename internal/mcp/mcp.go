@@ -73,9 +73,34 @@ type rpcResponse struct {
 	Error   *rpcError       `json:"error,omitempty"`
 }
 
+// serverRequestReply answers a request the server sent to Likha. ping is part
+// of the MCP base protocol and gets an empty result; sampling, roots and
+// elicitation are unsupported and get "method not found", so the server is
+// not left waiting either way.
+func serverRequestReply(request rpcMessage) ([]byte, error) {
+	reply := map[string]any{"jsonrpc": "2.0", "id": request.ID}
+	if request.Method == "ping" {
+		reply["result"] = struct{}{}
+	} else {
+		reply["error"] = rpcError{Code: -32601, Message: "method not found"}
+	}
+	payload, err := json.Marshal(reply)
+	if err != nil {
+		return nil, fmt.Errorf("encode reply to server request %q: %w", request.Method, err)
+	}
+	return payload, nil
+}
+
 // Start connects to the server and performs the MCP handshake:
-// initialize → notifications/initialized → tools/list.
-func Start(name string, cfg ServerConfig, userAgent string) (*Client, error) {
+// initialize → notifications/initialized → tools/list. The handshake is
+// bounded by CallTimeout and by ctx; when either ends it first, the server
+// is closed (its process group killed) before Start returns.
+func Start(ctx context.Context, name string, cfg ServerConfig, userAgent string) (*Client, error) {
+	// A cancelled start must not fork: Stop may already have stopped waiting,
+	// so a server launched now could outlive Likha.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("mcp %s: start: %w", name, err)
+	}
 	var conn transport
 	var err error
 	if cfg.Remote() {
@@ -87,15 +112,17 @@ func Start(name string, cfg ServerConfig, userAgent string) (*Client, error) {
 		return nil, err
 	}
 	c := &Client{name: name, conn: conn, userAgent: userAgent}
-	if err := c.handshake(); err != nil {
-		c.Close()
+	if err := c.handshake(ctx); err != nil {
+		if closeErr := c.Close(); closeErr != nil {
+			return nil, fmt.Errorf("%w; closing the server failed: %v", err, closeErr)
+		}
 		return nil, err
 	}
 	return c, nil
 }
 
-func (c *Client) handshake() error {
-	ctx, cancel := context.WithTimeout(context.Background(), CallTimeout)
+func (c *Client) handshake(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()
 	if err := c.initialize(ctx); err != nil {
 		return err

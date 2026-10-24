@@ -450,3 +450,46 @@ func TestOAuthStreamingFailureDoesNotRefreshOrReplayPartialTurn(t *testing.T) {
 		t.Fatalf("partial failure error=%v usage=%v requests=%d chunks=%v", err, ok, requests.Load(), chunks)
 	}
 }
+
+// OAuthTokens lists every token the session has held: a rotation adds the
+// new tokens and keeps the replaced ones, sign-out clears none of them, and
+// forks share the list.
+func TestOAuthTokensKeepRotatedTokens(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { codexOK(w) }))
+	t.Cleanup(server.Close)
+	client := newOAuthTestClient(t, server.URL, server.URL+"/v1", validOAuthCredentials())
+	if got, want := client.OAuthTokens(), []string{"access-old", "refresh-old", "previously-validated-id-token"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tokens before a rotation = %v, want %v", got, want)
+	}
+	fork, err := client.Fork()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.SetOAuthRefresher(func(_ context.Context, expected OAuthCredentials, _ bool) (OAuthCredentials, error) {
+		expected.Access, expected.Refresh, expected.IDToken = "access-new", "refresh-new", "id-new"
+		return expected, nil
+	})
+	if _, err := fork.Stream(context.Background(), hello, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"access-old", "refresh-old", "previously-validated-id-token", "access-new", "refresh-new", "id-new"}
+	for name, c := range map[string]*Client{"client": client, "fork": fork} {
+		if got := c.OAuthTokens(); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s tokens after a rotation = %v, want %v", name, got, want)
+		}
+	}
+	client.InvalidateOAuth()
+	if got := client.OAuthTokens(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("tokens after sign-out = %v, want %v", got, want)
+	}
+	if got := (*Client)(nil).OAuthTokens(); got != nil {
+		t.Fatalf("nil client tokens = %v", got)
+	}
+	keyed, err := New(server.URL+"/v1", "m", "sk-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := keyed.OAuthTokens(); got != nil {
+		t.Fatalf("API-key client tokens = %v, want none", got)
+	}
+}

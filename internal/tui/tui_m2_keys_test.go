@@ -82,10 +82,10 @@ func TestComposerChordWiring(t *testing.T) {
 	m.input = nil
 	m.edit.endCaret(nil)
 
-	// Ctrl+T at the end of the buffer: the last two runes swap.
+	// Ctrl+T belongs to variants and no longer edits the composer.
 	sendRunes(m, "abcd")
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	if string(m.input) != "abdc" {
+	if string(m.input) != "abcd" {
 		t.Fatalf("ctrl+t = %q", string(m.input))
 	}
 }
@@ -275,14 +275,27 @@ func TestTuiKeyTerminalEventHoldsQueue(t *testing.T) {
 	if queuedRows != 2 {
 		t.Fatalf("queued rows after hold = %d, want 2 (%+v)", queuedRows, m.entries)
 	}
-	// Enter on an empty draft sends the batch: with no client, startTurn
-	// restores the head as the draft and keeps the rest queued.
+	// Enter on an empty draft sends the batch: with no client the run
+	// cannot start, so the whole batch stays held with its Queued rows and
+	// the composer stays empty.
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if got := string(m.input); got != "head" {
-		t.Fatalf("held-queue send prompt = %q, want %q", got, "head")
+	if !hasEntry(m, "Error", "No provider configured") {
+		t.Fatal("Enter did not try to send the held batch")
 	}
-	if len(m.queue) != 1 || m.queue[0] != "rest" {
-		t.Fatalf("rest queue = %v, want [rest]", m.queue)
+	if len(m.input) != 0 {
+		t.Fatalf("failed send put %q in the composer", string(m.input))
+	}
+	if len(m.queue) != 2 || m.queue[0] != "head" || m.queue[1] != "rest" {
+		t.Fatalf("queue after failed send = %v, want [head rest]", m.queue)
+	}
+	queuedRows = 0
+	for _, e := range m.entries {
+		if e.role == "Queued" {
+			queuedRows++
+		}
+	}
+	if queuedRows != 2 {
+		t.Fatalf("queued rows after failed send = %d, want 2", queuedRows)
 	}
 }
 

@@ -18,7 +18,9 @@ import (
 // entries (dot-prefixed, including .git), node_modules, symlinked entries, or
 // anything matched by a .gitignore file in the repository root or any
 // traversed subdirectory. The walk stops at maxEntries; truncated reports
-// whether more entries existed. It is the shared traversal behind the @
+// whether more entries existed or some could not be listed (a directory over
+// MaxListEntries contributes a bounded sample, an unreadable subdirectory
+// contributes only its own name). It is the shared traversal behind the @
 // completion popup and folder-reference expansion.
 func (r *Repository) Tree(path string, maxEntries int) (entries []string, truncated bool, err error) {
 	if maxEntries < 1 {
@@ -41,15 +43,20 @@ func (r *Repository) Tree(path string, maxEntries int) (entries []string, trunca
 		if depth > MaxTreeDepth {
 			return nil // too deep: skip the subtree rather than fail the whole listing
 		}
-		if rule := loadIgnore(dir); rule != nil {
-			ignores = append(append([]*dirIgnore(nil), ignores...), &dirIgnore{dir: prefix, rule: rule})
+		if rules := loadIgnore(dir, prefix); rules != nil {
+			ignores = append(append([]*dirIgnore(nil), ignores...), rules)
 		}
 		entries0, err := dir.ReadDir(MaxListEntries + 1)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return fmt.Errorf("tree directory %q: %w", prefix, err)
 		}
 		if len(entries0) > MaxListEntries {
-			return fmt.Errorf("tree directory %q: %w", prefix, ErrLimit)
+			// List a bounded sample of an oversized directory instead of
+			// failing the whole walk, and report the listing as incomplete.
+			entries0 = entries0[:MaxListEntries]
+			if base == "" || prefix == base || strings.HasPrefix(prefix, base+"/") {
+				truncated = true // only a directory inside the requested subtree loses entries
+			}
 		}
 		sort.Slice(entries0, func(i, j int) bool { return entries0[i].Name() < entries0[j].Name() })
 		for _, entry := range entries0 {
@@ -106,7 +113,10 @@ func (r *Repository) Tree(path string, maxEntries int) (entries []string, trunca
 				out = append(out, candidate+"/")
 				child, err := openChild(dir, name, true)
 				if err != nil {
-					return fmt.Errorf("tree %q: %w", candidate, err)
+					// An unreadable subdirectory hides only its own entries,
+					// never the rest of the listing.
+					truncated = true
+					continue
 				}
 				err = walk(child, candidate, ignores, depth+1)
 				child.Close()
@@ -139,10 +149,24 @@ const MaxTreeDepth = 24
 type dirIgnore struct {
 	dir  string // repository-relative directory containing the file, "" for root
 	rule *gitignore.GitIgnore
+	// reinclude is the same rules behind a leading match-everything pattern.
+	// It reports false only when the last pattern matching a path is a
+	// negation, which is how a deeper "!keep.log" overrides a parent rule.
+	reinclude *gitignore.GitIgnore
+}
+
+// compileIgnore scopes one .gitignore file's text to its directory.
+func compileIgnore(dir, text string) *dirIgnore {
+	lines := strings.Split(text, "\n")
+	return &dirIgnore{
+		dir:       dir,
+		rule:      gitignore.CompileIgnoreLines(lines...),
+		reinclude: gitignore.CompileIgnoreLines(append([]string{"*"}, lines...)...),
+	}
 }
 
 // loadIgnore reads a .gitignore in the open directory, if one exists.
-func loadIgnore(dir *os.File) *gitignore.GitIgnore {
+func loadIgnore(dir *os.File, prefix string) *dirIgnore {
 	file, err := openChild(dir, ".gitignore", false)
 	if err != nil {
 		return nil // no ignore file in this directory
@@ -152,12 +176,13 @@ func loadIgnore(dir *os.File) *gitignore.GitIgnore {
 	if err != nil {
 		return nil // unreadable ignore file: never hide the listing behind it
 	}
-	return gitignore.CompileIgnoreLines(strings.Split(text, "\n")...)
+	return compileIgnore(prefix, text)
 }
 
-// ignored reports whether any active .gitignore rules match the path; a
-// deeper rule set wins, matching git's nested-file semantics closely enough
-// for listing purposes.
+// ignored reports whether the active .gitignore rules exclude the path. The
+// deepest file with a pattern matching the path decides, as in git: its
+// positive match ignores the path, and its negation ("!name") re-includes
+// it even when a parent file ignores it.
 func ignored(ignores []*dirIgnore, path string) bool {
 	for i := len(ignores) - 1; i >= 0; i-- {
 		ig := ignores[i]
@@ -170,6 +195,9 @@ func ignored(ignores []*dirIgnore, path string) bool {
 		}
 		if ig.rule.MatchesPath(rel) {
 			return true
+		}
+		if !ig.reinclude.MatchesPath(rel) {
+			return false
 		}
 	}
 	return false

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -29,34 +30,109 @@ func (m *McpManager) CatalogTools(userAgent string) []CatalogTool {
 	if m == nil {
 		return nil
 	}
+	m.startServers(userAgent)
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.catalogToolsLocked(m.serverNamesLocked())
+}
+
+// startServers launches every configured server that is neither running nor
+// failed. A handshake can take up to CallTimeout, so it runs without the
+// manager mutex: Summary and Status read that mutex while rendering the UI. A
+// server another caller is already starting is awaited, not started twice.
+// Starts run under the manager's lifetime context, which Stop cancels.
+func (m *McpManager) startServers(userAgent string) {
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return
+	}
 	if m.clients == nil {
 		m.clients = make(map[string]*Client)
 	}
 	if m.failed == nil {
 		m.failed = make(map[string]string)
 	}
-	servers := make([]string, 0, len(m.servers))
-	for server := range m.servers {
-		servers = append(servers, server)
+	if m.starting == nil {
+		m.starting = make(map[string]chan struct{})
 	}
-	sort.Strings(servers)
-	for _, server := range servers {
+	if m.lifetime == nil {
+		m.lifetime, m.cancelLifetime = context.WithCancel(context.Background())
+	}
+	lifetime := m.lifetime
+	var mine []string
+	configs := make(map[string]ServerConfig)
+	var others []chan struct{}
+	for _, server := range m.serverNamesLocked() {
 		if m.clients[server] != nil {
 			continue
 		}
 		if _, failed := m.failed[server]; failed {
 			continue // relaunch-only restart, as in the legacy discovery path
 		}
-		client, err := Start(server, m.servers[server], userAgent)
-		if err != nil {
-			m.failed[server] = err.Error()
+		if done, ok := m.starting[server]; ok {
+			others = append(others, done)
 			continue
 		}
+		m.starting[server] = make(chan struct{})
+		mine = append(mine, server)
+		configs[server] = m.servers[server]
+	}
+	m.mu.Unlock()
+
+	for _, server := range mine {
+		if err := lifetime.Err(); err != nil {
+			// Stop cancelled the lifetime while an earlier start ran; the
+			// rest are settled with that cancellation, never launched.
+			m.finishStart(server, nil, err)
+			continue
+		}
+		client, err := Start(lifetime, server, configs[server], userAgent)
+		m.finishStart(server, client, err)
+	}
+	for _, done := range others {
+		<-done
+	}
+}
+
+// finishStart records one start's outcome and wakes callers waiting on it.
+// A client that finished its handshake after Stop is closed rather than
+// installed, so it cannot outlive Likha. A start that Stop cancelled is not
+// a server failure and is not recorded as one.
+func (m *McpManager) finishStart(server string, client *Client, err error) {
+	m.mu.Lock()
+	done := m.starting[server]
+	delete(m.starting, server)
+	late := err == nil && m.stopped
+	cancelledByStop := m.stopped && errors.Is(err, context.Canceled)
+	switch {
+	case cancelledByStop:
+	case err != nil:
+		m.failed[server] = err.Error()
+	case !late:
 		m.clients[server] = client
 	}
-	return m.catalogToolsLocked(servers)
+	m.mu.Unlock()
+	if late {
+		// Closing waits for the process to exit, so it runs without mu;
+		// a failure is recorded as Stop records its own.
+		if closeErr := client.Close(); closeErr != nil {
+			m.mu.Lock()
+			m.failed[server] = closeErr.Error()
+			m.mu.Unlock()
+		}
+	}
+	close(done)
+}
+
+// serverNamesLocked lists the configured servers in a stable order.
+func (m *McpManager) serverNamesLocked() []string {
+	servers := make([]string, 0, len(m.servers))
+	for server := range m.servers {
+		servers = append(servers, server)
+	}
+	sort.Strings(servers)
+	return servers
 }
 
 // catalogToolsLocked does not start servers or acquire the manager mutex.

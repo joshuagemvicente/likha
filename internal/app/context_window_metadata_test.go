@@ -50,7 +50,7 @@ func TestDiscoverContextWindowReportsEveryModelToObserver(t *testing.T) {
 	})
 
 	var observed bool
-	got := discoverModelMetadata("selected-model", "https://provider.example/v1", "key", "openrouter", func(provider, operation string, elapsed time.Duration, details []model.ModelDetails, err error) {
+	got := discoverModelMetadata(context.Background(), "selected-model", "https://provider.example/v1", "key", "openrouter", func(provider, operation string, elapsed time.Duration, details []model.ModelDetails, err error) {
 		observed = true
 		if provider != "openrouter" || operation != "startup /models" || elapsed < 0 || err != nil {
 			t.Fatalf("observer event = (%q, %q, %s, %v), want successful startup model metadata", provider, operation, elapsed, err)
@@ -74,7 +74,7 @@ func TestDiscoverModelMetadataCarriesLiveEffortLevels(t *testing.T) {
 			{ID: "selected-model", Efforts: []string{"minimal", "low", "high"}, DefaultEffort: "low"},
 		}, nil
 	})
-	got := discoverModelMetadata("selected-model", "https://provider.example/v1", "key", "openrouter", nil)
+	got := discoverModelMetadata(context.Background(), "selected-model", "https://provider.example/v1", "key", "openrouter", nil)
 	if !reflect.DeepEqual(got.Efforts, []string{"minimal", "low", "high"}) || got.DefaultEffort != "low" {
 		t.Fatalf("selected model effort = %v default %q, want the live levels", got.Efforts, got.DefaultEffort)
 	}

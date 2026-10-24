@@ -94,13 +94,18 @@ type headlessStart struct {
 	key      string
 	// apiKey is the --api-key/LIKHA_API_KEY value as given: redacted even
 	// when the resolved provider sends no key (a custom endpoint).
-	apiKey  string
-	stored  providers.StoredProviderConfig
-	json    bool
-	maxTime time.Duration
+	apiKey   string
+	json     bool
+	maxTime  time.Duration
+	variant  *string
+	restored *model.Selection
+	// windowOverrides are config.json's context_windows; autoCompact is its
+	// auto_compact preference. Both apply as in the TUI (D10, FR-42).
+	windowOverrides map[string]map[string]int64
+	autoCompact     bool
 }
 
-// headlessFlow checks the connection, applies the stored effort, opens the
+// headlessFlow checks the connection, applies the variant, opens the
 // session and runs one headless run (specs/headless-print). MCP servers are
 // never started (D7).
 func headlessFlow(start headlessStart, stdout, stderr io.Writer) int {
@@ -108,14 +113,23 @@ func headlessFlow(start headlessStart, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "likha: no provider configured; set --provider or LIKHA_PROVIDER (see --help)")
 		return headless.ExitUsage
 	}
-	ctx, stop := interruptContext(context.Background())
+	ctx, hookCtx, stop := interruptContext(context.Background(), os.Exit)
 	defer stop()
 	secrets := []string{start.key, strings.TrimSpace(start.apiKey)}
 	if start.res.OAuth {
 		secrets = append(secrets, start.res.Creds.Access, start.res.Creds.Refresh, start.res.Creds.IDToken)
 	}
 	fail := func(code int, format string, args ...any) int {
-		fmt.Fprintf(stderr, "likha: %s\n", redact.Secrets(fmt.Sprintf(format, args...), secrets...))
+		// A startup step cut short by SIGINT or SIGTERM failed because of
+		// the interrupt, so it reports and exits as one.
+		if cause := context.Cause(ctx); errors.Is(cause, headless.ErrInterrupted) {
+			fmt.Fprintf(stderr, "likha: %v\n", cause)
+			return headless.ExitInterrupted
+		}
+		// The connection check may already have rotated the sign-in's
+		// tokens, so the ones it holds now are redacted too.
+		current := append(slices.Clone(secrets), start.client.OAuthTokens()...)
+		fmt.Fprintf(stderr, "likha: %s\n", redact.Secrets(fmt.Sprintf(format, args...), current...))
 		return code
 	}
 
@@ -138,9 +152,18 @@ func headlessFlow(start headlessStart, stdout, stderr io.Writer) int {
 		if err := start.client.EnsureConnected(ctx); err != nil {
 			return fail(headless.ExitFailed, "%s: connection check failed: %v", start.display, err)
 		}
-		live = discoverModelMetadata(modelName, start.res.Endpoint, start.key, start.selected.Name, nil)
+		live = discoverModelMetadata(ctx, modelName, start.res.Endpoint, start.key, start.selected.Name, nil)
 	}
-	effort, effortNotice := applyStoredEffort(start.client, start.selected, modelName, live.Efforts, start.stored)
+	var variantNotice string
+	var selectionErr error
+	if start.restored != nil {
+		variantNotice, selectionErr = providers.ApplySavedVariant(ctx, start.stateDir, start.client, start.selected, live.Reasoning, start.restored.Variant)
+	} else {
+		variantNotice, selectionErr = providers.ApplyVariant(ctx, start.stateDir, start.client, start.selected, live.Reasoning, start.variant)
+	}
+	if selectionErr != nil {
+		return fail(headless.ExitUsage, "select variant: %v", selectionErr)
+	}
 
 	var snapshot session.Snapshot
 	var err error
@@ -158,8 +181,8 @@ func headlessFlow(start headlessStart, stdout, stderr io.Writer) int {
 	}
 
 	var notices []string
-	if effortNotice != "" {
-		notices = append(notices, effortNotice)
+	if variantNotice != "" {
+		notices = append(notices, variantNotice)
 	}
 	if note := mcpNotice(start.stateDir); note != "" {
 		notices = append(notices, note)
@@ -168,31 +191,19 @@ func headlessFlow(start headlessStart, stdout, stderr io.Writer) int {
 	if display == "" {
 		display = start.res.Endpoint
 	}
+	// Resolved as the TUI does: a config.json override, then the provider's
+	// /models metadata, then the bundled catalog. An unknown window (0)
+	// never compacts.
+	modelName = start.client.Model()
+	window, _ := model.ResolveContextWindow(start.selected.Name, modelName, start.windowOverrides[start.selected.Name][modelName], live.ContextWindow)
 	return headless.Run(ctx, headless.Config{
 		Prompt: start.prompt, Root: start.root, Repo: start.repo, Client: start.client,
 		Store: start.store, Snapshot: snapshot, StateDir: start.stateDir,
-		Provider: start.selected.Name, Display: display, Effort: effort,
+		Provider: start.selected.Name, Display: display, Variant: start.client.Variant(),
+		Created: start.resumeID == "", HookContext: hookCtx,
 		JSON: start.json, MaxTime: start.maxTime, Secrets: secrets, Notices: notices,
+		ContextWindow: window, AutoCompact: start.autoCompact,
 	}, stdout, stderr)
-}
-
-// applyStoredEffort sends the level stored for this provider and model, as
-// an interactive launch does (D6). A stored level the model no longer
-// publishes falls back to Default with a notice.
-func applyStoredEffort(client *model.Client, p model.Provider, modelID string, live []string, stored providers.StoredProviderConfig) (level, notice string) {
-	levels := model.EffortLevels(p, modelID, live)
-	if len(levels) == 0 {
-		return "", ""
-	}
-	want := stored.StoredEffort(p.Name, modelID)
-	if want == "" {
-		return "", ""
-	}
-	if !slices.Contains(levels, want) {
-		return "", "Stored effort " + want + " is not offered for " + modelID + "; using default."
-	}
-	client.SetEffort(p.Effort, want)
-	return want, ""
 }
 
 // mcpNotice says once that configured MCP servers stay stopped, because MCP
@@ -208,10 +219,17 @@ func mcpNotice(stateDir string) string {
 	return fmt.Sprintf("%d configured MCP server(s) are not started in headless runs; MCP tools are unavailable.", len(servers))
 }
 
-// interruptContext cancels with headless.ErrInterrupted on the first SIGINT
-// or SIGTERM and exits at once on the second. stop releases the handler.
-func interruptContext(parent context.Context) (context.Context, func()) {
+// forceExitGrace is how long a second interrupt waits, after killing hook
+// process groups, for the run to return before exiting anyway.
+const forceExitGrace = 2 * time.Second
+
+// interruptContext cancels ctx with headless.ErrInterrupted on the first
+// SIGINT or SIGTERM. The second cancels hookCtx, which kills every running
+// hook's process group, and calls exit(130) unless the run returns within
+// forceExitGrace; a third calls it at once. stop releases the handler.
+func interruptContext(parent context.Context, exit func(code int)) (ctx, hookCtx context.Context, stop func()) {
 	ctx, cancel := context.WithCancelCause(parent)
+	hookCtx, killHooks := context.WithCancel(context.Background())
 	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	done := make(chan struct{})
@@ -224,14 +242,23 @@ func interruptContext(parent context.Context) (context.Context, func()) {
 		}
 		select {
 		case <-signals:
-			os.Exit(headless.ExitInterrupted)
+			killHooks()
+		case <-done:
+			return
+		}
+		select {
+		case <-time.After(forceExitGrace):
+			exit(headless.ExitInterrupted)
+		case <-signals:
+			exit(headless.ExitInterrupted)
 		case <-done:
 		}
 	}()
-	return ctx, func() {
+	return ctx, hookCtx, func() {
 		signal.Stop(signals)
 		close(done)
 		cancel(nil)
+		killHooks()
 	}
 }
 

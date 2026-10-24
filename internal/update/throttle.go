@@ -49,7 +49,13 @@ func throttleAllows(stateDir string) (bool, error) {
 	if json.Unmarshal(data, &st) != nil {
 		return true, nil
 	}
-	return time.Since(time.Unix(0, st.CheckedNS)) >= interval, nil
+	elapsed := time.Since(time.Unix(0, st.CheckedNS))
+	if elapsed < 0 {
+		// A timestamp in the future (the clock was set back, or the value is
+		// corrupt) would otherwise suppress every check until that moment.
+		return true, nil
+	}
+	return elapsed >= interval, nil
 }
 
 // writeState atomically persists the given timestamp: write a temp file in the

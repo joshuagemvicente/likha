@@ -264,9 +264,10 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 			if autoEdit {
 				result.Content = autoEditLabel + result.Content
 				result.Diff = prepared.Diff
+				result.AutoApproved = AutoApprovalReason
 			}
 			if set, ok := prepared.ChangeSet(); ok {
-				result.Warnings = recordChangeSet(ctx, options, set)
+				result.Warnings = recordChangeSet(ctx, options, set, emit)
 			}
 			return result, nil
 		},
@@ -319,16 +320,17 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 				return tools.Result{}, errors.New("edit has no approved proposal")
 			}
 			if err := options.EditJournal(batch); err != nil {
-				return tools.Result{}, errors.New("private edit recovery journal unavailable; no file changes applied")
+				return tools.Result{}, fmt.Errorf("private edit recovery journal unavailable; no file changes applied: %w", err)
 			}
 			content, err := batch.Apply(ctx)
 			result := tools.Result{Content: content}
 			if autoEdit && err == nil {
 				result.Content = autoEditLabel + result.Content
 				result.Diff = batchBody
+				result.AutoApproved = AutoApprovalReason
 			}
 			if set, ok := batch.ChangeSet(); ok {
-				result.Warnings = recordChangeSet(ctx, options, set)
+				result.Warnings = recordChangeSet(ctx, options, set, emit)
 			}
 			return result, err
 		},
@@ -375,10 +377,13 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 			if auto != "" {
 				approval = CommandApprovalPrefix + "auto-approved (" + auto + ")\n"
 			}
-			result := tools.Result{Content: fmt.Sprintf("Exit status: %d\n%s%s", command.ExitCode, approval, strings.ToValidUTF8(content, "\ufffd")), Truncated: command.Truncated}
+			result := tools.Result{Content: fmt.Sprintf("Exit status: %d\n%s%s", command.ExitCode, approval, strings.ToValidUTF8(content, "\ufffd")), Truncated: command.Truncated, AutoApproved: auto}
 			if command.Truncated {
 				result.Status = tools.Limited
 				result.Warnings = []string{fmt.Sprintf("Command output capture reached its limit; discarded %d bytes. Exit status and payload completeness are separate.", command.Discarded)}
+			}
+			if command.BackgroundLeftRunning {
+				result.Warnings = append(result.Warnings, "A background process kept the command's output open after the shell exited; it was left running, but its later output was not captured and further writes to that output may stop it. Redirect a background job's output to a file to keep it.")
 			}
 			if errors.Is(err, context.DeadlineExceeded) && auto != "" {
 				return result, fmt.Errorf("auto-approved command timed out after %s", AutoCommandTimeout)
@@ -417,7 +422,7 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 		taskUnavailable = "Nested exploration requires an active model and private session task persistence"
 	}
 	register(TaskTool(options.TaskSpawn, taskUnavailable, options.TaskAgents...))
-	register(tools.AskUserTool(options.Ask))
+	register(withoutPerson(tools.AskUserTool(options.Ask), options.Ask == nil, options.NoReviewer, "question needs an answer", "this question was not asked. Decide from what you have and state any assumption in your answer"))
 	planTool := tools.PlanUpdateTool(options.PlanApply)
 	if options.PlanApply == nil {
 		planTool.UnavailableReason = "Plan checklist persistence is unavailable"
@@ -476,9 +481,21 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 			},
 		})
 	}
-	register(tools.WebSearchTool(options.WebSearch))
-	register(tools.WebFetchTool(options.WebFetch))
+	register(withoutPerson(tools.WebSearchTool(options.WebSearch), options.WebSearch == nil, options.NoReviewer, "web search needs consent", "no search was made"))
+	register(withoutPerson(tools.WebFetchTool(options.WebFetch), options.WebFetch == nil, options.NoReviewer, "web fetch needs consent", "the page was not fetched"))
 	return registry, warnings
+}
+
+// withoutPerson gives a tool that needs a person (an answer or web consent)
+// the run's no-reviewer reason when its runtime is missing because nobody
+// can answer, so the model learns why it was refused instead of the tool's
+// generic guess at a configuration problem (specs/headless-print point 8).
+func withoutPerson(tool tools.Tool, missing bool, noReviewer, kind, action string) tools.Tool {
+	if !missing || noReviewer == "" {
+		return tool
+	}
+	tool.UnavailableReason = "refused (" + kind + "): " + noReviewer + ", so " + action + "."
+	return tool
 }
 
 func validateCommand(command string) error {

@@ -80,7 +80,12 @@ below; change them here first if review disagrees.
 - **D3. Sessions.** Each headless run is saved as a normal session for the
   repository, titled from the prompt's first line without a naming request,
   and can be opened later with `likha --resume ID`. `-p` with
-  `--resume ID` continues that session headlessly.
+  `--resume ID` continues that session headlessly, reconciling it first as
+  the interactive resume does: explore tasks an earlier run left unfinished
+  are saved interrupted, and plan steps a run that never completed left
+  active are reported interrupted (plan-todo). Nothing restarts. A resumed
+  session whose explore records or plan cannot be read could not be saved,
+  so the run exits 2 before any request, naming which part failed.
 - **D4. Time limit.** `--max-time DURATION` bounds the whole run, default
   `30m`; `0` removes the bound.
 - **D5. Flags.** `-p` combines with `--provider`, `--model`, `--api-key`,
@@ -107,8 +112,12 @@ below; change them here first if review disagrees.
   saves nothing and exits 1 with the block message as the error;
   `session_start`, `post_tool` and `run_end` fire, `attention` never does;
   hook warnings and an unusable `hooks.json` are reported as notices.
-  Automatic compaction (FR-42) and model recovery (FR-36) apply once
-  implemented.
+  Automatic compaction (FR-42) applies as in an interactive run, with the
+  same context window and `auto_compact` preference: the summarize request
+  counts in the totals (one more `usage` event with `--json`), the caller
+  gets a notice naming the trigger (a `likha: note:` line, or a `notice`
+  event), and the saved session holds the compaction divider and a
+  `compacted` turn footer. Model recovery (FR-36) applies once implemented.
 
 ## Functional changes
 
@@ -159,11 +168,16 @@ below; change them here first if review disagrees.
     a trailing newline. A run that fails writes nothing to stdout.
 11. stderr receives progress as plain lines without color or cursor
     movement: the repository and model at start, one line per tool call and
-    its outcome (auto-approved, refused, failed), notices, and a final
+    its outcome (auto-approved, refused, failed; a call is labeled
+    auto-approved only when Likha itself approved it, never because its
+    output holds a line that reads like the label), notices, and a final
     summary with the session ID, tool calls, refusals, tokens and spend when
     the price is known. Reasoning is not printed.
 12. Errors go to stderr prefixed `likha:`, naming the provider and cause, and
-    never contain an API key, OAuth token or authorization header.
+    never contain an API key, OAuth token or authorization header. A ChatGPT
+    sign-in token that a refresh rotates during the run is removed as well
+    as the one loaded at start, in every field of both modes, tool names
+    and call IDs included.
 
 ### Output: `--json`
 
@@ -176,9 +190,20 @@ below; change them here first if review disagrees.
       `model`, `effort`.
     - `text`: `delta` of assistant text.
     - `reasoning`: `delta` of display reasoning (D9).
+
+    Credentials are removed from deltas as from every other field, even
+    when one arrives split across deltas. Each stream's deltas, joined
+    over one model response, equal that response's text with its
+    credentials replaced. A delta may hold back its last unfinished word
+    (and "Bearer" with its spaces) until the next whitespace in its stream
+    or the response's end, so a `notice` or the other stream's delta can
+    appear before the rest of that word. Text that runs 64 KiB or more
+    without whitespace is released in pieces regardless, and may then show
+    more of it redacted than the whole response would.
     - `tool_start`: `call_id`, `name`, `arguments` (bounded).
     - `tool_result`: `call_id`, `name`, `status` (`ok`, `error`,
-      `refused`, `cancelled`), `auto_approved` reason when one applied,
+      `refused`, `cancelled`), `auto_approved` reason when Likha approved
+      the call without a prompt (never read from `content`),
       `content` (bounded).
     - `notice`: `text`.
     - `usage`: one model request's prompt, completion, reasoning and cached
@@ -197,11 +222,19 @@ below; change them here first if review disagrees.
 16. Exit codes follow D2. The final summary (text mode) or `result` event
     (`--json`) agrees with the exit code.
 17. SIGINT or SIGTERM cancels the run as Esc does: no further action starts,
-    in-flight tools end as cancelled, the session is saved, and Likha exits
-    130. A second signal exits immediately.
+    in-flight tools end as cancelled, the session is saved with the same
+    cancellation notice an interactive cancel stores, and Likha exits
+    130. A second signal stops any hook processes still running and exits
+    within 2 seconds (the session is already saved); a third exits
+    immediately.
 18. When `--max-time` elapses (D4), the run is cancelled the same way, the
     result reports `time_limit`, and Likha exits 1.
-19. The session is saved when the run ends, whatever the outcome (D3).
+19. When output cannot be written (stdout closed by its reader), the run
+    stops the same way at the first failed write, the session is saved, and
+    Likha exits 1 (output not written). In text mode stderr carries only
+    progress: when it cannot be written (`2>&-`) the progress lines are
+    lost, and the run continues and prints its answer.
+20. The session is saved when the run ends, whatever the outcome (D3).
     Saving fails visibly and exits 1; the answer already written stays
     written. Nothing pending is replayed on resume (FR-10).
 

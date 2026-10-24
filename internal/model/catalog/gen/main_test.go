@@ -464,3 +464,181 @@ func TestBuildKeepsEffortLevels(t *testing.T) {
 		}
 	}
 }
+
+// optionsJSON renders a row's reasoning options the way models.json does.
+func optionsJSON(t *testing.T, options []catalog.ReasoningOption) string {
+	t.Helper()
+	if options == nil {
+		return "absent"
+	}
+	b, err := json.Marshal(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestBuildKeepsReasoningOptions(t *testing.T) {
+	const upstreamRaw = `{"openai": {"id": "openai", "models": {
+	  "all": {"id": "all", "tool_call": true, "reasoning": true, "reasoning_options": [
+	    {"type": "toggle"}, {"type": "effort", "values": ["default", "low", "max"]}, {"type": "budget_tokens", "min": 0, "max": 24576}]},
+	  "budget-max": {"id": "budget-max", "tool_call": true, "reasoning": true,
+	    "reasoning_options": [{"type": "budget_tokens", "max": 81920}]},
+	  "budget-open": {"id": "budget-open", "tool_call": true, "reasoning": true,
+	    "reasoning_options": [{"type": "budget_tokens"}]},
+	  "no-control": {"id": "no-control", "tool_call": true, "reasoning": true, "reasoning_options": []},
+	  "plain": {"id": "plain", "tool_call": true}
+	}}}`
+	var upstream map[string]upstreamProvider
+	if err := json.Unmarshal([]byte(upstreamRaw), &upstream); err != nil {
+		t.Fatal(err)
+	}
+	providers := []model.Provider{{Name: "openai"}, {Name: "chatgpt"}}
+	mapping := map[string]string{"openai": "openai", "chatgpt": ""}
+	o := overridesFrom(t, `{"providers": {"chatgpt": {"models": {"gpt-sub": {"ref": "provider.go", "verified": "2026-10-07"}}}}}`)
+	file, err := build(upstream, o, providers, mapping, "2026-10-07", DefaultUpstream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		model   string
+		want    string
+		efforts string
+	}{
+		{"all", `[{"type":"toggle"},{"type":"effort","values":["default","low","max"]},{"type":"budget_tokens","min":0,"max":24576}]`, "low,max"},
+		{"budget-max", `[{"type":"budget_tokens","max":81920}]`, ""},
+		{"budget-open", `[{"type":"budget_tokens"}]`, ""},
+		{"no-control", `[]`, ""},
+		{"plain", "absent", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			row, ok := file.Lookup("openai", tc.model)
+			if !ok {
+				t.Fatalf("row %s missing", tc.model)
+			}
+			if got := optionsJSON(t, row.ReasoningOptions); got != tc.want {
+				t.Fatalf("ReasoningOptions = %s, want %s", got, tc.want)
+			}
+			if got := strings.Join(row.Efforts, ","); got != tc.efforts {
+				t.Fatalf("Efforts = %q, want %q", got, tc.efforts)
+			}
+			if !row.ToolCall {
+				t.Fatal("upstream row has tool_call false")
+			}
+		})
+	}
+	sub, ok := file.Lookup("chatgpt", "gpt-sub")
+	if !ok || !sub.ToolCall || sub.ReasoningOptions != nil {
+		t.Fatalf("curated row = %+v, want tool_call and no reasoning options", sub)
+	}
+
+	var report bytes.Buffer
+	writeReport(&report, nil, file, providers)
+	if want := "reasoning options: 1 effort, 3 budget_tokens, 1 toggle, 1 with no control"; !strings.Contains(report.String(), want) {
+		t.Fatalf("report lacks %q:\n%s", want, report.String())
+	}
+}
+
+// An upstream reasoning control the spec does not name fails generation
+// instead of being dropped or rounded (specs/reasoning-options rule 14).
+func TestBuildRejectsBadReasoningOptions(t *testing.T) {
+	cases := map[string]string{
+		"unknown type":      `[{"type": "dial"}]`,
+		"fractional bound":  `[{"type": "budget_tokens", "min": 1024.5}]`,
+		"negative bound":    `[{"type": "budget_tokens", "min": -1}]`,
+		"min above max":     `[{"type": "budget_tokens", "min": 4096, "max": 1024}]`,
+		"repeated type":     `[{"type": "toggle"}, {"type": "toggle"}]`,
+		"effort no values":  `[{"type": "effort", "values": []}]`,
+		"bad effort level":  `[{"type": "effort", "values": ["Low"]}]`,
+		"toggle with value": `[{"type": "toggle", "values": ["on"]}]`,
+	}
+	for name, options := range cases {
+		t.Run(name, func(t *testing.T) {
+			raw := `{"openai": {"id": "openai", "models": {"bad": {"id": "bad", "tool_call": true, "reasoning": true, "reasoning_options": ` + options + `}}}}`
+			var upstream map[string]upstreamProvider
+			if err := json.Unmarshal([]byte(raw), &upstream); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := build(upstream, overridesFile{}, []model.Provider{{Name: "openai"}}, map[string]string{"openai": "openai"}, "2026-10-07", DefaultUpstream); err == nil {
+				t.Fatalf("build accepted %s", options)
+			}
+		})
+	}
+	raw := `{"openai": {"id": "openai", "models": {"bad": {"id": "bad", "tool_call": true, "reasoning_options": [{"type": "toggle"}]}}}}`
+	var upstream map[string]upstreamProvider
+	if err := json.Unmarshal([]byte(raw), &upstream); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := build(upstream, overridesFile{}, []model.Provider{{Name: "openai"}}, map[string]string{"openai": "openai"}, "2026-10-07", DefaultUpstream); err == nil {
+		t.Fatal("build accepted reasoning options on a model without reasoning")
+	}
+	var unknownKey map[string]upstreamProvider
+	if err := json.Unmarshal([]byte(`{"openai": {"id": "openai", "models": {"bad": {"id": "bad", "tool_call": true, "reasoning": true, "reasoning_options": [{"type": "toggle", "default": true}]}}}}`), &unknownKey); err == nil || !strings.Contains(err.Error(), "reasoning option") {
+		t.Fatalf("unknown option key decoded without a reasoning option error: %v", err)
+	}
+}
+
+func TestOverridesEditReasoningOptions(t *testing.T) {
+	const upstreamRaw = `{"openai": {"id": "openai", "models": {
+	  "budget": {"id": "budget", "tool_call": true, "reasoning": true,
+	    "reasoning_options": [{"type": "toggle"}, {"type": "budget_tokens", "min": 128, "max": 32768}]},
+	  "toggle-effort": {"id": "toggle-effort", "tool_call": true, "reasoning": true,
+	    "reasoning_options": [{"type": "toggle"}, {"type": "effort", "values": ["low", "high"]}]}
+	}}}`
+	var upstream map[string]upstreamProvider
+	if err := json.Unmarshal([]byte(upstreamRaw), &upstream); err != nil {
+		t.Fatal(err)
+	}
+	providers := []model.Provider{{Name: "openai"}}
+	mapping := map[string]string{"openai": "openai"}
+	cases := []struct {
+		name       string
+		model      string
+		override   string
+		want       string
+		efforts    string
+		overridden string
+	}{
+		{"efforts append an effort entry", "budget", `"efforts": ["low", "medium", "high"]`,
+			`[{"type":"toggle"},{"type":"budget_tokens","min":128,"max":32768},{"type":"effort","values":["low","medium","high"]}]`, "low,medium,high", "efforts"},
+		{"efforts replace the effort entry", "toggle-effort", `"efforts": ["none", "low", "high"]`,
+			`[{"type":"toggle"},{"type":"effort","values":["none","low","high"]}]`, "none,low,high", "efforts"},
+		{"reasoning_options replace the list", "toggle-effort", `"reasoning_options": [{"type": "effort", "values": ["default", "low"]}]`,
+			`[{"type":"effort","values":["default","low"]}]`, "low", "reasoning_options"},
+		{"reasoning_options can state no control", "budget", `"reasoning_options": []`,
+			`[]`, "", "reasoning_options"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := overridesFrom(t, `{"providers": {"openai": {"models": {"`+tc.model+`": {`+tc.override+`, "ref": "https://example.test/doc", "verified": "2026-10-07"}}}}}`)
+			file, err := build(upstream, o, providers, mapping, "2026-10-07", DefaultUpstream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row, _ := file.Lookup("openai", tc.model)
+			if got := optionsJSON(t, row.ReasoningOptions); got != tc.want {
+				t.Fatalf("ReasoningOptions = %s, want %s", got, tc.want)
+			}
+			if got := strings.Join(row.Efforts, ","); got != tc.efforts {
+				t.Fatalf("Efforts = %q, want %q", got, tc.efforts)
+			}
+			if got := strings.Join(row.Overridden, ","); got != tc.overridden {
+				t.Fatalf("Overridden = %q, want %q", got, tc.overridden)
+			}
+		})
+	}
+	// The override's edit must not leak into the upstream row it copied.
+	if got := upstream["openai"].Models["toggle-effort"].ReasoningOptions[1].Values; strings.Join(got, ",") != "low,high" {
+		t.Fatalf("upstream row changed to %v", got)
+	}
+
+	both := overridesFrom(t, `{"providers": {"openai": {"models": {"budget": {"efforts": ["low"],
+	  "reasoning_options": [{"type": "effort", "values": ["low"]}], "ref": "https://example.test/doc", "verified": "2026-10-07"}}}}}`)
+	if _, err := build(upstream, both, providers, mapping, "2026-10-07", DefaultUpstream); err == nil {
+		t.Fatal("an override setting both efforts and reasoning_options was accepted")
+	}
+	if _, err := parseOverrides([]byte(`{"providers": {"openai": {"models": {"budget": {"reasoning_options": [{"type": "toggle", "stepp": 1}], "ref": "x", "verified": "2026-10-07"}}}}}`)); err == nil {
+		t.Fatal("a misspelled reasoning option key in overrides was accepted")
+	}
+}

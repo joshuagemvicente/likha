@@ -16,7 +16,11 @@ import (
 // provider is not serving, is refused with a visible reason and held out of
 // this run's advertisement instead of silently substituted.
 func (m *ui) profileRunInputs() ([]string, []agent.TaskProfile) {
-	run := runsetup.ProfileInputs(m.stateDir, m.client)
+	client := m.client
+	if m.working && m.runClient != nil {
+		client = m.runClient
+	}
+	run := runsetup.ProfileInputs(m.stateDir, client)
 	m.profileCatalog = run.Catalog
 	m.reportProfileCatalogIssue(run.Catalog)
 	for _, skip := range run.Skipped {

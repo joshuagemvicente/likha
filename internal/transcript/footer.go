@@ -27,6 +27,7 @@ const footerSeparator = " · "
 type TurnInfo struct {
 	Model     string        // the model the turn ran on
 	Effort    string        // the effort level the turn ran at; "" is Default (specs/model-effort)
+	Variant   string        // named execution preset; legacy Effort remains readable
 	Duration  time.Duration // wall time from prompt submit to run end
 	Tools     int           // top-level tool calls the turn showed as items
 	Compacted bool          // the conversation was compacted automatically during the turn
@@ -46,6 +47,7 @@ type turnJSON struct {
 	// Effort is omitted at Default, so such turns encode exactly as before
 	// the field existed.
 	Effort    string `json:"effort,omitempty"`
+	Variant   string `json:"variant,omitempty"`
 	MS        int64  `json:"ms"`
 	Tools     int    `json:"tools"`
 	Cancelled bool   `json:"cancelled"`
@@ -67,7 +69,7 @@ func EncodeTurn(t TurnInfo) string {
 	for _, d := range t.Thoughts {
 		thoughts = append(thoughts, turnMS(d))
 	}
-	data, err := json.Marshal(turnJSON{V: &v, Model: t.Model, Effort: t.Effort, MS: turnMS(t.Duration), Tools: max(t.Tools, 0), Cancelled: t.Cancelled, Compacted: t.Compacted, ThoughtsMS: thoughts})
+	data, err := json.Marshal(turnJSON{V: &v, Model: t.Model, Effort: t.Effort, Variant: t.Variant, MS: turnMS(t.Duration), Tools: max(t.Tools, 0), Cancelled: t.Cancelled, Compacted: t.Compacted, ThoughtsMS: thoughts})
 	if err != nil { // unreachable: every field marshals
 		return fmt.Sprintf(`{"v":%d}`, turnVersion)
 	}
@@ -97,7 +99,7 @@ func DecodeTurn(s string) (TurnInfo, bool) {
 	if raw.V == nil || *raw.V < 1 || raw.MS < 0 || raw.Tools < 0 || raw.MS > math.MaxInt64/int64(time.Millisecond) {
 		return TurnInfo{}, false
 	}
-	info := TurnInfo{Model: raw.Model, Effort: raw.Effort, Duration: time.Duration(raw.MS) * time.Millisecond, Tools: raw.Tools, Cancelled: raw.Cancelled, Compacted: raw.Compacted}
+	info := TurnInfo{Model: raw.Model, Effort: raw.Effort, Variant: raw.Variant, Duration: time.Duration(raw.MS) * time.Millisecond, Tools: raw.Tools, Cancelled: raw.Cancelled, Compacted: raw.Compacted}
 	for _, ms := range raw.ThoughtsMS {
 		if ms < 0 || ms > math.MaxInt64/int64(time.Millisecond) {
 			info.Thoughts = nil
@@ -155,7 +157,11 @@ func FooterText(t TurnInfo, width int, ellipsis string) string {
 	if model := flattenRow(t.Model); model != "" {
 		segments = append(segments, model)
 	}
-	if effort := flattenRow(t.Effort); effort != "" {
+	variant := t.Variant
+	if variant == "" {
+		variant = t.Effort
+	}
+	if effort := flattenRow(variant); effort != "" {
 		segments = append(segments, effort)
 	}
 	segments = append(segments, TurnDuration(t.Duration))

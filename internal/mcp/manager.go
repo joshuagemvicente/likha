@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"likha/internal/model"
 )
@@ -21,6 +22,16 @@ type McpManager struct {
 	trusted map[string]bool // server name → approved for the session
 	once    map[string]bool // onceKey(server, tool) → one approved call pending
 	failed  map[string]string
+	// starting holds one channel per server whose handshake is in flight,
+	// closed when it ends; the handshake itself runs without mu.
+	starting map[string]chan struct{}
+	stopped  bool // Stop ran: no further starts, late clients are closed
+	// lifetime bounds every server start; Stop cancels it so a handshake in
+	// flight ends at once instead of holding its server for CallTimeout.
+	// Server starts have no caller context of their own (CatalogTools is
+	// called while building the tool list), so the manager owns this one.
+	lifetime       context.Context
+	cancelLifetime context.CancelFunc
 }
 
 func NewMcpManager(stateDir, userAgent string) (*McpManager, error) {
@@ -203,17 +214,92 @@ func (m *McpManager) Trusted(name string) bool {
 	return m.trusted[name]
 }
 
-// Stop kills every running server and fails pending calls. Called on exit;
-// servers must not outlive Likha.
+// Stop kills every running server, ends any handshake in flight, and fails
+// pending calls. Called on exit; servers must not outlive Likha.
+//
+// Servers close concurrently, one goroutine each, and Stop waits for all of
+// them: a server that ignores SIGTERM takes stdioStopGrace to kill, so
+// closing in turn would grow with the server count and outlast the exit
+// grace, leaving later servers unreaped. A start in flight is cancelled and
+// awaited too, bounded by startCleanupBound, so its cleanup runs before the
+// process exits. mu is not held while waiting: finishStart needs it.
 func (m *McpManager) Stop() {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.stopped = true
+	if m.cancelLifetime != nil {
+		m.cancelLifetime()
+	}
+	clients := make(map[string]*Client, len(m.clients))
 	for name, client := range m.clients {
-		if err := client.Close(); err != nil {
-			m.failed[name] = err.Error()
+		clients[name] = client
+	}
+	starting := make([]chan struct{}, 0, len(m.starting))
+	for _, done := range m.starting {
+		starting = append(starting, done)
+	}
+	m.mu.Unlock()
+
+	type closeResult struct {
+		name string
+		err  error
+	}
+	results := make(chan closeResult, len(clients))
+	var wg sync.WaitGroup
+	for name, client := range clients {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results <- closeResult{name: name, err: client.Close()}
+		}()
+	}
+	awaitStarts(starting, startCleanupBound())
+	wg.Wait()
+	close(results)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failed == nil {
+		m.failed = make(map[string]string)
+	}
+	for result := range results {
+		if result.err != nil {
+			m.failed[result.name] = result.err.Error()
+		}
+	}
+}
+
+// StopBound is the longest Stop waits. Servers close concurrently, each
+// within stdioStopGrace (stdio) or closeTimeout (HTTP), while Stop awaits
+// in-flight starts for at most startCleanupBound, which covers either. The
+// app's shutdown grace must exceed it so a signalled exit still reaps every
+// server.
+func StopBound() time.Duration {
+	return startCleanupBound()
+}
+
+// startCleanupBound is how long Stop waits for cancelled starts to clean up:
+// a stdio server gets stdioStopGrace before its group is killed, and an HTTP
+// session's DELETE is bounded by closeTimeout.
+func startCleanupBound() time.Duration {
+	return stdioStopGrace + closeTimeout
+}
+
+// awaitStarts waits until every in-flight start has finished, or bound has
+// passed.
+func awaitStarts(starting []chan struct{}, bound time.Duration) {
+	if len(starting) == 0 {
+		return
+	}
+	deadline := time.NewTimer(bound)
+	defer deadline.Stop()
+	for _, done := range starting {
+		select {
+		case <-done:
+		case <-deadline.C:
+			return
 		}
 	}
 }

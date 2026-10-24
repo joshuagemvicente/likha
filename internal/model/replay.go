@@ -34,6 +34,8 @@ const (
 	// (chunked-content T10); until then a rejected replay would have
 	// repeated on every later turn with no way out named.
 	ReplayThinkingChunk
+	// ReplayResponsesItems sends completed Responses reasoning items to their issuer.
+	ReplayResponsesItems
 )
 
 // modelBound reports whether state of this form goes back only to the model
@@ -85,6 +87,8 @@ type ReasoningReplay struct {
 	Thinking *string `json:",omitempty"`
 	// ThinkingSignature is the last non-empty signature of those chunks.
 	ThinkingSignature string `json:",omitempty"`
+	// Responses holds completed reasoning output items, not display summaries.
+	Responses json.RawMessage `json:",omitempty"`
 }
 
 // NewReasoningReplay builds replay state issued by source. Details and Blocks
@@ -149,7 +153,40 @@ func (r *ReasoningReplay) Equal(other *ReasoningReplay) bool {
 	if !equalText(r.Thinking, other.Thinking) || r.ThinkingSignature != other.ThinkingSignature {
 		return false
 	}
-	return bytes.Equal(r.Details, other.Details) && bytes.Equal(r.Blocks, other.Blocks)
+	return bytes.Equal(r.Details, other.Details) && bytes.Equal(r.Blocks, other.Blocks) && bytes.Equal(r.Responses, other.Responses)
+}
+
+func validResponsesReplay(raw json.RawMessage) bool {
+	if len(raw) == 0 || len(raw) > 256<<10 {
+		return false
+	}
+	var items []struct {
+		Type      string `json:"type"`
+		ID        string `json:"id"`
+		Status    string `json:"status"`
+		Encrypted string `json:"encrypted_content"`
+	}
+	if json.Unmarshal(raw, &items) != nil || len(items) == 0 || len(items) > 256 {
+		return false
+	}
+	for _, item := range items {
+		if item.Type != "reasoning" || !validResponsesID(item.ID) || item.Status != "" && item.Status != "completed" {
+			return false
+		}
+		// Requests use store:false, so the API kept no copy of the item: an
+		// ID without its encrypted state names nothing and is rejected.
+		if item.Encrypted == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Client) responsesReplay(m Message) *ReasoningReplay {
+	if m.Role != "assistant" || m.Replay == nil || m.Replay.Source != c.ReplaySource() || !validResponsesReplay(m.Replay.Responses) {
+		return nil
+	}
+	return m.Replay
 }
 
 // equalText compares optional texts by value; nil equals only nil.
@@ -274,6 +311,10 @@ func (c *Client) replaySentText(m Message, currentTurn, toolsDeclared bool) []st
 			}
 		}
 		return signatures
+	case ReplayResponsesItems:
+		if validResponsesReplay(replay.Responses) {
+			return []string{string(replay.Responses)}
+		}
 	}
 	return nil
 }

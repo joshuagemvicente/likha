@@ -15,7 +15,7 @@ var (
 )
 
 // Delete removes one session owned by this store's repository. Its plans,
-// task_records, edit_journal and undo history (edit_changesets,
+// run_markers, task_records, edit_journal and undo history (edit_changesets,
 // edit_changeset_drops) rows go with it through ON DELETE CASCADE in the
 // same transaction. Retained tool output lives outside the database; the
 // caller removes it separately (tooloutput.RemoveSession).

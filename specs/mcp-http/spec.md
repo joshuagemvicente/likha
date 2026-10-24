@@ -214,7 +214,10 @@ and Likha's existing conventions.
   `Last-Event-ID`.
 - **Server-initiated requests** arriving on a response stream (sampling,
   roots, elicitation) get a JSON-RPC "method not found" error, so the
-  server is not left waiting. Notifications are ignored, as for stdio.
+  server is not left waiting; `ping` gets an empty result, as the MCP
+  specification requires. Stdio servers get the same answers, and a
+  server request is never mistaken for the reply to a tool call that
+  shares its id. Notifications are ignored, as for stdio.
 - **Timeouts.** Connecting and the handshake share the existing 60-second
   limit. Each tool call keeps 60 seconds. The exit DELETE waits at most
   2 seconds.

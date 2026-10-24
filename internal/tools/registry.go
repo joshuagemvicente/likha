@@ -459,10 +459,12 @@ func cancelledCall(name string, source Source, cause error) (Result, error) {
 	return callFailure(name, source, Cancelled, "cancelled", "Tool call was cancelled.", cause)
 }
 
+// authorizeTool and runTool turn a backend panic into a failed call. The
+// recovered value stays in the cause so the failure can be diagnosed.
 func authorizeTool(ctx context.Context, authorize Authorizer, arguments json.RawMessage) (err error) {
 	defer func() {
-		if recover() != nil {
-			err = errors.New("authorization backend failed")
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("authorization backend failed: panic: %v", recovered)
 		}
 	}()
 	return authorize(ctx, arguments)
@@ -470,9 +472,9 @@ func authorizeTool(ctx context.Context, authorize Authorizer, arguments json.Raw
 
 func runTool(ctx context.Context, run Handler, arguments json.RawMessage) (result Result, err error) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
 			result = Result{Status: Failed}
-			err = errors.New("tool backend failed")
+			err = fmt.Errorf("tool backend failed: panic: %v", recovered)
 		}
 	}()
 	return run(ctx, arguments)

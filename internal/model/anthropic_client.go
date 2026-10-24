@@ -117,25 +117,36 @@ func (c *Client) streamAnthropic(ctx context.Context, messages []Message, tools 
 	if c.effortWire == EffortAnthropic {
 		effort = c.Effort()
 	}
+	thinking, output := anthropicThinking(c.model), anthropicMaxTokens(c.model)
+	if c.nativeSnapshot {
+		thinking, output = c.nativeThinking, c.nativeOutput
+	}
 	request, err := buildAnthropicRequest(anthropicInput{
 		Model:     c.model,
 		Messages:  messages,
 		Tools:     tools,
-		Thinking:  anthropicThinking(c.model),
-		MaxTokens: anthropicMaxTokens(c.model),
+		Thinking:  thinking,
+		MaxTokens: output,
 		Effort:    effort,
 		Replay:    c.replayFor,
 	})
 	if err != nil {
 		return Message{}, usageReport{}, err
 	}
-	resp, err := c.postAnthropic(ctx, request)
+	request.Body, err = c.variantPayload(request.Body)
 	if err != nil {
 		return Message{}, usageReport{}, err
 	}
+	sendCtx, watchBody, stopWatch := withStreamWatchdog(ctx, streamIdleTimeout)
+	defer stopWatch()
+	resp, err := c.postAnthropic(sendCtx, request)
+	if err != nil {
+		return Message{}, usageReport{}, err
+	}
+	resp.Body = watchBody(resp.Body)
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return Message{}, usageReport{}, rejectedAnthropicRequest(readAnthropicHTTPError(resp), request)
+		return Message{}, usageReport{}, c.rejectedVariant(resp.StatusCode, rejectedAnthropicRequest(readAnthropicHTTPError(resp), request))
 	}
 	responseID := strings.TrimSpace(resp.Header.Get("request-id"))
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
@@ -162,6 +173,7 @@ func (c *Client) postAnthropic(ctx context.Context, request anthropicRequest) (*
 		return nil, fmt.Errorf("create model request: %w", err)
 	}
 	setAnthropicHeaders(req.Header, c.apiKey)
+	setOverlayHeaders(req.Header, c.variantHeaders)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	if request.Beta != "" {

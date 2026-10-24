@@ -153,6 +153,8 @@ func (m *ui) applyPromptBlocked(v agent.TurnEvent) {
 	}
 	m.restoreQueuedRows()
 	m.working = false
+	// A blocked prompt started no work, so it never recorded a run marker.
+	m.runMarker = nil
 	if m.cancel != nil {
 		m.cancel()
 	}
@@ -197,6 +199,9 @@ func (m *ui) applySteerBlocked(v agent.TurnEvent) {
 	for i, text := range m.queue {
 		if text == v.Text {
 			m.queue = append(m.queue[:i:i], m.queue[i+1:]...)
+			if i < len(m.queueSelections) {
+				m.queueSelections = append(m.queueSelections[:i:i], m.queueSelections[i+1:]...)
+			}
 			break
 		}
 	}

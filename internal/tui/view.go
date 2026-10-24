@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"likha/internal/transcript"
@@ -132,6 +134,7 @@ func (m *ui) rebuild() {
 		first := false
 		m.entryLines = make([]int, len(m.entries))
 		md := m.newMarkdownLayout()
+		toolRows := m.newToolRowsLayout(width)
 		m.editDiffNext = map[editDiffKey]transcript.DiffSummary{}
 		plan := m.toolItemPlan()
 		focused, hasFocus := m.focusedToolItem(plan)
@@ -218,7 +221,7 @@ func (m *ui) rebuild() {
 				continue
 			}
 			if e.role == "Tool" {
-				addTool(m.toolItemRows(index, plan, hasFocus && focused == index, width))
+				addTool(m.cachedToolItemRows(toolRows, index, plan, hasFocus && focused == index, width))
 				continue
 			}
 			// Glyph-language blocks (spec transcript-redesign § Glyph
@@ -260,6 +263,7 @@ func (m *ui) rebuild() {
 		// Keep only this layout's rendered entries and code highlights:
 		// edits, theme changes, and resizes leave nothing stale behind.
 		m.commitMarkdownLayout(md)
+		m.commitToolRowsLayout(toolRows)
 		m.editDiffCache, m.editDiffNext = m.editDiffNext, nil
 		m.layoutWidth = m.width
 	}
@@ -547,9 +551,29 @@ func spliceRow(rendered string, left, boxWidth int, box string) string {
 
 func spliceRowOn(rendered string, left, boxWidth int, box, bg string) string {
 	plain := stripANSI(rendered)
-	l, rest := splitAtWidth(plain, left)
-	_, right := splitAtWidth(rest, boxWidth)
+	l, rest := splitCells(plain, left)
+	_, right := splitCells(rest, boxWidth)
 	return dimRowOn(l, bg) + box + dimRowOn(right, bg)
+}
+
+// splitCells splits plain text at display column col so that left ends and
+// right starts exactly there. A wide rune straddling col cannot be split, so
+// its cells on either side become spaces; keeping it whole on one side would
+// move everything after the cut by a cell on this row only.
+func splitCells(s string, col int) (left, right string) {
+	width := 0
+	for i, r := range s {
+		if width >= col {
+			return s[:i], s[i:]
+		}
+		size := runewidth.RuneWidth(r)
+		if width+size > col {
+			_, n := utf8.DecodeRuneInString(s[i:])
+			return s[:i] + strings.Repeat(" ", col-width), strings.Repeat(" ", width+size-col) + s[i+n:]
+		}
+		width += size
+	}
+	return s, ""
 }
 
 // stripANSI removes SGR escape sequences, leaving the plain text of a
@@ -647,10 +671,19 @@ func hiddenReviewRune(r rune) bool {
 
 func fit(text string, width int) string {
 	text = fitText(text, width)
-	if columns := runewidth.StringWidth(text); columns < width {
+	if columns := displayWidth(text); columns < width {
 		text += strings.Repeat(" ", width-columns)
 	}
 	return text
+}
+
+// displayWidth measures plain text for padding: the wider of go-runewidth's
+// and x/ansi's grapheme widths. They disagree on some clusters (go-runewidth
+// counts a regional-indicator flag as one cell, x/ansi and terminals as two),
+// and Bubble Tea truncates every row by the x/ansi width, so padding by the
+// smaller figure would push the row's last cells off the screen.
+func displayWidth(text string) int {
+	return max(runewidth.StringWidth(text), ansi.StringWidth(text))
 }
 
 // fitText is fit without the canvas padding: selection copies these visible

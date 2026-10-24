@@ -1,5 +1,10 @@
 # Feature: Model effort (choose how hard a reasoning model thinks)
 
+> Superseded 2026-10-09 by [model-variants](../model-variants/spec.md), FR-47.
+> This file records the historical effort-only contract, not the current
+> implementation target. `/effort` and its probe prerequisite are retired;
+> provider API effort fields and the explicit diagnostic probe remain.
+
 **Status:** in progress — M1–M4 and live OpenRouter levels implemented (local)
 2026-10-06, automated suite green; provider live probes (M5, run by the user
 with `likha --probe-effort`) outstanding, so no provider carries effort yet

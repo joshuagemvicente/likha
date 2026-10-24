@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -531,11 +532,10 @@ func (m *ui) reviewActionLines() []string {
 // An unsuccessful write leaves both the active appearance and the stored
 // choice untouched. A corrupt or unreadable config is never overwritten.
 func (m *ui) applyComposerStyle(style string) {
-	cfg, err := providers.LoadStoredConfig(m.stateDir)
-	if err == nil {
+	err := providers.UpdateStoredConfig(context.Background(), m.stateDir, func(cfg *providers.StoredProviderConfig) error {
 		cfg.Composer = &providers.StoredComposerConfig{Style: style}
-		err = providers.SaveStoredConfig(m.stateDir, cfg)
-	}
+		return nil
+	})
 	if err != nil {
 		m.status = "Error"
 		m.entries = append(m.entries, entry{role: "Error", content: "Store composer style: " + err.Error()})

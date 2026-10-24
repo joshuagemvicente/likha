@@ -14,8 +14,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"golang.org/x/sys/unix"
-
 	"likha/internal/actions"
 )
 
@@ -262,22 +260,30 @@ func runHook(ctx context.Context, hook Hook, ev Event, payload []byte) hookResul
 		if cmd.Process == nil {
 			return os.ErrProcessDone
 		}
-		if err := unix.Kill(-cmd.Process.Pid, unix.SIGKILL); err != nil {
-			if errors.Is(err, unix.ESRCH) {
-				return os.ErrProcessDone
-			}
-			return err
-		}
-		return nil
+		return actions.KillProcessGroup(cmd.Process.Pid)
 	}
 	// A background child holding stdout open must not keep Wait blocked.
 	cmd.WaitDelay = time.Second
 	err := cmd.Run()
+	if runCtx.Err() != nil && cmd.Process != nil {
+		// Cancel only fires while the hook's shell runs; one that exited just
+		// before the timeout or cancel can still leave its children behind.
+		// A hook that finished in time keeps its background jobs (`afplay &`).
+		if killErr := actions.KillLeftoverProcessGroup(cmd.Process.Pid); killErr != nil {
+			return hookResult{err: fmt.Errorf("stop interrupted hook: %w", killErr)}
+		}
+	}
 	if ctx.Err() != nil {
 		return hookResult{err: ctx.Err()}
 	}
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		return hookResult{err: fmt.Errorf("timed out after %s", hook.Timeout)}
+	}
+	// ErrWaitDelay alone means the hook exited 0 while a background child
+	// still held its output open: the hook itself succeeded, and the child
+	// keeps running with its output no longer read.
+	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
+		err = nil
 	}
 	var exit *exec.ExitError
 	switch {
