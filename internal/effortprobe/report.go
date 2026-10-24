@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"likha/internal/redact"
 )
 
 // formatVersion changes whenever a report field changes meaning.
@@ -89,32 +89,12 @@ func (r Report) Sent() int {
 	return sent
 }
 
-// bearerPattern finds an authorization value a provider may echo.
-var bearerPattern = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=-]+`)
-
 // Redact removes every secret from text, in its raw, URL-escaped and
 // JSON-escaped forms, plus any bearer authorization value, then cuts the
 // result to 1 KiB on a character boundary (tasks T11). It is exported so
 // provider errors printed before consent are cleaned the same way as rows.
 func Redact(text string, secrets ...string) string {
-	for _, secret := range secrets {
-		if secret == "" {
-			continue
-		}
-		for _, form := range secretForms(secret) {
-			text = strings.ReplaceAll(text, form, "[redacted]")
-		}
-	}
-	text = bearerPattern.ReplaceAllString(text, "Bearer [redacted]")
-	return truncate(text, maxErrorText)
-}
-
-func secretForms(secret string) []string {
-	forms := []string{secret, url.QueryEscape(secret), url.PathEscape(secret)}
-	if quoted, err := json.Marshal(secret); err == nil {
-		forms = append(forms, strings.Trim(string(quoted), `"`))
-	}
-	return forms
+	return truncate(redact.Secrets(text, secrets...), maxErrorText)
 }
 
 func truncate(text string, limit int) string {

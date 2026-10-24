@@ -22,7 +22,10 @@ func authorizeEdit(ctx context.Context, request *ApprovalRequest, options RunOpt
 	if !alwaysAsk && options.EditGrant != nil {
 		request.Remember = RememberEdits
 	}
-	approved, err := awaitApproval(ctx, request, emit)
+	approved, err := review(ctx, request, options, emit, NoReviewerError{
+		Action: "this edit was not applied and no file was written",
+		Advice: "Describe the change in your answer instead.",
+	})
 	if err != nil {
 		return false, err
 	}

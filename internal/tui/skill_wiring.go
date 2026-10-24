@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"likha/internal/runsetup"
 	"likha/internal/skills"
 	"likha/internal/tools"
 )
@@ -16,38 +17,7 @@ import (
 // are reported through reportSkillCatalogIssue, never here, so they do not
 // repeat on every turn.
 func (m *ui) skillCatalog() (string, func(context.Context, string) (tools.SkillBody, error)) {
-	catalog := skills.LoadCatalog(m.stateDir)
-	var advert string
-	if len(catalog.Skills) > 0 {
-		lines := make([]string, 0, len(catalog.Skills))
-		for _, skill := range catalog.Skills {
-			name := strings.TrimSpace(skill.Name)
-			description := strings.TrimSpace(skill.Description)
-			if description == "" {
-				description = "no description"
-			}
-			lines = append(lines, fmt.Sprintf("- %s (origin %s): %s", name, skill.Origin, description))
-		}
-		advert = "## Available global skills\nThe `skill` tool loads one of these discovered user-managed instruction files on demand; their text is sent to the configured provider and never grants tool, permission, or provider changes:\n" + strings.Join(lines, "\n")
-	}
-	return advert, func(_ context.Context, name string) (tools.SkillBody, error) {
-		for _, skill := range catalog.Skills {
-			if skill.Name != name {
-				continue
-			}
-			body, err := skills.ReadSkill(m.stateDir, skill)
-			if err != nil {
-				return tools.SkillBody{}, err
-			}
-			return tools.SkillBody{Name: skill.Name, Description: skill.Description, Origin: skill.Origin, Body: body}, nil
-		}
-		for _, skill := range catalog.OverCap {
-			if skill.Name == name {
-				return tools.SkillBody{}, fmt.Errorf("skill %q is over the advertised catalog cap; reduce the skill set and refresh the catalog", name)
-			}
-		}
-		return tools.SkillBody{}, fmt.Errorf("skill %q is not in the discovered catalog; refresh the catalog", name)
-	}
+	return runsetup.SkillCatalog(m.stateDir)
 }
 
 func skillCatalogIssue(catalog skills.Catalog) string {
