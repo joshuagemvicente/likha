@@ -43,7 +43,7 @@ lint — depguard is a recorded follow-up); `internal/` stays internal.
 | `tui` | All Bubbletea UI: `ui` struct, `NewUI`, `Update` dispatch, dialogs, setup, status, composer/editor/scroll/popups, `Version`, `logo` | `agent`, `providers`, `model`, `session`, `repository`, `mcp`, `ui`, `update` | `app` (would cycle) |
 | `agent` | Turn loop: `RunTurn`, `TurnEvent`/`ApprovalRequest`, `CompactHistory`, `GenerateSessionName`, mention expansion + index helpers | `actions`, `model`, `repository`, `mcp` (manager type only) | `bubbletea`, `lipgloss`, `tui`, `providers` |
 | `providers` | Provider identity + persistence: `Connection`, `ResolveProvider`, `SwitchModelID`, `CustomEndpointTarget`, `Load/SaveStoredConfig`, `Store/StoredKey/OAuth`, paths | `model`, `mcp` (manager type only) | `tui`, `agent`, Bubbletea |
-| `mcp` | MCP stdio core + `McpManager` (`NewMcpManager`, `Tools`, `Call`, `Stop`, `Status`, `Summary`, `Trusted`, test-only `NewMcpManagerForTest`) | `model` | `tui`, `agent`, `providers`, `app` |
+| `mcp` | MCP client core (stdio and Streamable HTTP transports) + `McpManager` (`NewMcpManager`, `Tools`, `Call`, `Stop`, `Status`, `Summary`, `Trusted`, `Origin`, test-only `NewMcpManagerForTest`) | `model` | `tui`, `agent`, `providers`, `app` |
 | `ui` | Themes + glyphs (`ThemeNames`, `Resolve`, `HasDarkBackground`, `Ascii/NerdGlyphs`) | `lipgloss` | project packages |
 | `model`, `session`, `repository`, `actions`, `update`, `skills` | Unchanged leaf packages (see their package docs) | — | — |
 

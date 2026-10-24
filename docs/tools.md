@@ -43,9 +43,23 @@ Likha can use tools from **MCP servers** (Model Context Protocol) you configure 
 }
 ```
 
-- **stdio only for v1** — each server is launched as a child process, handshaken (MCP 2025-03-26), and killed when Likha exits. HTTP transports are deferred.
+- **stdio servers** (`command`) are launched as child processes, handshaken (MCP 2025-03-26), and killed when Likha exits.
+- **Streamable HTTP servers** (`url`) are reached over the network instead. Give a `url` in place of `command`, and optional static `headers`; a value may refer to an environment variable as `${NAME}`, which is how bearer tokens are usually supplied:
+
+  ```json
+  {
+    "mcpServers": {
+      "docs": {
+        "url": "https://mcp.example.com/mcp",
+        "headers": { "Authorization": "Bearer ${DOCS_MCP_TOKEN}" }
+      }
+    }
+  }
+  ```
+
+  The URL must use `https://`; plain `http://` is accepted only for `localhost`, `127.x.x.x`, and `[::1]`. A `"type"` of `"http"` or `"streamable-http"` (as Claude Code writes it) is accepted. If a referenced variable is unset or empty, that server shows as failed in `/mcp`, naming the variable, and receives nothing. Headers cannot refer to Likha's own provider keys (`LIKHA_API_KEY`, `LIKHA_*_API_KEY`), and `args`/`env` apply only to stdio servers. Header values never appear in `/mcp`, errors, tool results, or the transcript; `/mcp` shows only the server's origin. **Tool arguments you approve are sent to that remote server**, and the first-call review names its origin. Not supported yet: OAuth sign-in (a server that requires it fails with a message saying so) and the legacy HTTP+SSE transport (`"type": "sse"` is refused). On exit Likha ends each HTTP session, waiting at most 2 seconds. HTTP support is verified by automated tests against local fake servers only; no real remote server has been tried yet.
 - **Trust per server, by choice:** the first tool call from a server shows the server name, tool, and arguments. **Approve** runs that one call and the server stays untrusted; **Approve always** also trusts the server's tools for the rest of the session. Trust resets on session switch, session deletion, and relaunch.
-- A crashed server produces a clear failed tool result and stays dead until relaunch (see `/mcp`); the TUI stays usable.
+- A crashed server (or an HTTP server that could not start) produces a clear failed tool result and stays dead until relaunch (see `/mcp`); the TUI stays usable. On an HTTP server, a single call that fails because the connection dropped fails only that call.
 - **`/mcp`** lists configured servers, their state, and their tools.
 - Invalid `mcp.json` fails loudly at startup; the file is 0600 in private state, never in the repository.
 
