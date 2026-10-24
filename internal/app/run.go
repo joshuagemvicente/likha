@@ -465,13 +465,26 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		client.SetSessionHeader(selected.SessionHeader)
 		client.SetSession(snapshot.ID)
 	}
+	var attention providers.StoredAttentionConfig
+	if stored.Attention != nil {
+		attention = *stored.Attention
+	}
+	// The renderer and the attention signals share one write lock so a bell
+	// or OSC 9 sequence never lands inside a frame.
+	terminal := newTerminalOutput(stdout)
+	programOptions := []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(terminal)}
+	if providers.FlagEnabled(attention.Bell) || providers.FlagEnabled(attention.Desktop) {
+		// Focus reports let the TUI stay quiet while the user is looking.
+		programOptions = append(programOptions, tea.WithReportFocus())
+	}
 	program := tea.NewProgram(tui.NewUI(root, repo, client, modelName, providers.Connection{
 		Provider: display, ProviderCanonical: selected.Name, Verified: verified, Err: startupErr,
 		Setup: setupNeeded, Theme: themeName, ComposerStyle: composerStyle, StatusLine: statusLine,
 		ContextWindows: contextWindows, ContextWindowOverrides: stored.ContextWindows, ModelMetadataObserver: metadataObserver,
 		EffortLevels: active.Efforts, DefaultEffort: active.DefaultEffort,
 		Nerd: *nerdFlag || os.Getenv("LIKHA_NERD") == "1", ASCII: asciiGlyphs(*asciiFlag), Mcp: mcpServers,
-	}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
+		Attention: attention, AttentionOut: terminal,
+	}, stateDir, store, snapshot), programOptions...)
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(stderr, "likha: terminal: %v\n", err)
 		return 1

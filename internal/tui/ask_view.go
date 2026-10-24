@@ -24,6 +24,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -105,6 +106,8 @@ type askState struct {
 	skipHint      string                // muted note shown inside the dialog (e.g. provider warning)
 	committed     func(tools.AskAnswer) // coordinator-supplied reply callback
 	scroll        int                   // vertical page offset when the body is tall
+	skipLeft      time.Duration         // auto-skip time left while the dialog is on screen; 0 = no countdown
+	skipLast      time.Time             // when skipLeft was last advanced
 }
 
 // askPageAnswer is one page's recorded outcome inside a questionnaire.
@@ -232,6 +235,7 @@ func (m *ui) openAskQuestion(rec tools.AskRequest, id, callID string, reply func
 	m.layoutWidth = 0
 	m.persist()
 	m.status = "Question pending: answer, skip, or cancel"
+	m.signalAttention(attentionQuestion)
 }
 
 // askClampPages bounds a request's pages to the spec limits as a rendering
@@ -518,6 +522,8 @@ func (m *ui) handleAskKey(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	if m.ask.responded {
 		return false, nil // already delivered; the dialog is closed anyway
 	}
+	// Any key shows the user is present: the question no longer times out.
+	m.stopAskTimer()
 	switch msg.String() {
 	case "ctrl+c":
 		// Never intercepted: cancellation (or idle quit) stays live.
@@ -741,6 +747,11 @@ func (m *ui) askView() string {
 		}
 	} else {
 		footer = append(footer, m.theme.Base.Render(fit("", inner)))
+	}
+	if countdown := m.askCountdownLine(); countdown != "" {
+		for _, line := range wrap(countdown, inner) {
+			footer = append(footer, withBase(m.theme.Muted, m.theme.Base).Render(fit(line, inner)))
+		}
 	}
 	hintLines := wrap(hint, inner)
 	if m.ask.multiPage() {

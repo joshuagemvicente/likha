@@ -2,6 +2,7 @@ package providers
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -33,6 +34,11 @@ type Connection struct {
 	Nerd                   bool                        // user opted into Nerd Font markers
 	ASCII                  bool                        // user selected the plain-ASCII block glyph set
 	Mcp                    *mcp.McpManager
+	Attention              StoredAttentionConfig // attention-signal settings from config.json (specs/attention-notifications)
+	// AttentionOut receives the terminal bell and OSC 9 sequences. It must
+	// share the renderer's write lock so a signal never splits a frame; nil
+	// disables every signal (tests, non-terminal output).
+	AttentionOut io.Writer
 }
 
 // resolvedProvider is the concrete provider configuration after flag,
