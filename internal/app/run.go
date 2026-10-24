@@ -18,6 +18,7 @@ import (
 	"likha/internal/mcp"
 	"likha/internal/model"
 	"likha/internal/providers"
+	"likha/internal/redact"
 	"likha/internal/repository"
 	"likha/internal/session"
 	"likha/internal/tui"
@@ -64,6 +65,15 @@ Options:
   --probe-levels L  With --probe-effort: comma-separated levels to probe
                     instead of the model's published levels.
   --yes             With --probe-effort: confirm the spend without a prompt.
+  -p PROMPT         Run one prompt without the TUI, print the final answer on
+                    stdout and progress on stderr, then exit ("-p -" reads the
+                    prompt from stdin, at most 256 KiB). Nothing prompts:
+                    edits, commands that would ask, MCP, questions and web
+                    access are refused; reads, read-only commands and checks
+                    you already trusted run. Exit codes: 0 completed, 1
+                    failed or time limit, 2 usage or setup, 130 interrupted.
+  --json            With -p: stream JSON Lines events on stdout instead.
+  --max-time D      With -p: bound the whole run (default 30m; 0 for none).
   --debug-models    Log model IDs and context metadata to
                     model-metadata.log (also LIKHA_DEBUG_MODELS=1).
   --ascii           Draw transcript block glyphs and the composer box in plain
@@ -86,8 +96,10 @@ Examples:
   likha ~/projects/app                                        # first-run setup
   likha --provider opencode-go ~/projects/app                 # stored key, default model
   likha --provider openai --api-key sk-... ~/projects/app
+  likha -p "summarize the README" ~/projects/app             # headless run
 
-Put options before the repository path. Likha needs an interactive terminal.
+Put options before the repository path. Without -p, Likha needs an
+interactive terminal.
 
 Composer editing keys: Ctrl+W / Ctrl+Backspace / Alt+Backspace delete the
 previous word (with its spaces), Ctrl+Delete or Alt+D the next word;
@@ -109,18 +121,19 @@ var listModelDetailsFunc = model.ListModelsWithDetails
 // A missing, invalid, or unavailable value is unknown; callers can still use
 // the stored override or documented catalog. This never sends a prompt.
 func discoverContextWindow(modelID, endpoint, apiKey string) map[string]int64 {
-	return contextWindowOf(discoverModelMetadata(modelID, endpoint, apiKey, "", nil))
+	return contextWindowOf(discoverModelMetadata(context.Background(), modelID, endpoint, apiKey, "", nil))
 }
 
 // discoverModelMetadata fetches the details the provider's model list
 // reports for the configured model: its context window and the live effort
 // levels a stored effort is checked against at launch. A failed request or
-// an unlisted model yields the zero value. This never sends a prompt.
-func discoverModelMetadata(modelID, endpoint, apiKey, provider string, observe providers.ModelMetadataObserver) model.ModelDetails {
+// an unlisted model yields the zero value, as does a cancelled ctx. This
+// never sends a prompt.
+func discoverModelMetadata(ctx context.Context, modelID, endpoint, apiKey, provider string, observe providers.ModelMetadataObserver) model.ModelDetails {
 	if strings.TrimSpace(modelID) == "" || strings.TrimSpace(endpoint) == "" {
 		return model.ModelDetails{}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), contextWindowMetadataTimeout)
+	ctx, cancel := context.WithTimeout(ctx, contextWindowMetadataTimeout)
 	defer cancel()
 	start := time.Now()
 	details, err := listModelDetailsFunc(ctx, endpoint, apiKey)
@@ -152,6 +165,23 @@ func contextWindowOf(detail model.ModelDetails) map[string]int64 {
 	return map[string]int64{detail.ID: detail.ContextWindow}
 }
 
+// savedSelectionProvider returns the predefined provider a resumed session
+// ran on, or why it cannot serve this launch.
+func savedSelectionProvider(name, apiKey, stateDir string) (model.Provider, error) {
+	p, known := model.LookupProvider(name)
+	if !known {
+		return model.Provider{}, errors.New("not a predefined provider")
+	}
+	res, err := providers.ResolveProvider(p.Name, "", apiKey, false, stateDir)
+	if err != nil {
+		return model.Provider{}, err
+	}
+	if res.Endpoint != p.BaseURL {
+		return model.Provider{}, fmt.Errorf("its endpoint resolves to %s instead of %s", res.Endpoint, p.BaseURL)
+	}
+	return p, nil
+}
+
 // usageText builds the help text with the provider block generated from the
 // provider table so help cannot drift from the accepted list.
 func usageText() string {
@@ -180,7 +210,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	model.UserAgent = "likha/" + tui.Version
 	flags := flag.NewFlagSet("likha", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	flags.Usage = func() { fmt.Fprint(stdout, usageText()) }
+	// Parse calls Usage for both --help and malformed flags; the help text is
+	// printed after Parse instead so only an explicit --help reaches stdout and
+	// a bad flag in a `-p --json` pipeline cannot corrupt the event stream.
+	flags.Usage = func() {}
 	endpoint := flags.String("endpoint", "", "OpenAI-compatible endpoint (overrides the provider default)")
 	name := flags.String("model", os.Getenv("LIKHA_MODEL"), "model name")
 	providerName := flags.String("provider", os.Getenv("LIKHA_PROVIDER"), "provider from the predefined accepted list")
@@ -198,12 +231,19 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	probeWire := flags.String("probe-wire", "", "with --probe-effort: top, object or both wire shapes")
 	probeLevels := flags.String("probe-levels", "", "with --probe-effort: comma-separated levels to probe")
 	assumeYes := flags.Bool("yes", false, "with --probe-effort: confirm the spend without a prompt")
+	promptFlag := flags.String("p", "", "run one prompt without the TUI (\"-\" reads it from stdin)")
+	jsonOutput := flags.Bool("json", false, "with -p: stream JSON Lines events on stdout")
+	maxTime := flags.Duration("max-time", defaultMaxTime, "with -p: bound the whole run (0 for no bound)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
+			fmt.Fprint(stdout, usageText())
 			return 0
 		}
+		fmt.Fprint(stderr, usageText())
 		return 2
 	}
+	given := flagsSet(flags)
+	headlessRun := given["p"]
 	if *showVersion {
 		fmt.Fprintf(stdout, "Likha %s\n", tui.Version)
 		return 0
@@ -216,9 +256,25 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "likha: expected at most one repository path")
 		return 2
 	}
+	if err := headlessFlagError(given); err != nil {
+		fmt.Fprintf(stderr, "likha: %v\n", err)
+		return 2
+	}
 	if err := probeFlagError(flags, *probeEffort, *listSessions, *login, *resumeID); err != nil {
 		fmt.Fprintf(stderr, "likha: %v\n", err)
 		return 2
+	}
+	var prompt string
+	if headlessRun {
+		if *maxTime < 0 {
+			fmt.Fprintln(stderr, "likha: --max-time cannot be negative")
+			return 2
+		}
+		var err error
+		if prompt, err = readPrompt(*promptFlag, headlessStdin); err != nil {
+			fmt.Fprintf(stderr, "likha: %v\n", err)
+			return 2
+		}
 	}
 	path := "."
 	if *listSessions && *resumeID != "" {
@@ -299,6 +355,47 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "likha: %v\n", err)
 		return 2
 	}
+	selectionOverride := given["provider"] || given["model"] || given["endpoint"] || *providerName != "" || *name != "" || os.Getenv("LIKHA_ENDPOINT") != ""
+	var explicitVariant *string
+	if *name != "" {
+		if *providerName == "" {
+			if prefix, _, qualified := strings.Cut(*name, "/"); qualified {
+				if _, known := model.LookupProvider(prefix); known {
+					ref, parseErr := model.ParseModelReference(*name)
+					if parseErr != nil {
+						fmt.Fprintf(stderr, "likha: %v\n", parseErr)
+						return 2
+					}
+					*providerName, *name = ref.Provider, strings.TrimPrefix(*name, prefix+"/")
+				}
+			}
+		}
+		var parseErr error
+		*name, explicitVariant, parseErr = model.SplitModelVariant(*name)
+		if parseErr != nil {
+			fmt.Fprintf(stderr, "likha: %v\n", parseErr)
+			return 2
+		}
+	}
+	var restoredSelection *model.Selection
+	if *resumeID != "" && !selectionOverride {
+		saved, loadErr := store.Load(*resumeID)
+		if loadErr != nil {
+			fmt.Fprintf(stderr, "likha: session: %v\n", loadErr)
+			return 2
+		}
+		// A custom-endpoint session saves no provider: there is nothing to
+		// restore, so launch preferences apply without a notice.
+		if saved.Selection != nil && saved.Selection.Provider != "" {
+			if p, err := savedSelectionProvider(saved.Selection.Provider, *apiKey, stateDir); err != nil {
+				fmt.Fprintf(stderr, "likha: saved session provider %s is unavailable (%s); using launch preferences\n",
+					saved.Selection.Provider, redact.Secrets(err.Error(), *apiKey))
+			} else {
+				*providerName, *name = p.Name, saved.Selection.Model
+				restoredSelection = saved.Selection
+			}
+		}
+	}
 	// Precedence: --provider flag (which includes LIKHA_PROVIDER) > stored
 	// first-run config. A stored model applies only when the provider itself
 	// came from storage and no model was given. The theme follows the same
@@ -337,7 +434,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	// clearly.
 	setupNeeded := effectiveProvider == "" && *endpoint == "" && os.Getenv("LIKHA_ENDPOINT") == ""
 	output, isFile := stdout.(*os.File)
-	interactive := isatty.IsTerminal(os.Stdin.Fd()) && isFile && isatty.IsTerminal(output.Fd())
+	// A headless run never starts setup or a browser sign-in, whatever the
+	// terminal: both need a person.
+	interactive := !headlessRun && isatty.IsTerminal(os.Stdin.Fd()) && isFile && isatty.IsTerminal(output.Fd())
 	if setupNeeded && !interactive {
 		fmt.Fprintln(stderr, "likha: no provider configured; set --provider or LIKHA_PROVIDER (see --help), or run Likha in an interactive terminal to set one up")
 		return 2
@@ -396,6 +495,21 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "likha: %v\n", err)
 		return 2
 	}
+	if headlessRun {
+		return headlessFlow(headlessStart{
+			prompt: prompt, root: root, stateDir: stateDir, repo: repo, store: store, resumeID: *resumeID,
+			client: client, res: res, selected: selected, display: display, key: key, apiKey: *apiKey,
+			json: *jsonOutput, maxTime: *maxTime,
+			variant: explicitVariant, restored: restoredSelection,
+			windowOverrides: stored.ContextWindows, autoCompact: stored.AutoCompactEnabled(),
+		}, stdout, stderr)
+	}
+	// Installed before the MCP manager, and stopped after it, so a SIGHUP
+	// from a closing terminal or a kill's SIGTERM unwinds the deferred
+	// cleanup below instead of leaving MCP servers (in their own process
+	// groups) running.
+	shutdown := watchShutdownSignals(os.Exit)
+	defer shutdown.stop()
 	mcpServers, err := mcp.NewMcpManager(stateDir, model.UserAgent)
 	if err != nil {
 		fmt.Fprintf(stderr, "likha: %v\n", err)
@@ -418,6 +532,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "likha: model metadata debug log: %s\n", metadataLog.path)
 		}
 	}
+	// Ctrl+C still reaches Likha as SIGINT until the program takes the
+	// terminal; startupCtx ends these network calls on that signal.
+	startupCtx := shutdown.startupContext()
 	var startupErr error
 	var contextWindows map[string]int64
 	var active model.ModelDetails // the active model's /models entry; carries its live effort levels
@@ -427,7 +544,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		// the session stays available for another attempt. In setup mode the
 		// connection is verified interactively instead.
 		if res.OAuth {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(startupCtx, 5*time.Second)
 			start := time.Now()
 			var details []model.ModelDetails
 			modelName, contextWindows, details, startupErr = discoverOAuthModel(ctx, client, modelName)
@@ -440,14 +557,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 				startupErr = client.SetModel(modelName)
 			}
 		} else {
-			startupErr = client.EnsureConnected(context.Background())
+			startupErr = client.EnsureConnected(startupCtx)
 			providerID := selected.Name
 			if providerID == "" {
 				providerID = "custom"
 			}
-			active = discoverModelMetadata(modelName, chosen, key, providerID, metadataObserver)
+			active = discoverModelMetadata(startupCtx, modelName, chosen, key, providerID, metadataObserver)
 			contextWindows = contextWindowOf(active)
 		}
+	}
+	if code, caught := shutdown.caught(); caught {
+		return code // a signal ended the connection check
 	}
 	var snapshot session.Snapshot
 	if *resumeID != "" {
@@ -465,15 +585,69 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		client.SetSessionHeader(selected.SessionHeader)
 		client.SetSession(snapshot.ID)
 	}
-	program := tea.NewProgram(tui.NewUI(root, repo, client, modelName, providers.Connection{
+	var variantNotice string
+	if client != nil {
+		if restoredSelection != nil {
+			variantNotice, err = providers.ApplySavedVariant(startupCtx, stateDir, client, selected, active.Reasoning, restoredSelection.Variant)
+		} else {
+			variantNotice, err = providers.ApplyVariant(startupCtx, stateDir, client, selected, active.Reasoning, explicitVariant)
+		}
+		if code, caught := shutdown.caught(); caught {
+			return code // a signal ended the variant check; its error is moot
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "likha: select variant: %v\n", err)
+			return 2
+		}
+		if variantNotice != "" {
+			fmt.Fprintln(stderr, "likha: "+variantNotice)
+		}
+	}
+	var attention providers.StoredAttentionConfig
+	if stored.Attention != nil {
+		attention = *stored.Attention
+	}
+	// The renderer and the attention signals share one write lock so a bell
+	// or OSC 9 sequence never lands inside a frame.
+	terminal := newTerminalOutput(stdout)
+	programOptions := []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(terminal)}
+	if providers.FlagEnabled(attention.Bell) || providers.FlagEnabled(attention.Desktop) {
+		// Focus reports let the TUI stay quiet while the user is looking.
+		programOptions = append(programOptions, tea.WithReportFocus())
+	}
+	// Likha's watch owns SIGINT and SIGTERM: Bubble Tea's handler would quit
+	// on them without stopping the run.
+	programOptions = append(programOptions, tea.WithoutSignalHandler())
+	if code, caught := shutdown.caught(); caught {
+		return code // a signal during startup: never take over the screen
+	}
+	interfaceModel := tui.NewUI(root, repo, client, modelName, providers.Connection{
 		Provider: display, ProviderCanonical: selected.Name, Verified: verified, Err: startupErr,
 		Setup: setupNeeded, Theme: themeName, ComposerStyle: composerStyle, StatusLine: statusLine,
 		ContextWindows: contextWindows, ContextWindowOverrides: stored.ContextWindows, ModelMetadataObserver: metadataObserver,
 		EffortLevels: active.Efforts, DefaultEffort: active.DefaultEffort,
+		Reasoning: active.Reasoning, Variant: explicitVariant, SelectionOverride: selectionOverride, VariantResolved: client != nil,
 		Nerd: *nerdFlag || os.Getenv("LIKHA_NERD") == "1", ASCII: asciiGlyphs(*asciiFlag), Mcp: mcpServers,
-	}, stateDir, store, snapshot), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(os.Stdin), tea.WithOutput(stdout))
-	if _, err := program.Run(); err != nil {
-		fmt.Fprintf(stderr, "likha: terminal: %v\n", err)
+		Attention: attention, AttentionOut: terminal,
+	}, stateDir, store, snapshot)
+	program := tea.NewProgram(interfaceModel, programOptions...)
+	shutdown.attach(program)
+	_, runErr := program.Run()
+	if runErr != nil {
+		fmt.Fprintf(stderr, "likha: terminal: %v\n", runErr)
+	}
+	// Quitting by key cancels the run without waiting for it; wait here,
+	// whatever ended the program, so its process groups are killed before
+	// the process exits.
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), runStopTimeout)
+	defer cancelStop()
+	if err := interfaceModel.StopRun(stopCtx); err != nil {
+		fmt.Fprintf(stderr, "likha: %v\n", err)
+	}
+	if code, caught := shutdown.caught(); caught {
+		return code
+	}
+	if runErr != nil {
 		return 1
 	}
 	return 0

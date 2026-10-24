@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
+	"github.com/rivo/uniseg"
 
 	"likha/internal/agent"
 	"likha/internal/providers"
@@ -834,4 +835,74 @@ func TestTranscriptSelectionOpenCodeAndDiffPanelPadding(t *testing.T) {
 			t.Fatalf("diff copy lost whitespace or included panel padding: %q", got)
 		}
 	})
+}
+
+// reverseCells reports, per screen cell of a rendered row, its text and
+// whether reverse video paints it. Cells are measured per grapheme the way
+// x/ansi and the screen measure them, so a flag fills two cells.
+func reverseCells(t *testing.T, row string) (text []string, reverse []bool) {
+	t.Helper()
+	on := false
+	for i := 0; i < len(row); {
+		if strings.HasPrefix(row[i:], "\x1b[") {
+			end := strings.IndexByte(row[i+2:], 'm')
+			if end < 0 {
+				t.Fatal("dangling SGR escape")
+			}
+			for _, parameter := range strings.Split(row[i+2:i+2+end], ";") {
+				switch value, _ := strconv.Atoi(parameter); value {
+				case 0, 27:
+					on = false
+				case 7:
+					on = true
+				}
+			}
+			i += 3 + end
+			continue
+		}
+		cluster, _, _, _ := uniseg.FirstGraphemeClusterInString(row[i:], -1)
+		for cell := range ansi.StringWidth(cluster) {
+			if cell == 0 {
+				text = append(text, cluster)
+			} else {
+				text = append(text, "")
+			}
+			reverse = append(reverse, on)
+		}
+		i += len(cluster)
+	}
+	return text, reverse
+}
+
+// TestTranscriptSelectionAfterFlagEmoji pins the cell measure after a
+// regional-indicator flag: the screen shows it in two cells, so a drag over
+// the word after it copies that word and highlights exactly its cells.
+func TestTranscriptSelectionAfterFlagEmoji(t *testing.T) {
+	forceANSI(t)
+	m := selectionTestUI(t, 80, 24, "🇵🇭 flag row text")
+	// The flag fills cells 0–1 and the space cell 2; "flag" is cells 3–6.
+	selectionDrag(t, m, 3, 0, 7, 0)
+	if got := m.selectedText(); got != "flag" {
+		t.Fatalf("selection after a flag = %q, want %q", got, "flag")
+	}
+	text, reverse := reverseCells(t, strings.Split(m.View(), "\n")[0])
+	var highlighted strings.Builder
+	for cell, active := range reverse {
+		if want := cell >= 3 && cell < 7; active != want {
+			t.Fatalf("cell %d (%q) reverse=%t, want %t", cell, text[cell], active, want)
+		}
+		if active {
+			highlighted.WriteString(text[cell])
+		}
+	}
+	if got := highlighted.String(); got != "flag" {
+		t.Fatalf("highlighted cells read %q, want %q", got, "flag")
+	}
+	// The last text cell is text, not padding: a click there starts a drag.
+	m = selectionTestUI(t, 80, 24, "🇵🇭 flag row text")
+	last := ansi.StringWidth("🇵🇭 flag row text") - 1
+	selectionDrag(t, m, last, 0, last+1, 0)
+	if got := m.selectedText(); got != "t" {
+		t.Fatalf("selection of the last cell after a flag = %q, want %q", got, "t")
+	}
 }

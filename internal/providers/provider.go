@@ -2,7 +2,10 @@ package providers
 
 import (
 	"fmt"
+	"io"
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -29,10 +32,19 @@ type Connection struct {
 	ContextWindowOverrides map[string]map[string]int64 // user overrides by canonical provider and model ID
 	EffortLevels           []string                    // live effort levels the startup /models fetch published for the active model, lowest first; nil when none
 	DefaultEffort          string                      // the active model's live default effort level; "" when unknown
-	ModelMetadataObserver  ModelMetadataObserver       // optional opt-in diagnostics for model-list metadata
-	Nerd                   bool                        // user opted into Nerd Font markers
-	ASCII                  bool                        // user selected the plain-ASCII block glyph set
+	Reasoning              *model.ReasoningCapabilities
+	Variant                *string               // explicit launch suffix; nil restores remembered choice
+	SelectionOverride      bool                  // explicit launch provider/model/endpoint prevents session restoration
+	VariantResolved        bool                  // composition root already validated and installed the launch selection
+	ModelMetadataObserver  ModelMetadataObserver // optional opt-in diagnostics for model-list metadata
+	Nerd                   bool                  // user opted into Nerd Font markers
+	ASCII                  bool                  // user selected the plain-ASCII block glyph set
 	Mcp                    *mcp.McpManager
+	Attention              StoredAttentionConfig // attention-signal settings from config.json (specs/attention-notifications)
+	// AttentionOut receives the terminal bell and OSC 9 sequences. It must
+	// share the renderer's write lock so a signal never splits a frame; nil
+	// disables every signal (tests, non-terminal output).
+	AttentionOut io.Writer
 }
 
 // resolvedProvider is the concrete provider configuration after flag,
@@ -94,33 +106,83 @@ func ResolveProvider(providerName, endpointFlag, apiKeyFlag string, persistKey b
 		}
 		return ResolvedProvider{Endpoint: model.ChatGPTResource, Verified: true, Display: p.DisplayName, Creds: creds, OAuth: true}, nil
 	}
-	if p.Hosted {
-		key := apiKeyFlag
-		if key == "" && p.KeyEnv != "" {
-			key = os.Getenv(p.KeyEnv)
-		}
-		if key == "" {
-			stored, err := StoredKey(stateDir, p.Name)
-			if err != nil {
-				return ResolvedProvider{}, err
-			}
-			key = stored
-		}
-		if key == "" {
-			return ResolvedProvider{}, fmt.Errorf("provider %s requires an API key; set --api-key, LIKHA_API_KEY, or %s, or pass --api-key once to store it", p.Name, p.KeyEnv)
-		}
-		if persistKey {
-			if err := StoreKey(stateDir, p.Name, key); err != nil {
-				return ResolvedProvider{}, err
-			}
-		}
-		if endpoint == "" {
-			endpoint = p.BaseURL
-		}
-		return ResolvedProvider{Endpoint: endpoint, Verified: true, Display: p.DisplayName, Key: key}, nil
-	}
 	if endpoint == "" {
 		endpoint = p.BaseURL
 	}
-	return ResolvedProvider{Endpoint: endpoint, Verified: true, Display: p.DisplayName}, nil
+	// An override that is neither the provider's own base URL nor its
+	// documented endpoint in another region is outside the accepted list,
+	// so it carries the unverified warning (v1-spec §3).
+	verified := EndpointVerified(p, endpoint)
+	if !p.Hosted {
+		return ResolvedProvider{Endpoint: endpoint, Verified: verified, Display: p.DisplayName}, nil
+	}
+	key, err := hostedKey(p, apiKeyFlag, persistKey, stateDir)
+	if err != nil {
+		return ResolvedProvider{}, err
+	}
+	return ResolvedProvider{Endpoint: endpoint, Verified: verified, Display: p.DisplayName, Key: key}, nil
+}
+
+// hostedKey returns the first non-blank key in resolution order. Keys are
+// trimmed because a pasted trailing newline or space would otherwise reach
+// the provider as a rejected credential, and a blank variable must not hide
+// a later source. Only a key that came from the flag is persisted.
+func hostedKey(p model.Provider, apiKeyFlag string, persistKey bool, stateDir string) (string, error) {
+	if key := strings.TrimSpace(apiKeyFlag); key != "" {
+		if persistKey {
+			if err := StoreKey(stateDir, p.Name, key); err != nil {
+				return "", err
+			}
+		}
+		return key, nil
+	}
+	if p.KeyEnv != "" {
+		if key := strings.TrimSpace(os.Getenv(p.KeyEnv)); key != "" {
+			return key, nil
+		}
+	}
+	stored, err := StoredKey(stateDir, p.Name)
+	if err != nil {
+		return "", err
+	}
+	if key := strings.TrimSpace(stored); key != "" {
+		return key, nil
+	}
+	return "", fmt.Errorf("provider %s requires an API key; set --api-key, LIKHA_API_KEY, or %s, or pass --api-key once to store it", p.Name, p.KeyEnv)
+}
+
+// regionalHosts matches the documented per-region hosts of a provider whose
+// base URL names one region. Amazon Bedrock's base is us-east-1; every other
+// region is bedrock-runtime.<region>.amazonaws.com with the same path
+// (https://docs.aws.amazon.com/bedrock/latest/userguide/endpoints.html).
+var regionalHosts = map[string]*regexp.Regexp{
+	"bedrock": regexp.MustCompile(`^bedrock-runtime\.[a-z]{2}(-gov)?-[a-z]+-[0-9]\.amazonaws\.com$`),
+}
+
+// EndpointVerified reports whether endpoint is one of p's accepted
+// endpoints: an https URL equal to p's base URL (ignoring a trailing slash),
+// or, for a provider with documented regional hosts, the same path on one of
+// those hosts. User info, an explicit port, a query or a fragment make it
+// unverified.
+func EndpointVerified(p model.Provider, endpoint string) bool {
+	if strings.TrimRight(endpoint, "/") == p.BaseURL {
+		return true
+	}
+	got, err := url.Parse(endpoint)
+	if err != nil || got.Scheme != "https" || got.User != nil || got.Port() != "" || got.RawQuery != "" || got.Fragment != "" {
+		return false
+	}
+	base, err := url.Parse(p.BaseURL)
+	if err != nil {
+		return false
+	}
+	if strings.TrimRight(got.Path, "/") != strings.TrimRight(base.Path, "/") {
+		return false
+	}
+	host := strings.ToLower(got.Hostname())
+	if host == strings.ToLower(base.Hostname()) {
+		return true
+	}
+	pattern, ok := regionalHosts[p.Name]
+	return ok && pattern.MatchString(host)
 }

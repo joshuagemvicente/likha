@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -101,18 +102,22 @@ func migrateToolsConfig(stateDir string, stderr io.Writer) {
 	if err != nil || web == nil {
 		return
 	}
-	cfg, err := providers.LoadStoredConfig(stateDir)
-	if err != nil {
-		return
-	}
 	legacy := webtools.LegacyConfigPath(stateDir)
-	if cfg.Web != nil {
-		fmt.Fprintf(stderr, "likha: %s is ignored because config.json already has web settings; delete it\n", legacy)
+	conflict := false
+	err = providers.UpdateStoredConfig(context.Background(), stateDir, func(cfg *providers.StoredProviderConfig) error {
+		if cfg.Web != nil {
+			conflict = true
+			return nil
+		}
+		cfg.Web = web
+		return nil
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "likha: cannot move web settings into config.json: %v\n", err)
 		return
 	}
-	cfg.Web = web
-	if err := providers.SaveStoredConfig(stateDir, cfg); err != nil {
-		fmt.Fprintf(stderr, "likha: cannot move web settings into config.json: %v\n", err)
+	if conflict {
+		fmt.Fprintf(stderr, "likha: %s is ignored because config.json already has web settings; delete it\n", legacy)
 		return
 	}
 	if err := os.Remove(legacy); err != nil {

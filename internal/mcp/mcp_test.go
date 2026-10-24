@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +14,8 @@ import (
 
 // TestMain turns the test binary into a fake MCP server when asked to. The
 // server answers initialize, tools/list (one "echo" tool), and tools/call
-// (echoes the arguments back) over newline-delimited JSON-RPC.
+// (echoes the arguments back) over newline-delimited JSON-RPC. The
+// LIKHA_FAKE_MCP_* variables read by runFakeMCPServer select test behaviors.
 func TestMain(m *testing.M) {
 	if os.Getenv("LIKHA_FAKE_MCP") == "1" {
 		runFakeMCPServer()
@@ -23,6 +25,17 @@ func TestMain(m *testing.M) {
 }
 
 func runFakeMCPServer() {
+	if path := os.Getenv("LIKHA_FAKE_MCP_PIDFILE"); path != "" {
+		appendPID(path, os.Getpid())
+	}
+	if path := os.Getenv("LIKHA_FAKE_MCP_CHILDFILE"); path != "" {
+		// A long-lived child, as npx or uvx leave behind the real server.
+		child := exec.Command("sleep", "300")
+		if child.Start() == nil {
+			appendPID(path, child.Process.Pid)
+		}
+	}
+	mode := os.Getenv("LIKHA_FAKE_MCP_MODE")
 	reader := bufio.NewReader(os.Stdin)
 	writer := bufio.NewWriter(os.Stdout)
 	for {
@@ -45,13 +58,38 @@ func runFakeMCPServer() {
 		}
 		switch req.Method {
 		case "initialize":
+			if mode == "slow-init" {
+				time.Sleep(300 * time.Millisecond)
+			}
 			write(`{"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"fake","version":"1"}}`)
 		case "tools/list":
 			write(`{"tools":[{"name":"echo","description":"Echo the arguments back","inputSchema":{"type":"object","properties":{"message":{"type":"string"}}}}]}`)
+			if mode == "deaf" {
+				time.Sleep(time.Hour) // stops reading stdin: Likha's writes fill the pipe
+			}
 		case "tools/call":
 			var params struct {
 				Name      string          `json:"name"`
 				Arguments json.RawMessage `json:"arguments"`
+			}
+			if json.Unmarshal(req.Params, &params) == nil && params.Name == "ask" {
+				// Server requests that reuse the pending call's ID; the result
+				// reports how Likha answered them.
+				var answers []string
+				for _, method := range []string{"ping", "sampling/createMessage"} {
+					fmt.Fprintf(writer, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{}}\n")
+					fmt.Fprintf(writer, "{\"jsonrpc\":\"2.0\",\"id\":%d,\"method\":%q}\n", req.ID, method)
+					writer.Flush()
+					answer, err := reader.ReadString('\n')
+					if err != nil {
+						return
+					}
+					answers = append(answers, strings.TrimSpace(answer))
+				}
+				content, _ := json.Marshal([]map[string]string{{"type": "text", "text": strings.Join(answers, "\n")}})
+				fmt.Fprintf(writer, "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"content\":%s}}\n", req.ID, content)
+				writer.Flush()
+				continue
 			}
 			if json.Unmarshal(req.Params, &params) != nil || params.Name != "echo" {
 				write(`{"content":[{"type":"text","text":"unknown tool"}],"isError":true}`)
@@ -67,6 +105,17 @@ func runFakeMCPServer() {
 	}
 }
 
+// appendPID records a process ID, one per line, for tests that check which
+// processes a server left behind.
+func appendPID(path string, pid int) {
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	fmt.Fprintln(file, pid)
+}
+
 // fakeServerCommand returns a ServerConfig whose command re-executes this
 // test binary as the fake MCP server.
 func fakeServerCommand(t *testing.T) ServerConfig {
@@ -79,7 +128,7 @@ func fakeServerCommand(t *testing.T) ServerConfig {
 }
 
 func TestHandshakeListsToolsAndCalls(t *testing.T) {
-	client, err := Start("fake", fakeServerCommand(t), "likha/1.2.3")
+	client, err := Start(context.Background(), "fake", fakeServerCommand(t), "likha/1.2.3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +150,7 @@ func TestHandshakeListsToolsAndCalls(t *testing.T) {
 
 func TestStartRejectsBadServer(t *testing.T) {
 	cfg := ServerConfig{Command: "/nonexistent/likha-mcp-fake"}
-	if _, err := Start("bad", cfg, "likha/1.2.3"); err == nil {
+	if _, err := Start(context.Background(), "bad", cfg, "likha/1.2.3"); err == nil {
 		t.Fatal("accepted a nonexistent server command")
 	}
 }
@@ -144,7 +193,7 @@ func TestCallTimeout(t *testing.T) {
 	cfg.Command = "sh"
 	cfg.Args = []string{"-c", "cat > /dev/null"}
 	start := time.Now()
-	client, err := Start("silent", cfg, "likha/1.2.3")
+	client, err := Start(context.Background(), "silent", cfg, "likha/1.2.3")
 	elapsed := time.Since(start)
 	if err == nil {
 		// The handshake timed out (bounded) — that is the expected outcome

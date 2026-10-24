@@ -144,6 +144,11 @@ conversation/app lifetime; clear on session switch/resume, app exit, or
 relevant config/credential change — so switching backends always requires
 fresh consent.
 
+The consent prompt follows FR-22: labelled Allow and Decline buttons, focus
+starting on Decline, ←/→ or Tab to move focus, Enter to confirm the focused
+button, Esc to decline. No letter key decides consent, so text typed into a
+live composer when the prompt opens can never grant a request.
+
 Per-provider privacy copy:
 
 - Brave: Brave receives the query and request metadata; its API privacy

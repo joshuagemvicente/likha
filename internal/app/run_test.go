@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"likha/internal/model"
 	"likha/internal/session"
 )
 
@@ -100,6 +101,33 @@ func TestRunHelpDoesNotRequireRepository(t *testing.T) {
 	}
 }
 
+// A malformed flag must keep stdout clean so a `-p --json` consumer never
+// parses help text as events; only an explicit --help prints to stdout.
+func TestRunFlagParseErrorWritesUsageToStderr(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"unknown flag", []string{"--no-such-flag"}},
+		{"unknown flag in a json pipeline", []string{"-p", "hi", "--json", "--no-such-flag"}},
+		{"missing flag value", []string{"--model"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := Run(tc.args, &stdout, &stderr); code != 2 {
+				t.Fatalf("exit code = %d, want 2", code)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), "Usage: likha") {
+				t.Fatalf("stderr = %q, want the usage text", stderr.String())
+			}
+		})
+	}
+}
+
 func TestASCIIFlagAndEnvironment(t *testing.T) {
 	t.Setenv("LIKHA_ASCII", "")
 	if asciiGlyphs(false) {
@@ -144,5 +172,66 @@ func TestSessionListWorksWithoutModelOrTerminal(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), snapshot.ID) || !strings.Contains(stdout.String(), "Inspect repository") {
 		t.Fatalf("session was not selectable: %q", stdout.String())
+	}
+}
+
+// resumeWithSelection saves a session that ran on selection and returns its
+// repository and ID.
+func resumeWithSelection(t *testing.T, state string, selection model.Selection) (string, string) {
+	t.Helper()
+	repo := t.TempDir()
+	store, err := session.Open(state, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	snapshot, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Selection = &selection
+	snapshot.Entries = []session.Entry{{Role: "user", Content: "earlier"}}
+	if err := store.Save(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	return repo, snapshot.ID
+}
+
+func TestResumeSavedProviderNotice(t *testing.T) {
+	cases := []struct {
+		name      string
+		selection model.Selection
+		want      string // "" means no notice at all
+	}{
+		{"custom endpoint saves no provider", model.Selection{Model: "test-model"}, ""},
+		{"unknown provider", model.Selection{Provider: "nonesuch", Model: "m"}, "saved session provider nonesuch is unavailable (not a predefined provider); using launch preferences"},
+		{"provider without a key names why", model.Selection{Provider: "openrouter", Model: "m"}, "saved session provider openrouter is unavailable ("},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state := headlessEnv(t)
+			t.Setenv("OPENROUTER_API_KEY", "")
+			t.Setenv("LIKHA_OPENROUTER_API_KEY", "")
+			repo, id := resumeWithSelection(t, state, tc.selection)
+			_, _, stderr := runApp("-p", "hi", "--resume", id, repo)
+			if tc.want == "" {
+				if strings.Contains(stderr, "saved session provider") {
+					t.Fatalf("stderr = %q, want no saved-provider notice", stderr)
+				}
+				return
+			}
+			if !strings.Contains(stderr, tc.want) {
+				t.Fatalf("stderr = %q, want %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestResumeUnknownSessionNamesIt(t *testing.T) {
+	headlessEnv(t)
+	id := strings.Repeat("b", 32)
+	code, _, stderr := runApp("-p", "hi", "--resume", id, t.TempDir())
+	if code != 2 || !strings.Contains(stderr, "no session "+id+" in this repository") || strings.Contains(stderr, "sql:") {
+		t.Fatalf("exit = %d stderr = %q", code, stderr)
 	}
 }

@@ -130,7 +130,7 @@ func claudeUIReject(w http.ResponseWriter) {
 // replayed thinking gets no replay hint.
 func TestClaudeReplayRejectionShowsHints(t *testing.T) {
 	providerError := "model HTTP 400 Bad Request: invalid_request_error: " + claudeRejection + " (request req_ui_400)"
-	effortHint := "Sent with effort high; /effort default sends none."
+	effortHint := "Sent with effort high; use /variants → Default to remove the preset."
 	cases := []struct {
 		name     string
 		effort   string // set on the client as the effort probe would allow

@@ -124,7 +124,7 @@ func TestSetupThemeCursorDoesNotMoveProvider(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // openai
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("sk-test")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m.Update(setupCheckMsg{models: []string{"alpha", "beta"}})
+	m.Update(setupCheckMsg{attempt: m.setup.checkAttempt, models: []string{"alpha", "beta"}})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.setup.stage != setupTheme {
 		t.Fatalf("theme stage not reached: %d", m.setup.stage)
@@ -198,7 +198,7 @@ func TestSetupModelStagePreselectsDefaultAndFilters(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // openai, default gpt-4o-mini
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("sk")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m.Update(setupCheckMsg{models: []string{"gpt-4o", "gpt-4o-mini", "o3"}, contextWindows: map[string]int64{"gpt-4o-mini": 128000}})
+	m.Update(setupCheckMsg{attempt: m.setup.checkAttempt, models: []string{"gpt-4o", "gpt-4o-mini", "o3"}, contextWindows: map[string]int64{"gpt-4o-mini": 128000}})
 	if m.setup.models[m.setup.modelCursor] != "gpt-4o-mini" {
 		t.Fatalf("default model not preselected: %q", m.setup.models[m.setup.modelCursor])
 	}
@@ -240,7 +240,7 @@ func TestSetupUsesEnvironmentKeyWithoutStoringIt(t *testing.T) {
 	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil || m.setup.stage != setupChecking || !m.setup.envKey {
 		t.Fatalf("empty field did not check the environment key: stage=%d env=%t", m.setup.stage, m.setup.envKey)
 	}
-	m.Update(setupCheckMsg{models: []string{"alpha"}})
+	m.Update(setupCheckMsg{attempt: m.setup.checkAttempt, models: []string{"alpha"}})
 	if m.setup.stage != setupTheme || m.client == nil {
 		t.Fatalf("setup did not finish with the environment key: stage=%d err=%q", m.setup.stage, m.setup.err)
 	}
@@ -265,7 +265,7 @@ func TestSetupSpinnerTicksOnlyWhileWaiting(t *testing.T) {
 	if _, cmd := m.Update(setupTickMsg{}); cmd == nil || m.setup.spin != before+1 {
 		t.Fatalf("tick did not advance and re-arm: spin=%d", m.setup.spin)
 	}
-	m.Update(setupCheckMsg{err: model.ErrUnauthorized})
+	m.Update(setupCheckMsg{attempt: m.setup.checkAttempt, err: model.ErrUnauthorized})
 	if _, cmd := m.Update(setupTickMsg{}); cmd != nil || m.setup.ticking {
 		t.Fatal("spinner kept ticking after the check settled")
 	}
@@ -277,7 +277,7 @@ func TestSetupCompletionLeavesNotice(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("sk")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m.Update(setupCheckMsg{models: []string{"alpha"}})
+	m.Update(setupCheckMsg{attempt: m.setup.checkAttempt, models: []string{"alpha"}})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.mode != modeMain {
 		t.Fatalf("setup did not complete: %q", m.mode)

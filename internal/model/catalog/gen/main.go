@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -180,12 +181,28 @@ type upstreamModel struct {
 	Cost *upstreamCost `json:"cost"`
 }
 
-// upstreamReasoningOption is one models.dev reasoning control. Only the
-// "effort" type carries named levels; "budget_tokens" and "toggle" are
-// outside specs/model-effort and are ignored.
+// upstreamReasoningOption is one models.dev reasoning control
+// (specs/reasoning-options). Bounds decode as float64 so a fractional one is
+// reported, not rounded.
 type upstreamReasoningOption struct {
 	Type   string   `json:"type"`
 	Values []string `json:"values"`
+	Min    *float64 `json:"min"`
+	Max    *float64 `json:"max"`
+}
+
+// UnmarshalJSON rejects keys the generator does not know, so a new upstream
+// field fails generation instead of being dropped.
+func (o *upstreamReasoningOption) UnmarshalJSON(data []byte) error {
+	type plain upstreamReasoningOption
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var p plain
+	if err := dec.Decode(&p); err != nil {
+		return fmt.Errorf("reasoning option: %w", err)
+	}
+	*o = upstreamReasoningOption(p)
+	return nil
 }
 
 type upstreamRates struct {
@@ -224,19 +241,22 @@ type overrideProvider struct {
 // overrideModel sets only the fields it names; Cost replaces the whole
 // price card. Drop removes the model.
 type overrideModel struct {
-	Name       *string       `json:"name,omitempty"`
-	Context    *int64        `json:"context,omitempty"`
-	Input      *int64        `json:"input,omitempty"`
-	Output     *int64        `json:"output,omitempty"`
-	Cost       *overrideCost `json:"cost,omitempty"`
-	Reasoning  *bool         `json:"reasoning,omitempty"`
-	Efforts    []string      `json:"efforts,omitempty"`
-	Modalities []string      `json:"modalities,omitempty"`
-	Status     *string       `json:"status,omitempty"`
-	Drop       bool          `json:"drop,omitempty"`
-	Ref        string        `json:"ref"`
-	Verified   string        `json:"verified"`
-	Note       string        `json:"note,omitempty"`
+	Name      *string       `json:"name,omitempty"`
+	Context   *int64        `json:"context,omitempty"`
+	Input     *int64        `json:"input,omitempty"`
+	Output    *int64        `json:"output,omitempty"`
+	Cost      *overrideCost `json:"cost,omitempty"`
+	Reasoning *bool         `json:"reasoning,omitempty"`
+	Efforts   []string      `json:"efforts,omitempty"`
+	// ReasoningOptions replaces the row's whole list; [] is kept as an
+	// empty list, distinct from a missing key.
+	ReasoningOptions []catalog.ReasoningOption `json:"reasoning_options,omitempty"`
+	Modalities       []string                  `json:"modalities,omitempty"`
+	Status           *string                   `json:"status,omitempty"`
+	Drop             bool                      `json:"drop,omitempty"`
+	Ref              string                    `json:"ref"`
+	Verified         string                    `json:"verified"`
+	Note             string                    `json:"note,omitempty"`
 }
 
 // overrideCost is a whole price card. Input and output are pointers so a
@@ -357,16 +377,22 @@ func convert(um upstreamModel) (catalog.Model, error) {
 			return catalog.Model{}, fmt.Errorf("negative or non-finite limit %v", limit)
 		}
 	}
+	options, err := reasoningOptions(um.ReasoningOptions)
+	if err != nil {
+		return catalog.Model{}, err
+	}
 	m := catalog.Model{
-		Name:       strings.TrimSpace(um.Name),
-		Context:    toTokens(um.Limit.Context),
-		Output:     toTokens(um.Limit.Output),
-		Reasoning:  um.Reasoning,
-		Efforts:    upstreamEfforts(um.ReasoningOptions),
-		Modalities: um.Modalities.Input,
-		Status:     um.Status,
-		Updated:    um.LastUpdated,
-		Source:     catalog.SourceUpstream,
+		Name:             strings.TrimSpace(um.Name),
+		Context:          toTokens(um.Limit.Context),
+		Output:           toTokens(um.Limit.Output),
+		Reasoning:        um.Reasoning,
+		ToolCall:         um.ToolCall,
+		ReasoningOptions: options,
+		Efforts:          catalog.EffortLevels(options),
+		Modalities:       um.Modalities.Input,
+		Status:           um.Status,
+		Updated:          um.LastUpdated,
+		Source:           catalog.SourceUpstream,
 	}
 	if in := toTokens(um.Limit.Input); in > 0 && (m.Context == 0 || in < m.Context) {
 		m.Input = in
@@ -408,24 +434,44 @@ func convert(um upstreamModel) (catalog.Model, error) {
 	return m, nil
 }
 
-// upstreamEfforts returns the named levels of the "effort" reasoning option,
-// in upstream order; nil when the model publishes none. An upstream
-// "default" level (Groq Qwen) is dropped: Likha's Default already means
-// "provider decides" by sending no effort at all.
-func upstreamEfforts(options []upstreamReasoningOption) []string {
-	for _, option := range options {
-		if option.Type != "effort" {
-			continue
-		}
-		var levels []string
-		for _, level := range option.Values {
-			if level != "default" {
-				levels = append(levels, level)
-			}
-		}
-		return levels
+// reasoningOptions converts upstream reasoning controls in upstream order,
+// keeping nil (none listed) apart from an empty list (no control). An
+// unknown type or a fractional budget bound fails: supporting either is a
+// spec change, not something to drop or round.
+func reasoningOptions(upstream []upstreamReasoningOption) ([]catalog.ReasoningOption, error) {
+	if upstream == nil {
+		return nil, nil
 	}
-	return nil
+	options := make([]catalog.ReasoningOption, 0, len(upstream))
+	for _, u := range upstream {
+		switch u.Type {
+		case catalog.OptionEffort, catalog.OptionBudgetTokens, catalog.OptionToggle:
+		default:
+			return nil, fmt.Errorf("unknown reasoning option type %q", u.Type)
+		}
+		minTokens, err := budgetBound(u.Min)
+		if err != nil {
+			return nil, fmt.Errorf("%s min: %w", u.Type, err)
+		}
+		maxTokens, err := budgetBound(u.Max)
+		if err != nil {
+			return nil, fmt.Errorf("%s max: %w", u.Type, err)
+		}
+		options = append(options, catalog.ReasoningOption{Type: u.Type, Values: u.Values, Min: minTokens, Max: maxTokens})
+	}
+	return options, nil
+}
+
+// budgetBound converts an optional upstream bound; nil stays unknown.
+func budgetBound(v *float64) (*int64, error) {
+	if v == nil {
+		return nil, nil
+	}
+	if math.IsNaN(*v) || math.IsInf(*v, 0) || *v != math.Trunc(*v) {
+		return nil, fmt.Errorf("%v is not a whole token count", *v)
+	}
+	tokens := int64(*v)
+	return &tokens, nil
 }
 
 // rates converts upstream rates; a tier missing its input or output rate
@@ -506,12 +552,21 @@ func applyOverrides(file *catalog.File, overrides overridesFile) error {
 				m.Reasoning = *om.Reasoning
 				set = append(set, "reasoning")
 			}
+			if om.Efforts != nil && om.ReasoningOptions != nil {
+				return fmt.Errorf("overrides: %s/%s sets both efforts and reasoning_options; state the effort entry inside reasoning_options", providerID, modelID)
+			}
 			if om.Efforts != nil {
 				if err := catalog.ValidateEfforts(om.Efforts); err != nil {
 					return fmt.Errorf("overrides: %s/%s: %w", providerID, modelID, err)
 				}
+				m.ReasoningOptions = withEffortLevels(m.ReasoningOptions, om.Efforts)
 				m.Efforts = om.Efforts
 				set = append(set, "efforts")
+			}
+			if om.ReasoningOptions != nil {
+				m.ReasoningOptions = om.ReasoningOptions
+				m.Efforts = catalog.EffortLevels(om.ReasoningOptions)
+				set = append(set, "reasoning_options")
 			}
 			if om.Modalities != nil {
 				m.Modalities = om.Modalities
@@ -528,6 +583,10 @@ func applyOverrides(file *catalog.File, overrides overridesFile) error {
 					return fmt.Errorf("overrides: %s/%s changes no field of the upstream row", providerID, modelID)
 				}
 				m.Overridden = set
+			} else {
+				// Curated rows are added only for providers Likha drives
+				// with tools.
+				m.ToolCall = true
 			}
 			m.Source, m.Ref, m.Verified, m.Note = catalog.SourceOverride, om.Ref, om.Verified, om.Note
 			p.Models[modelID] = m
@@ -535,6 +594,20 @@ func applyOverrides(file *catalog.File, overrides overridesFile) error {
 		file.Providers[providerID] = p
 	}
 	return nil
+}
+
+// withEffortLevels returns a copy of options whose effort entry has levels,
+// appending an effort entry when there is none. The other entries keep
+// their upstream values.
+func withEffortLevels(options []catalog.ReasoningOption, levels []string) []catalog.ReasoningOption {
+	out := slices.Clone(options)
+	for i := range out {
+		if out[i].Type == catalog.OptionEffort {
+			out[i].Values = levels
+			return out
+		}
+	}
+	return append(out, catalog.ReasoningOption{Type: catalog.OptionEffort, Values: levels})
 }
 
 func encode(file *catalog.File) ([]byte, error) {
@@ -559,6 +632,7 @@ func sameProviders(a, b *catalog.File) bool {
 // defaults the catalog cannot price.
 func writeReport(w io.Writer, previous, next *catalog.File, providers []model.Provider) {
 	fmt.Fprintf(w, "catalog %s from %s\n", next.Generated, next.Upstream.URL)
+	writeOptionCounts(w, next)
 	for _, id := range sortedKeys(next.Providers) {
 		p := next.Providers[id]
 		priced, efforts := 0, 0
@@ -609,6 +683,25 @@ func writeReport(w io.Writer, previous, next *catalog.File, providers []model.Pr
 	for _, gap := range defaultGaps(next, providers) {
 		fmt.Fprintln(w, "default without entry:", gap)
 	}
+}
+
+// writeOptionCounts prints how many rows publish each reasoning control,
+// and how many reason with no control at all.
+func writeOptionCounts(w io.Writer, file *catalog.File) {
+	counts := map[string]int{}
+	noControl := 0
+	for _, p := range file.Providers {
+		for _, m := range p.Models {
+			if m.ReasoningOptions != nil && len(m.ReasoningOptions) == 0 {
+				noControl++
+			}
+			for _, option := range m.ReasoningOptions {
+				counts[option.Type]++
+			}
+		}
+	}
+	fmt.Fprintf(w, "reasoning options: %d effort, %d budget_tokens, %d toggle, %d with no control\n",
+		counts[catalog.OptionEffort], counts[catalog.OptionBudgetTokens], counts[catalog.OptionToggle], noControl)
 }
 
 // describe is the reviewable summary of a row: limits, the whole price card

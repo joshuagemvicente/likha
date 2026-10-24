@@ -24,6 +24,7 @@ type codexInputItem struct {
 	Namespace string          `json:"namespace,omitempty"`
 	Arguments string          `json:"arguments,omitempty"`
 	Output    *string         `json:"output,omitempty"`
+	Phase     string          `json:"phase,omitempty"`
 }
 
 type codexTool struct {
@@ -44,7 +45,8 @@ type responsesNamespace struct {
 type codexRequest struct {
 	Model        string               `json:"model"`
 	Instructions string               `json:"instructions,omitempty"`
-	Input        []codexInputItem     `json:"input"`
+	Input        []json.RawMessage    `json:"input"`
+	Include      []string             `json:"include,omitempty"`
 	Tools        []responsesNamespace `json:"tools"`
 	Store        bool                 `json:"store"`
 	Stream       bool                 `json:"stream"`
@@ -60,11 +62,27 @@ type codexRequest struct {
 // A non-empty effort adds reasoning: {effort} (specs/model-effort); it is set
 // only when the chatgpt provider row carries effort, after its live probe.
 func BuildCodexRequest(modelName, effort string, messages []Message, tools []ToolDefinition) ([]byte, error) {
+	return buildResponsesRequest(modelName, effort, messages, tools, nil)
+}
+
+func buildResponsesRequest(modelName, effort string, messages []Message, tools []ToolDefinition, replay func(Message) *ReasoningReplay) ([]byte, error) {
 	if strings.TrimSpace(modelName) == "" {
 		return nil, errors.New("model name is required")
 	}
 	var instructions []string
 	input := make([]codexInputItem, 0, len(messages))
+	rawInput := []json.RawMessage{}
+	flush := func() error {
+		for _, item := range input {
+			raw, err := json.Marshal(item)
+			if err != nil {
+				return fmt.Errorf("encode Responses input: %w", err)
+			}
+			rawInput = append(rawInput, raw)
+		}
+		input = input[:0]
+		return nil
+	}
 	for _, m := range messages {
 		switch m.Role {
 		case "system":
@@ -78,6 +96,18 @@ func BuildCodexRequest(modelName, effort string, messages []Message, tools []Too
 			}
 			input = append(input, codexInputItem{Type: "message", Role: m.Role, Content: content})
 		case "assistant":
+			if replay != nil {
+				if state := replay(m); state != nil {
+					if err := flush(); err != nil {
+						return nil, err
+					}
+					var items []json.RawMessage
+					if err := json.Unmarshal(state.Responses, &items); err != nil {
+						return nil, fmt.Errorf("decode Responses replay: %w", err)
+					}
+					rawInput = append(rawInput, items...)
+				}
+			}
 			if m.Content != "" || len(m.ToolCalls) == 0 {
 				// EasyInputMessage accepts input_text for every role, including
 				// assistant. output_text is a response item and would require
@@ -86,7 +116,7 @@ func BuildCodexRequest(modelName, effort string, messages []Message, tools []Too
 				if err != nil {
 					return nil, err
 				}
-				input = append(input, codexInputItem{Type: "message", Role: "assistant", Content: content})
+				input = append(input, codexInputItem{Type: "message", Role: "assistant", Content: content, Phase: m.Phase})
 			}
 			for _, call := range m.ToolCalls {
 				if err := validateResponsesCall(call.ID, call.Name, responsesToolNamespace, call.Arguments, nil); err != nil {
@@ -104,7 +134,13 @@ func BuildCodexRequest(modelName, effort string, messages []Message, tools []Too
 			return nil, fmt.Errorf("invalid message role %q", m.Role)
 		}
 	}
-	body := codexRequest{Model: modelName, Instructions: strings.Join(instructions, "\n\n"), Input: input, Tools: []responsesNamespace{}, Store: false, Stream: true}
+	if err := flush(); err != nil {
+		return nil, err
+	}
+	body := codexRequest{Model: modelName, Instructions: strings.Join(instructions, "\n\n"), Input: rawInput, Tools: []responsesNamespace{}, Store: false, Stream: true}
+	if replay != nil {
+		body.Include = []string{"reasoning.encrypted_content"}
+	}
 	if effort != "" {
 		body.Reasoning = &reasoningParam{Effort: effort}
 	}

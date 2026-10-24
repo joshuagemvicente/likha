@@ -33,6 +33,7 @@ type keyState struct {
 	source         string // auth view (key): where the stored key came from
 	input          []rune
 	checking       bool
+	checkAttempt   uint64 // identity of the in-flight connection check (ui.keyChecks)
 	err            string
 	accounts       []model.OAuthCredentials
 	activeClientID string
@@ -43,6 +44,7 @@ type keyState struct {
 
 // keyCheckMsg carries the connection-check result for the key modal.
 type keyCheckMsg struct {
+	attempt  uint64 // the check's keyState.checkAttempt
 	provider model.Provider
 	key      string
 	err      error
@@ -63,7 +65,43 @@ func (m *ui) closeKeyModal() {
 		m.cancelOAuthLogin()
 	}
 	m.keyModal = keyState{}
+	if keyModalStatus(m.status) {
+		// The modal's prompts describe a surface that is gone.
+		m.status = m.settledStatus()
+	}
 	m.layoutWidth = 0
+}
+
+// keyModalStatus reports whether status is one the key modal set for itself.
+func keyModalStatus(status string) bool {
+	return status == "Provider key required" || status == "Replace provider key" || strings.HasPrefix(status, "Checking ")
+}
+
+// settleKeyCheckStatus returns the status to key entry once a check that
+// /providers <name> <key> announced as "Checking <Provider>" fails or is
+// abandoned. A check started from the modal itself keeps its own status.
+func (m *ui) settleKeyCheckStatus() {
+	if strings.HasPrefix(m.status, "Checking ") {
+		m.status = "Provider key required"
+	}
+}
+
+// startKeyCheck puts the key modal into its checking state and returns the
+// connection check. Each check gets its own identity, so a result for a key
+// abandoned with Esc can never store that key over the one typed since.
+func (m *ui) startKeyCheck(p model.Provider, key string) tea.Cmd {
+	m.keyChecks++
+	attempt := m.keyChecks
+	m.keyModal.checking = true
+	m.keyModal.checkAttempt = attempt
+	m.keyModal.err = ""
+	m.layoutWidth = 0
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := model.ListModels(ctx, p.BaseURL, key)
+		return keyCheckMsg{attempt: attempt, provider: p, key: key, err: err}
+	}
 }
 
 // openProviderAuth routes one provider row to its auth surface and never
@@ -85,7 +123,7 @@ func (m *ui) openProviderAuth(p model.Provider) tea.Cmd {
 			source: "stored in the private state directory (providers.json)"}
 		return nil
 	}
-	if p.KeyEnv != "" && os.Getenv(p.KeyEnv) != "" {
+	if p.KeyEnv != "" && strings.TrimSpace(os.Getenv(p.KeyEnv)) != "" {
 		m.keyModal = keyState{open: true, auth: true, provider: p,
 			source: "provided via environment variable " + p.KeyEnv}
 		return nil
@@ -105,6 +143,14 @@ func (m *ui) updateKeyModal(msg tea.KeyMsg) tea.Cmd {
 	if m.keyModal.provider.Auth == model.AuthOAuth {
 		return m.updateOAuthProviderAuth(msg)
 	}
+	switch msg.String() {
+	case "ctrl+c", "ctrl+d":
+		// Quit stays available on every key surface, as in the OAuth view.
+		if m.cancel != nil {
+			m.cancel()
+		}
+		return tea.Quit
+	}
 	if m.keyModal.auth {
 		switch msg.String() {
 		case "enter":
@@ -122,6 +168,7 @@ func (m *ui) updateKeyModal(msg tea.KeyMsg) tea.Cmd {
 		// the entered key but cancels the wait (same as setup's esc retreat).
 		if msg.String() == "esc" {
 			m.keyModal.checking = false
+			m.settleKeyCheckStatus()
 			m.layoutWidth = 0
 		}
 		return nil
@@ -139,16 +186,7 @@ func (m *ui) updateKeyModal(msg tea.KeyMsg) tea.Cmd {
 		m.keyModal.input = append(m.keyModal.input, r...)
 	case tea.KeyEnter:
 		if key := strings.TrimSpace(string(m.keyModal.input)); key != "" {
-			m.keyModal.checking = true
-			m.keyModal.err = ""
-			m.layoutWidth = 0
-			p := m.keyModal.provider
-			return func() tea.Msg {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				_, err := model.ListModels(ctx, p.BaseURL, key)
-				return keyCheckMsg{provider: p, key: key, err: err}
-			}
+			return m.startKeyCheck(m.keyModal.provider, key)
 		}
 	case tea.KeyEsc:
 		m.closeKeyModal()
@@ -161,19 +199,21 @@ func (m *ui) updateKeyModal(msg tea.KeyMsg) tea.Cmd {
 // provider and model stay untouched. A failed check keeps the previously
 // stored key (if any) and shows the error in the modal.
 func (m *ui) handleKeyCheckMsg(v keyCheckMsg) {
-	if !m.keyModal.open || !m.keyModal.checking || m.keyModal.provider.Name != v.provider.Name {
+	if !m.keyModal.open || !m.keyModal.checking || m.keyModal.provider.Name != v.provider.Name || v.attempt != m.keyModal.checkAttempt {
 		// Late result after esc or a restart of the modal: ignore.
 		return
 	}
 	m.keyModal.checking = false
 	if v.err != nil {
 		m.keyModal.err = v.err.Error()
+		m.settleKeyCheckStatus()
 		m.layoutWidth = 0
 		return
 	}
 	p := v.provider
 	if err := providers.StoreKey(m.stateDir, p.Name, v.key); err != nil {
 		m.keyModal.err = err.Error()
+		m.settleKeyCheckStatus()
 		m.layoutWidth = 0
 		return
 	}
@@ -245,14 +285,9 @@ func (m *ui) applyProviderKeyArgument(p model.Provider, key string) tea.Cmd {
 		m.entries = append(m.entries, entry{role: "Error", content: p.DisplayName + " uses ChatGPT login; it has no API key to store."})
 		return m.openProviderAuth(p)
 	}
-	m.keyModal = keyState{open: true, provider: p, checking: true, input: []rune(key)}
+	m.keyModal = keyState{open: true, provider: p, input: []rune(key)}
 	m.status = "Checking " + p.DisplayName
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, err := model.ListModels(ctx, p.BaseURL, key)
-		return keyCheckMsg{provider: p, key: key, err: err}
-	}
+	return m.startKeyCheck(p, key)
 }
 
 // Custom endpoints (spec §6.1): the auth machinery is provider-agnostic (the

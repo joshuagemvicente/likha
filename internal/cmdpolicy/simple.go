@@ -65,6 +65,44 @@ func hasAny(args []string, banned ...string) bool {
 	return false
 }
 
+// hasGoFlag reports whether args set any of the named flags of a Go tool.
+// Go's flag package reads -name, --name, -name=v and --name=v as one flag.
+func hasGoFlag(args []string, names ...string) bool {
+	for _, arg := range args {
+		flag, ok := strings.CutPrefix(arg, "-")
+		if !ok {
+			continue
+		}
+		flag, _, _ = strings.Cut(strings.TrimPrefix(flag, "-"), "=")
+		for _, name := range names {
+			if flag == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// tailFollows reports whether tail would keep running instead of exiting:
+// f or F anywhere in a short-flag group (-qf, and the obsolete -5f and +5f
+// forms), or a long option GNU tail expands to --follow or --retry (it
+// accepts any unambiguous abbreviation, such as --fo).
+func tailFollows(args []string) bool {
+	for _, arg := range args {
+		if long, ok := strings.CutPrefix(arg, "--"); ok {
+			name, _, _ := strings.Cut(long, "=")
+			if name != "" && (strings.HasPrefix("follow", name) || strings.HasPrefix("retry", name)) {
+				return true
+			}
+			continue
+		}
+		if (strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "+")) && strings.ContainsAny(arg[1:], "fF") {
+			return true
+		}
+	}
+	return false
+}
+
 func hasPrefix(args []string, prefixes ...string) bool {
 	for _, arg := range args {
 		for _, prefix := range prefixes {
@@ -103,20 +141,66 @@ func readOnly(words []string) bool {
 	case plainReadOnly[name]:
 		return true
 	case name == "tail":
-		return !hasPrefix(args, "-f", "-F", "--follow", "--retry")
+		return !tailFollows(args)
 	case name == "gofmt":
-		return !hasAny(args, "-w")
+		// -w rewrites files; -cpuprofile writes a profile to any path.
+		return !hasGoFlag(args, "w", "cpuprofile")
 	case name == "go" && len(args) > 0:
 		switch args[0] {
 		case "env":
-			return !hasAny(args[1:], "-w", "-u")
+			return !hasGoFlag(args[1:], "w", "u")
 		case "list":
-			return !hasAny(args[1:], "-toolexec", "-exec")
+			return goListReadOnly(args[1:])
 		}
 	case name == "git" && len(args) > 0:
 		return gitReadOnly(args[0], args[1:])
 	}
 	return false
+}
+
+// goListWriteFlags make go list run other programs or write files: the
+// debug flags write traces and action graphs to any path, -modfile names a
+// go.mod it may rewrite, and the tool flags pass options such as
+// -cpuprofile or -o to the compiler that -export runs.
+var goListWriteFlags = []string{
+	"toolexec", "exec", "debug-trace", "debug-runtime-trace", "debug-actiongraph",
+	"modfile", "gcflags", "asmflags", "gccgoflags", "ldflags",
+}
+
+// goListReadOnly accepts go list unless a flag lets it write or execute.
+// -mod=mod lets it rewrite go.mod and go.sum.
+func goListReadOnly(args []string) bool {
+	if hasGoFlag(args, goListWriteFlags...) {
+		return false
+	}
+	for _, value := range goFlagValues(args, "mod") {
+		if value != "readonly" && value != "vendor" {
+			return false
+		}
+	}
+	return true
+}
+
+// goFlagValues returns each value args give the named Go flag, spelled
+// -name=v, --name=v, -name v or --name v. A flag with no value left yields
+// an empty value, which callers treat like any unexpected one.
+func goFlagValues(args []string, name string) []string {
+	var values []string
+	for i, arg := range args {
+		flag, ok := strings.CutPrefix(arg, "-")
+		if !ok {
+			continue
+		}
+		flag, value, hasValue := strings.Cut(strings.TrimPrefix(flag, "-"), "=")
+		if flag != name {
+			continue
+		}
+		if !hasValue && i+1 < len(args) {
+			value = args[i+1]
+		}
+		values = append(values, value)
+	}
+	return values
 }
 
 func isNodeTool(name string) bool {
@@ -213,7 +297,8 @@ func verification(words []string, sc scope) (Decision, bool) {
 			return scriptCheck(args[1], root)
 		}
 	case "go":
-		if (sub == "test" || sub == "vet" || sub == "build") && !hasPrefix(args[1:], "-exec", "-toolexec", "--exec", "--toolexec", "-overlay") {
+		// -vettool, like -toolexec, runs a program of the caller's choosing.
+		if (sub == "test" || sub == "vet" || sub == "build") && !hasPrefix(args[1:], "-exec", "-toolexec", "--exec", "--toolexec", "-overlay", "-vettool", "--vettool") {
 			return check("go", "", "go "+sub), true
 		}
 	case "cargo":
@@ -270,8 +355,12 @@ func scriptCheck(name, root string) (Decision, bool) {
 	sc := newScope(root)
 	for _, hook := range []string{"pre" + name, name, "post" + name} {
 		if text, ok := scripts[hook]; ok {
-			if tier, why := scanDanger(text, sc); tier < Ask {
+			tier, why := scanDanger(text, sc)
+			if tier < Ask {
 				return Decision{Tier: AlwaysAsk, Reason: "the \"" + hook + "\" script " + why, Script: main}, true
+			}
+			if why != "" {
+				return Decision{Tier: Ask, Reason: "the \"" + hook + "\" script " + why, Script: main}, true
 			}
 		}
 	}

@@ -323,7 +323,7 @@ func TestCancelWatchdogForceStopsRun(t *testing.T) {
 func TestConsentEventKeepsReadingEvents(t *testing.T) {
 	m := toolItemTestUI(t, 80)
 	d := newStrictDriver(t, m)
-	d.send(agent.TurnEvent{RunID: m.runID, Kind: "consent", Consent: &agent.ConsentRequest{Kind: "fetch-origin", Origin: "example.com", Reply: make(chan bool, 1)}})
+	d.send(agent.TurnEvent{RunID: m.runID, Kind: "consent", Consent: &agent.ConsentRequest{Kind: "fetch-origin", Origin: "example.com", Reply: make(chan agent.ConsentReply, 1)}})
 	m.events <- agent.TurnEvent{RunID: m.runID, Kind: "done", History: m.history}
 	d.until(func() bool { return !m.working }, "the done event after a consent request")
 }

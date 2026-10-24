@@ -40,6 +40,7 @@ type Message struct {
 	// issuer (FR-39). It belongs to assistant messages only, and a message
 	// whose ToolCalls are dropped or whose Content is altered loses it.
 	Replay *ReasoningReplay `json:",omitempty"`
+	Phase  string           `json:",omitempty"` // Responses assistant phase, when returned
 }
 
 // ToolCall stays all-string so callers can compare calls with ==.
@@ -71,14 +72,23 @@ type Client struct {
 	model   string
 	apiKey  string
 	checked bool
+	wire    ProviderWire
 	mu      sync.Mutex
 	http    *http.Client
 
 	sessionHeader string // provider-required per-conversation session header
 	sessionID     string // stable per-conversation session identifier
 
-	effortWire EffortWire // how the provider carries effort; EffortUnsupported sends none
-	effort     string     // reasoning-effort level for later requests; "" sends none
+	effortWire      EffortWire // how the provider carries effort; EffortUnsupported sends none
+	effort          string     // reasoning-effort level for later requests; "" sends none
+	variantID       string
+	variantBody     map[string]any
+	variantHeaders  map[string]string
+	baselineBody    map[string]any
+	baselineHeaders map[string]string
+	nativeSnapshot  bool
+	nativeThinking  anthropicThinkingMode
+	nativeOutput    int64
 
 	replayWire ReplayWire // how the provider wants its reasoning state back; ReplayNone sends none
 
@@ -110,14 +120,19 @@ func New(endpoint, name, apiKey string) (*Client, error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, errors.New("model name is required")
 	}
-	return &Client{
-		url:        base + wireFor(base).route(),
+	client := &Client{
+		url:        base + wireForModel(base, name).route(),
+		wire:       wireForModel(base, name),
 		base:       base,
 		model:      name,
 		apiKey:     apiKey,
 		http:       noRedirectHTTPClient(),
 		replayWire: replayWireFor(base, Providers),
-	}, nil
+	}
+	if client.wire == WireResponses {
+		client.replayWire = ReplayResponsesItems
+	}
+	return client, nil
 }
 
 // parseEndpoint validates an OpenAI-compatible base URL and returns it without
@@ -147,16 +162,14 @@ func parseEndpoint(endpoint string) (string, error) {
 }
 
 func noRedirectHTTPClient() *http.Client {
-	return &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+	return &http.Client{Transport: modelTransport, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
 }
 
 // sharedListClient backs the read-only /models fetch so repeated model-list
 // opens reuse keep-alive connections instead of a fresh TLS handshake.
-var sharedListClient = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-	return http.ErrUseLastResponse
-}}
+var sharedListClient = noRedirectHTTPClient()
 
 // SetSessionHeader names the header a provider requires for per-conversation
 // routing (e.g. OpenCode's x-opencode-session).
@@ -177,6 +190,18 @@ func (c *Client) SetModel(name string) error {
 		return errors.New("model name is required")
 	}
 	c.model = strings.TrimSpace(name)
+	c.wire = wireForModel(c.base, c.model)
+	if c.oauth != nil {
+		c.wire = WireResponses
+	}
+	c.url = c.base + c.wire.route()
+	if c.wire == WireResponses {
+		c.replayWire = ReplayResponsesItems
+	} else if c.replayWire == ReplayResponsesItems {
+		c.replayWire = replayWireFor(c.base, Providers)
+	}
+	c.nativeSnapshot = false
+	c.variantID, c.variantBody, c.variantHeaders, c.baselineBody, c.baselineHeaders = "", nil, nil, nil, nil
 	return nil
 }
 
@@ -266,7 +291,7 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 		return result, usageReport{}, errors.New("model client is nil")
 	}
 	requestID := c.beginTokenUsage()
-	if c.oauth != nil {
+	if c.oauth != nil || c.wire == WireResponses {
 		return c.streamCodex(ctx, messages, tools, onText, onReasoning, requestID)
 	}
 	if c.nativeAnthropic() {
@@ -322,8 +347,10 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 		rt.Function.Name, rt.Function.Description, rt.Function.Parameters = t.Name, t.Description, t.Parameters
 		body.Tools = append(body.Tools, rt)
 	}
+	sendCtx, watchBody, stopWatch := withStreamWatchdog(ctx, streamIdleTimeout)
+	defer stopWatch()
 	newRequest := func(payload []byte) (*http.Request, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(payload))
+		req, err := http.NewRequestWithContext(sendCtx, http.MethodPost, c.url, bytes.NewReader(payload))
 		if err != nil {
 			return nil, fmt.Errorf("create model request: %w", err)
 		}
@@ -336,6 +363,7 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 		if c.sessionHeader != "" && c.sessionID != "" {
 			req.Header.Set(c.sessionHeader, c.sessionID)
 		}
+		setOverlayHeaders(req.Header, c.variantHeaders)
 		return req, nil
 	}
 	var resp *http.Response
@@ -343,6 +371,10 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 		payload, err := json.Marshal(body)
 		if err != nil {
 			return result, usageReport{}, fmt.Errorf("encode model request: %w", err)
+		}
+		payload, err = c.variantPayload(payload)
+		if err != nil {
+			return result, usageReport{}, err
 		}
 		req, err := newRequest(payload)
 		if err != nil {
@@ -352,6 +384,7 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 		if err != nil {
 			return result, usageReport{}, fmt.Errorf("model request: %w", err)
 		}
+		resp.Body = watchBody(resp.Body)
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			break
 		}
@@ -375,6 +408,9 @@ func (c *Client) stream(ctx context.Context, messages []Message, tools []ToolDef
 			return result, usageReport{}, fmt.Errorf("%w: %s", ErrUnauthorized, message)
 		}
 		failure := replay.rejected(resp.StatusCode, errors.New(message))
+		if c.variantID != "" {
+			return result, usageReport{}, c.rejectedVariant(resp.StatusCode, failure)
+		}
 		if effort != "" && effortRejectedStatus(resp.StatusCode) {
 			return result, usageReport{}, &EffortRejectedError{Level: effort, Err: failure}
 		}
@@ -460,27 +496,80 @@ func parseFinalUsageDetailed(raw json.RawMessage) usageReport {
 	return usageReport{usage: result, ok: true}
 }
 
-// streamCodex runs a public Responses API turn with Sign in with ChatGPT.
+// streamCodex runs a public Responses API turn with API-key or SIWC authentication.
 // Optional rate headers and terminal token usage are captured when present.
 func (c *Client) streamCodex(ctx context.Context, messages []Message, tools []ToolDefinition, onText func(string), onReasoning func(string), requestID uint64) (Message, usageReport, error) {
 	var result Message
 	effort := c.Effort()
-	payload, err := BuildCodexRequest(c.model, effort, messages, tools)
+	var replay func(Message) *ReasoningReplay
+	if c.replayWire == ReplayResponsesItems {
+		replay = c.responsesReplay
+	}
+	payload, err := buildResponsesRequest(c.model, effort, messages, tools, replay)
 	if err != nil {
 		return result, usageReport{}, err
 	}
-	requestCtx, cancel := c.oauth.requestContext(ctx)
+	payload, err = c.variantPayload(payload)
+	if err != nil {
+		return result, usageReport{}, err
+	}
+	requestCtx := ctx
+	cancel := func() {}
+	if c.oauth != nil {
+		requestCtx, cancel = c.oauth.requestContext(ctx)
+	}
 	defer cancel()
-	resp, err := c.doOAuthRequest(requestCtx, http.MethodPost, "/responses", payload, "text/event-stream")
+	sendCtx, watchBody, stopWatch := withStreamWatchdog(requestCtx, streamIdleTimeout)
+	defer stopWatch()
+	var resp *http.Response
+	if c.oauth != nil {
+		resp, err = c.doOAuthRequest(sendCtx, http.MethodPost, "/responses", payload, "text/event-stream")
+	} else {
+		var req *http.Request
+		req, err = http.NewRequestWithContext(sendCtx, http.MethodPost, c.url, bytes.NewReader(payload))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Accept", "text/event-stream")
+			req.Header.Set("User-Agent", UserAgent)
+			if c.apiKey != "" {
+				req.Header.Set("Authorization", "Bearer "+c.apiKey)
+			}
+			setOverlayHeaders(req.Header, c.variantHeaders)
+			resp, err = c.http.Do(req)
+		}
+	}
 	if err != nil {
 		return result, usageReport{}, fmt.Errorf("model request: %w", err)
 	}
+	resp.Body = watchBody(resp.Body)
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if effort != "" && effortRejectedStatus(resp.StatusCode) {
-			return result, usageReport{}, &EffortRejectedError{Level: effort, Err: oauthHTTPError(resp)}
+		label := "model"
+		if c.oauth != nil {
+			label = "ChatGPT"
 		}
-		return result, usageReport{}, oauthHTTPError(resp)
+		failure := responsesHTTPError(resp, label)
+		if c.replayWire == ReplayResponsesItems {
+			stats := c.newReplayEncoder(messages, len(tools) > 0)
+			for _, message := range messages {
+				if message.Role != "assistant" {
+					continue
+				}
+				if c.responsesReplay(message) != nil {
+					stats.sent++
+				} else if len(message.ToolCalls) > 0 {
+					stats.missing++
+				}
+			}
+			failure = stats.rejected(resp.StatusCode, failure)
+		}
+		if c.variantID != "" {
+			return result, usageReport{}, c.rejectedVariant(resp.StatusCode, failure)
+		}
+		if effort != "" && effortRejectedStatus(resp.StatusCode) {
+			return result, usageReport{}, &EffortRejectedError{Level: effort, Err: failure}
+		}
+		return result, usageReport{}, failure
 	}
 	c.captureRateLimit(resp.Header)
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
@@ -493,6 +582,9 @@ func (c *Client) streamCodex(ctx context.Context, messages []Message, tools []To
 	}
 	c.setTokenUsage(requestID, report)
 	c.markConnected()
+	if message.Replay != nil {
+		message.Replay.Source = c.ReplaySource()
+	}
 	return message, report, nil
 }
 
@@ -601,7 +693,7 @@ func (c *Client) Check(ctx context.Context) error {
 		_, err := fetchAnthropicModels(ctx, c.http, c.base, c.apiKey)
 		return err
 	}
-	raw, err := fetchModelList(ctx, c.base, c.apiKey)
+	raw, err := fetchModelListWithClient(ctx, c.http, c.base, c.apiKey)
 	if err != nil {
 		return err
 	}
@@ -639,23 +731,28 @@ type ModelDetails struct {
 	ID                  string
 	DisplayName         string // account catalog label; empty when not provided
 	ContextWindow       int64
-	ContextWindowSource string   // response field that supplied ContextWindow; empty when unknown
-	Efforts             []string // live effort levels, lowest first; empty when the list publishes none
-	DefaultEffort       string   // live default effort level; empty when unknown
+	ContextWindowSource string                 // response field that supplied ContextWindow; empty when unknown
+	Efforts             []string               // live effort levels, lowest first; empty when the list publishes none
+	DefaultEffort       string                 // live default effort level; empty when unknown
+	Reasoning           *ReasoningCapabilities // live field presence, controls and constraints
 }
 
 // ListModelsWithDetails returns model IDs and any positive context-window
 // metadata exposed by the endpoint's /models route. It accepts both the
 // OpenAI data envelope and a bare array of model objects.
 func ListModelsWithDetails(ctx context.Context, endpoint, apiKey string) ([]ModelDetails, error) {
+	return listModelsWithClient(ctx, sharedListClient, endpoint, apiKey)
+}
+
+func listModelsWithClient(ctx context.Context, client *http.Client, endpoint, apiKey string) ([]ModelDetails, error) {
 	base, err := parseEndpoint(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnexpectedResponse, err)
 	}
 	if wireFor(base) == WireAnthropic {
-		return fetchAnthropicModels(ctx, sharedListClient, base, apiKey)
+		return fetchAnthropicModels(ctx, client, base, apiKey)
 	}
-	raw, err := fetchModelList(ctx, base, apiKey)
+	raw, err := fetchModelListWithClient(ctx, client, base, apiKey)
 	if err != nil {
 		return nil, err
 	}
@@ -677,6 +774,10 @@ func decodeModelDetails(raw []byte) ([]ModelDetails, error) {
 		ContextWindowCamel json.RawMessage `json:"contextWindow"`
 		Limit              json.RawMessage `json:"limit"`
 		Reasoning          json.RawMessage `json:"reasoning"`
+		MaxOutput          json.RawMessage `json:"max_output_tokens"`
+		TopProvider        struct {
+			Output json.RawMessage `json:"max_completion_tokens"`
+		} `json:"top_provider"`
 	}
 	var items []item
 	trimmed := bytes.TrimSpace(raw)
@@ -731,7 +832,14 @@ func decodeModelDetails(raw []byte) ([]ModelDetails, error) {
 			}
 		}
 		efforts, defaultEffort := liveEfforts(entry.Reasoning)
-		details = append(details, ModelDetails{ID: entry.ID, ContextWindow: window, ContextWindowSource: source, Efforts: efforts, DefaultEffort: defaultEffort})
+		capabilities := decodeReasoningCapabilities(entry.Reasoning)
+		if output := positiveWindow(entry.MaxOutput, entry.TopProvider.Output); output > 0 {
+			if capabilities == nil {
+				capabilities = &ReasoningCapabilities{}
+			}
+			capabilities.Output = output
+		}
+		details = append(details, ModelDetails{ID: entry.ID, ContextWindow: window, ContextWindowSource: source, Efforts: efforts, DefaultEffort: defaultEffort, Reasoning: capabilities})
 	}
 	return details, nil
 }
@@ -796,6 +904,10 @@ func decodeModelIDs(raw []byte) ([]string, error) {
 // fetchModelList performs the read-only model-list request and classifies
 // transport, authorization, and response-shape failures.
 func fetchModelList(ctx context.Context, base, apiKey string) ([]byte, error) {
+	return fetchModelListWithClient(ctx, sharedListClient, base, apiKey)
+}
+
+func fetchModelListWithClient(ctx context.Context, client *http.Client, base, apiKey string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/models", nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
@@ -805,7 +917,7 @@ func fetchModelList(ctx context.Context, base, apiKey string) ([]byte, error) {
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	resp, err := sharedListClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}

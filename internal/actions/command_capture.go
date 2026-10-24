@@ -30,9 +30,10 @@ func RunCommandCaptured(ctx context.Context, root, command string, limit int) (C
 		limit = MaxCommandCaptureBytes
 	}
 	output := capturedOutput{limit: limit}
-	exitCode, err := executeCommand(ctx, root, command, &output)
+	exit, err := executeCommand(ctx, root, command, &output)
 	result := output.result()
-	result.ExitCode = exitCode
+	result.ExitCode = exit.code
+	result.BackgroundLeftRunning = exit.backgroundLeftRunning
 	if err != nil {
 		result.Truncated = true
 	}

@@ -52,7 +52,7 @@ func (m *ui) webHooks(events chan<- agent.TurnEvent, runID uint64) (
 				if m.webGranted(reqScope.ScopeKey()) {
 					return webtools.SearchWithBackend(ctx, backend, key, req)
 				}
-				bound := &agent.ConsentRequest{Kind: reqScope.Kind, Backend: reqScope.Backend, Query: req.Query, Privacy: webtools.BackendPrivacyCopy(backend)}
+				bound := &agent.ConsentRequest{Kind: reqScope.Kind, Backend: reqScope.Backend, Query: req.Query, Privacy: webtools.BackendPrivacyCopy(backend), Reply: make(chan agent.ConsentReply, 1)}
 				allowed, err := m.requestConsent(ctx, events, runID, bound)
 				if err != nil {
 					return webtools.SearchOutcome{}, err
@@ -117,6 +117,7 @@ func (m *ui) fetchConsent(events chan<- agent.TurnEvent, runID uint64) func(cont
 		bound := &agent.ConsentRequest{
 			Kind: scope.Kind, Backend: scope.Backend, Query: scope.Query,
 			Origin: scope.Origin, URL: scope.URL, Privacy: fetchPrivacyCopy(),
+			Reply: make(chan agent.ConsentReply, 1),
 		}
 		allowed, err := m.requestConsent(ctx, events, runID, bound)
 		if err != nil {

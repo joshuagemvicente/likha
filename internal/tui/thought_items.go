@@ -109,6 +109,7 @@ func (m *ui) resetThoughts() {
 	m.turnEffort = ""
 	m.turnThoughtBase = 0
 	m.turnToolItems = 0
+	m.turnCompacted = false
 }
 
 // thoughtTimes resolves every reasoning block's duration, by ordinal.
@@ -162,8 +163,10 @@ func (m *ui) beginTurnFooter() {
 	m.turnStarted = m.now()
 	m.turnModel = m.modelName
 	m.turnEffort = m.client.Effort()
+	m.turnVariant = m.client.Variant()
 	m.turnThoughtBase = m.reasoningCount()
 	m.turnToolItems = 0
+	m.turnCompacted = false
 }
 
 // appendTurnFooter closes a finished user turn with its persisted Turn
@@ -178,8 +181,10 @@ func (m *ui) appendTurnFooter(tools int, cancelled bool) {
 	info := transcript.TurnInfo{
 		Model:     m.turnModel,
 		Effort:    m.turnEffort,
+		Variant:   m.turnVariant,
 		Duration:  max(m.now().Sub(m.turnStarted), 0),
 		Tools:     tools,
+		Compacted: m.turnCompacted,
 		Cancelled: cancelled,
 		Thoughts:  m.turnThoughts(),
 	}

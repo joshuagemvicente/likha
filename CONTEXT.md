@@ -18,3 +18,18 @@ A local approximation of the input tokens Likha is about to send. It is always m
 
 **Context tracker**:
 The status-bar display of input-context usage against the model context window, when that limit is known.
+
+**Model variant**:
+A named, model-specific preset of request settings. A variant may control reasoning effort, a thinking-token budget, or whether optional thinking is enabled.
+
+**Default variant**:
+The absence of a variant preset. The provider and model's baseline settings still apply; Default does not mean thinking is disabled.
+
+**Variant preference**:
+The remembered choice for one provider/model pair. An explicit Default preference differs from having no preference.
+
+**Composer selection**:
+The provider, model, and variant selected for the next submitted work. It can differ from the selection of a run already in progress.
+
+**Execution selection**:
+The fixed provider, model, and resolved variant settings admitted for one run. Changing the composer selection does not change that run.

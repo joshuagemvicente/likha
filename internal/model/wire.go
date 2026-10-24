@@ -13,6 +13,8 @@ const (
 	// WireAnthropic posts Anthropic Messages API requests to {base}/messages
 	// with x-api-key authentication.
 	WireAnthropic
+	// WireResponses posts stateless streamed OpenAI Responses requests.
+	WireResponses
 )
 
 // route is the generating request path the wire posts to, relative to the
@@ -20,6 +22,9 @@ const (
 func (w ProviderWire) route() string {
 	if w == WireAnthropic {
 		return "/messages"
+	}
+	if w == WireResponses {
+		return "/responses"
 	}
 	return "/chat/completions"
 }
@@ -34,4 +39,13 @@ func wireFor(base string) ProviderWire {
 		return WireChat
 	}
 	return row.Wire
+}
+
+// wireForModel changes only the first-party OpenAI route for documented
+// reasoning models. Endpoint overrides retain chat completions.
+func wireForModel(base, id string) ProviderWire {
+	if base == "https://api.openai.com/v1" && IsReasoningModel("openai", id) {
+		return WireResponses
+	}
+	return wireFor(base)
 }

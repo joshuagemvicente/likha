@@ -60,6 +60,12 @@ type Result struct {
 	// always); the transcript renders it like a reviewed diff. Never model
 	// content.
 	Diff string `json:"-"`
+	// AutoApproved is why the call ran without a prompt, the reason its
+	// "Approval: auto-approved (…)" content line names; empty when someone
+	// approved it. A renderer reads it here, never from Content, which may
+	// echo such a line from a file or a command's output. Never model
+	// content.
+	AutoApproved string `json:"-"`
 }
 
 type Handler func(context.Context, json.RawMessage) (Result, error)

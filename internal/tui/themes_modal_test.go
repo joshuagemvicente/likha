@@ -475,3 +475,34 @@ func TestSetupThemePreviewChangesLiveTheme(t *testing.T) {
 		t.Fatal("setup preview wrote config.json")
 	}
 }
+
+// Ctrl+C in a selection dialog discards it (a previewed theme reverts) and
+// quits, as it does from setup and the key modal.
+func TestDialogCtrlCDiscardsAndQuits(t *testing.T) {
+	stateDir := t.TempDir()
+	if err := providers.SaveStoredConfig(stateDir, providers.StoredProviderConfig{Provider: "openai", Model: "gpt-4o-mini", Theme: "habamax"}); err != nil {
+		t.Fatal(err)
+	}
+	m := NewUI("/sample", nil, nil, "", providers.Connection{Provider: "OpenAI", Verified: true, Theme: "habamax"}, stateDir, nil, session.Snapshot{})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	openThemesDialog(t, m)
+	cursorOn(t, m, "everforest")
+	forceANSI(t)
+	beforeCfg := configSnapshot(t, stateDir)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("Ctrl+C in the dialog did nothing")
+	}
+	if _, quit := cmd().(tea.QuitMsg); !quit {
+		t.Fatal("Ctrl+C in the dialog did not quit")
+	}
+	if m.dialog.open || m.themeName != "habamax" {
+		t.Fatalf("Ctrl+C applied or kept the dialog: open=%t theme=%q", m.dialog.open, m.themeName)
+	}
+	if got, want := m.theme.Selected.Render("x"), likhaui.Resolve("habamax", likhaui.HasDarkBackground()).Selected.Render("x"); got != want {
+		t.Fatal("Ctrl+C left the previewed theme active")
+	}
+	if configSnapshot(t, stateDir) != beforeCfg {
+		t.Fatal("Ctrl+C wrote config.json")
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"likha/internal/actions"
 	"likha/internal/cmdpolicy"
 	"likha/internal/explore"
+	"likha/internal/hooks"
 	"likha/internal/mcp"
 	"likha/internal/model"
 	"likha/internal/profiles"
@@ -41,6 +42,12 @@ type RunOptions struct {
 	// read-only tier and every write tool refuse without review. Never
 	// persisted.
 	InstallMode bool
+	// ContextWindow is the main model's resolved context window, 0 when
+	// unknown. AutoCompact enables compacting a main-turn request that
+	// reaches 85% of it (specs/auto-compaction); either zero value turns
+	// that off. Explore children and profile tasks never read them.
+	ContextWindow int64
+	AutoCompact   bool
 	// Ask brokers one interactive question; PlanApply persists a checklist
 	// replacement; SkillLoad loads one discovered skill; WebSearch runs a
 	// consent-gated configured search. Nil hooks register the tool with its
@@ -75,6 +82,20 @@ type RunOptions struct {
 	// (specs/approve-always). Nil: every edit asks and no edit review offers
 	// Approve always.
 	EditGrant *EditGrant
+	// RecordChangeSet saves what an applied edit wrote so /undo can revert
+	// it (specs/edit-undo). It runs after the write; a failure leaves the
+	// edit applied and marks it not undoable. Nil records nothing.
+	RecordChangeSet func(toolCallID string, set actions.ChangeSet) error
+	// NoReviewer, when set, says why no person can answer a review in this
+	// run (specs/headless-print). Every edit, command and MCP review is then
+	// refused with a *NoReviewerError instead of emitting an approval event;
+	// actions that run without a review are unaffected. Empty: a person
+	// reviews as usual.
+	NoReviewer string
+	// Hooks runs the user's hooks.json (specs/hooks): pre_tool and post_tool
+	// on every registry of the run, children included, and prompt_submit on
+	// steering prompts at delivery. Nil: dispatch is exactly as without hooks.
+	Hooks *hooks.Runner
 }
 
 // TaskProfile is one accepted, drift-checked profile ready to run.
@@ -103,6 +124,9 @@ func RegistryForOptions(repo *repository.Repository, root string, options RunOpt
 func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpManager, options RunOptions, emit func(TurnEvent)) (*tools.Registry, []string) {
 	outputs := options.Outputs
 	registry := tools.New()
+	if gate := newHookGate(options.Hooks, options.SessionID, root, emit); gate != nil {
+		registry.SetGate(gate)
+	}
 	var warnings []string
 	// install holds one /install turn's plan-first gate; nil outside that
 	// turn and when plan mode's stricter gate already applies.
@@ -240,6 +264,10 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 			if autoEdit {
 				result.Content = autoEditLabel + result.Content
 				result.Diff = prepared.Diff
+				result.AutoApproved = AutoApprovalReason
+			}
+			if set, ok := prepared.ChangeSet(); ok {
+				result.Warnings = recordChangeSet(ctx, options, set, emit)
 			}
 			return result, nil
 		},
@@ -292,13 +320,17 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 				return tools.Result{}, errors.New("edit has no approved proposal")
 			}
 			if err := options.EditJournal(batch); err != nil {
-				return tools.Result{}, errors.New("private edit recovery journal unavailable; no file changes applied")
+				return tools.Result{}, fmt.Errorf("private edit recovery journal unavailable; no file changes applied: %w", err)
 			}
 			content, err := batch.Apply(ctx)
 			result := tools.Result{Content: content}
 			if autoEdit && err == nil {
 				result.Content = autoEditLabel + result.Content
 				result.Diff = batchBody
+				result.AutoApproved = AutoApprovalReason
+			}
+			if set, ok := batch.ChangeSet(); ok {
+				result.Warnings = recordChangeSet(ctx, options, set, emit)
 			}
 			return result, err
 		},
@@ -345,10 +377,13 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 			if auto != "" {
 				approval = CommandApprovalPrefix + "auto-approved (" + auto + ")\n"
 			}
-			result := tools.Result{Content: fmt.Sprintf("Exit status: %d\n%s%s", command.ExitCode, approval, strings.ToValidUTF8(content, "\ufffd")), Truncated: command.Truncated}
+			result := tools.Result{Content: fmt.Sprintf("Exit status: %d\n%s%s", command.ExitCode, approval, strings.ToValidUTF8(content, "\ufffd")), Truncated: command.Truncated, AutoApproved: auto}
 			if command.Truncated {
 				result.Status = tools.Limited
 				result.Warnings = []string{fmt.Sprintf("Command output capture reached its limit; discarded %d bytes. Exit status and payload completeness are separate.", command.Discarded)}
+			}
+			if command.BackgroundLeftRunning {
+				result.Warnings = append(result.Warnings, "A background process kept the command's output open after the shell exited; it was left running, but its later output was not captured and further writes to that output may stop it. Redirect a background job's output to a file to keep it.")
 			}
 			if errors.Is(err, context.DeadlineExceeded) && auto != "" {
 				return result, fmt.Errorf("auto-approved command timed out after %s", AutoCommandTimeout)
@@ -387,7 +422,7 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 		taskUnavailable = "Nested exploration requires an active model and private session task persistence"
 	}
 	register(TaskTool(options.TaskSpawn, taskUnavailable, options.TaskAgents...))
-	register(tools.AskUserTool(options.Ask))
+	register(withoutPerson(tools.AskUserTool(options.Ask), options.Ask == nil, options.NoReviewer, "question needs an answer", "this question was not asked. Decide from what you have and state any assumption in your answer"))
 	planTool := tools.PlanUpdateTool(options.PlanApply)
 	if options.PlanApply == nil {
 		planTool.UnavailableReason = "Plan checklist persistence is unavailable"
@@ -406,10 +441,23 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 		register(tools.Tool{
 			Definition: item.Definition, Source: tools.Source{Kind: "mcp", Server: item.SourceServer, Tool: item.OriginalName}, Effects: []tools.Effect{tools.Write, tools.Exec, tools.Network}, Target: "external", Interactive: true, Aliases: item.Aliases,
 			Authorize: func(ctx context.Context, input json.RawMessage) error {
-				return servers.AuthorizeTool(ctx, item.SourceServer, item.OriginalName, string(input), func(server, tool, arguments string) mcp.Decision {
-					body := fmt.Sprintf("MCP server: %s\nTool: %s\nArguments: %s\n\n\"Approve\" runs this call only. \"Approve always\" trusts this server's tools for the rest of this session. MCP servers run with your permissions; local cancellation may not stop server work.", server, tool, arguments)
+				// refused holds a no-reviewer refusal so it replaces the
+				// manager's generic decline in the model's result.
+				var refused error
+				err := servers.AuthorizeTool(ctx, item.SourceServer, item.OriginalName, string(input), func(server, tool, arguments string) mcp.Decision {
+					remote := ""
+					if origin := servers.Origin(server); origin != "" {
+						remote = fmt.Sprintf("Remote MCP server: %s (the arguments are sent over the network)\n", origin)
+					}
+					body := fmt.Sprintf("MCP server: %s\n%sTool: %s\nArguments: %s\n\n\"Approve\" runs this call only. \"Approve always\" trusts this server's tools for the rest of this session. MCP servers run with your permissions; local cancellation may not stop server work.", server, remote, tool, arguments)
 					request := &ApprovalRequest{Kind: "mcp", Title: "MCP tool", Body: body, Remember: RememberServer}
-					approved, err := awaitApproval(ctx, request, emit)
+					approved, err := review(ctx, request, options, emit, NoReviewerError{
+						Action: "the call to MCP server " + server + " was not made",
+					})
+					var noReviewer *NoReviewerError
+					if errors.As(err, &noReviewer) {
+						refused = err
+					}
 					switch {
 					case err != nil || !approved:
 						return mcp.Declined
@@ -419,6 +467,10 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 						return mcp.ApprovedOnce
 					}
 				})
+				if err != nil && refused != nil {
+					return refused
+				}
+				return err
 			},
 			Run: func(ctx context.Context, input json.RawMessage) (tools.Result, error) {
 				content, isError, err := servers.CallTool(ctx, item.SourceServer, item.OriginalName, input)
@@ -429,9 +481,21 @@ func newToolRegistry(repo *repository.Repository, root string, servers *mcp.McpM
 			},
 		})
 	}
-	register(tools.WebSearchTool(options.WebSearch))
-	register(tools.WebFetchTool(options.WebFetch))
+	register(withoutPerson(tools.WebSearchTool(options.WebSearch), options.WebSearch == nil, options.NoReviewer, "web search needs consent", "no search was made"))
+	register(withoutPerson(tools.WebFetchTool(options.WebFetch), options.WebFetch == nil, options.NoReviewer, "web fetch needs consent", "the page was not fetched"))
 	return registry, warnings
+}
+
+// withoutPerson gives a tool that needs a person (an answer or web consent)
+// the run's no-reviewer reason when its runtime is missing because nobody
+// can answer, so the model learns why it was refused instead of the tool's
+// generic guess at a configuration problem (specs/headless-print point 8).
+func withoutPerson(tool tools.Tool, missing bool, noReviewer, kind, action string) tools.Tool {
+	if !missing || noReviewer == "" {
+		return tool
+	}
+	tool.UnavailableReason = "refused (" + kind + "): " + noReviewer + ", so " + action + "."
+	return tool
 }
 
 func validateCommand(command string) error {

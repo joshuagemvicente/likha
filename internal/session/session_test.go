@@ -554,3 +554,43 @@ func TestToolRecordDiffRoundTrip(t *testing.T) {
 		t.Fatalf("a record without a diff encoded the field: %s", data)
 	}
 }
+
+// Fresh-state first runs race to create the schema; every opener must wait
+// for the writer lock instead of failing with SQLITE_BUSY.
+func TestConcurrentOpenOfFreshDatabase(t *testing.T) {
+	const openers = 12
+	for round := 0; round < 3; round++ {
+		base := filepath.Join(t.TempDir(), "state")
+		repo := t.TempDir()
+		start := make(chan struct{})
+		errs := make(chan error, openers)
+		for i := 0; i < openers; i++ {
+			go func() {
+				<-start
+				store, err := Open(base, repo)
+				if err == nil {
+					err = store.Close()
+				}
+				errs <- err
+			}()
+		}
+		close(start)
+		for i := 0; i < openers; i++ {
+			if err := <-errs; err != nil {
+				t.Fatalf("round %d: concurrent Open: %v", round, err)
+			}
+		}
+	}
+}
+
+func TestLoadUnknownSessionMatchesNotFound(t *testing.T) {
+	store, _, _ := testStore(t)
+	id := strings.Repeat("a", 32)
+	_, err := store.Load(id)
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("Load(unknown) error = %v, want ErrSessionNotFound", err)
+	}
+	if want := "no session " + id + " in this repository"; err.Error() != want {
+		t.Fatalf("Load(unknown) message = %q, want %q", err.Error(), want)
+	}
+}

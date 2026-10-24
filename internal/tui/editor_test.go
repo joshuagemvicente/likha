@@ -196,35 +196,6 @@ func TestKillRingCapsAtEight(t *testing.T) {
 	}
 }
 
-func TestTranspose(t *testing.T) {
-	input := []rune("abc")
-	s := editState{caret: len(input)}
-	if !transpose(&input, &s) {
-		t.Fatal("transpose did not run")
-	}
-	runeEq(t, input, "acb") // end of buffer: the last two swap
-	if s.caret != 3 {
-		t.Fatalf("caret = %d, want 3", s.caret)
-	}
-	// Mid-buffer: the two runes before the caret swap, caret stays.
-	input = []rune("abcd")
-	s = editState{caret: 3}
-	if !transpose(&input, &s) {
-		t.Fatal("transpose did not run")
-	}
-	runeEq(t, input, "acbd")
-	if s.caret != 3 {
-		t.Fatalf("caret = %d, want 3", s.caret)
-	}
-	// Fewer than two runes before the caret: no-op.
-	input = []rune("ab")
-	s = editState{caret: 1}
-	if transpose(&input, &s) {
-		t.Fatal("transpose with <2 runes before caret must be a no-op")
-	}
-	runeEq(t, input, "ab")
-}
-
 func TestNewlineInsertAndFlattenOnSubmitShape(t *testing.T) {
 	input := []rune("ab")
 	s := editState{caret: 1}

@@ -51,6 +51,9 @@ type targetedProposal struct {
 	recovery *targetedApply
 	result   string
 	journal  func(EditProgress) error
+	// completed is set when Apply finished with every target published and
+	// verified; only such a proposal yields an undoable change set.
+	completed bool
 }
 
 type targetedFile struct {
@@ -59,6 +62,9 @@ type targetedFile struct {
 	old    string
 	next   string
 	before os.FileInfo
+	// remove publishes the target's absence instead of next. Only undo plans
+	// set it (PrepareUndo); the model-facing edit tool never removes files.
+	remove bool
 }
 
 type targetedDirectory struct {
@@ -259,7 +265,7 @@ func targetedSnapshotParent(root string, parts []string, dirs map[string]*target
 			}
 		}
 		if previous, exists := dirs[path]; exists {
-			if (previous.before == nil) != (info == nil) || info != nil && !sameState(info, previous.before) {
+			if (previous.before == nil) != (info == nil) || info != nil && !sameDirectory(info, previous.before) {
 				if current != nil {
 					current.Close()
 				}
@@ -463,6 +469,7 @@ func (p *EditProposal) Apply(ctx context.Context) (string, error) {
 		a.finishReport(err)
 	}
 	s.result = a.summary()
+	s.completed = err == nil
 	return s.result, err
 }
 
@@ -517,7 +524,7 @@ func (a *targetedApply) preflight() error {
 		if err != nil {
 			return err
 		}
-		if !sameState(d.info, plan.before) {
+		if !sameDirectory(d.info, plan.before) {
 			return fmt.Errorf("directory %q: %w", plan.path, ErrStaleEdit)
 		}
 	}
@@ -610,6 +617,9 @@ func (a *targetedApply) prepare(ctx context.Context) error {
 		}
 	}
 	for _, f := range a.files {
+		if f.plan.remove {
+			continue // a removal publishes no output
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -721,6 +731,18 @@ func (f *targetedStagedFile) checkOriginal() error {
 }
 
 func (f *targetedStagedFile) checkWritten(name string) error {
+	if f.plan.remove {
+		// The published state of a removal is an absent public name; a
+		// removal never has a staged output to verify.
+		if name != f.plan.parts[len(f.plan.parts)-1] {
+			return nil
+		}
+		_, info, err := readTarget(f.parent.file, name)
+		if err != nil || info != nil {
+			return fmt.Errorf("removed %q reappeared: %w", f.plan.path, ErrStaleEdit)
+		}
+		return nil
+	}
 	text, info, err := readTarget(f.parent.file, name)
 	if err != nil || !sameState(info, f.stageInfo) || text != f.plan.next {
 		return fmt.Errorf("proposal-written %q changed: %w", f.plan.path, ErrStaleEdit)
@@ -804,6 +826,16 @@ func (a *targetedApply) publish(ctx context.Context) error {
 				return fmt.Errorf("original %q changed at publication: %w", f.plan.path, ErrStaleEdit)
 			}
 		}
+		if f.plan.remove {
+			// Moving the original aside was the whole publication; cleanup
+			// discards it once the group is verified.
+			f.published = true
+			a.report.Applied = append(a.report.Applied, f.plan.path)
+			if err := a.checkpoint("publishing", EditProgressStep{}, "File removal recorded."); err != nil {
+				return err
+			}
+			continue
+		}
 		if !a.started {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -879,7 +911,7 @@ func (a *targetedApply) recoverFile(f *targetedStagedFile) error {
 	if f.plan.before != nil && f.backup == "" {
 		return errors.New("saved original already discarded; preserve the published file for manual inspection, never replay old_text")
 	}
-	if f.published {
+	if f.published && !f.plan.remove {
 		if err := f.checkWritten(name); err != nil {
 			return err // changed/removed/replaced files belong to the user now
 		}

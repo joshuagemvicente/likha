@@ -472,27 +472,3 @@ func TestEditorSelectionWordMovementClears(t *testing.T) {
 		})
 	}
 }
-
-func TestEditorSelectionTransposeClearsSafely(t *testing.T) {
-	for _, test := range []struct {
-		name          string
-		input, want   string
-		anchor, caret int
-		wantCaret     int
-		changed       bool
-	}{
-		{name: "selected text", input: "a界🙂z", want: "a🙂界z", anchor: 1, caret: 3, wantCaret: 3, changed: true},
-		{name: "stale endpoints", input: "abc", want: "acb", anchor: -99, caret: 99, wantCaret: 3, changed: true},
-		{name: "too near start", input: "abc", want: "abc", anchor: 3, caret: 1, wantCaret: 1},
-		{name: "empty", anchor: 99, caret: -99},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			input := []rune(test.input)
-			s := editState{selectionAnchor: test.anchor, caret: test.caret, selecting: true}
-			if got := transpose(&input, &s); got != test.changed {
-				t.Fatalf("transpose = %t, want %t", got, test.changed)
-			}
-			assertEditorSelectionBuffer(t, input, &s, test.want, test.wantCaret)
-		})
-	}
-}

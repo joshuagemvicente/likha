@@ -2,6 +2,7 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -15,7 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"likha/internal/explore"
 	"likha/internal/model"
@@ -38,7 +40,8 @@ type Snapshot struct {
 	Root          string
 	History       []model.Message
 	Entries       []Entry
-	PromptHistory []string `json:"prompt_history,omitempty"`
+	PromptHistory []string         `json:"prompt_history,omitempty"`
+	Selection     *model.Selection `json:"selection,omitempty"` // committed identity only, never credentials or queued work
 
 	// ToolRecords retain displayable result metadata alongside Entries. They
 	// are not replayed into model history or restored as authorization grants.
@@ -147,9 +150,13 @@ func Open(base, root string) (*Store, error) {
 }
 
 func configure(db *sql.DB) error {
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		return fmt.Errorf("configure SQLite (PRAGMA busy_timeout = 5000): %w", err)
+	}
+	if err := enableWAL(db); err != nil {
+		return fmt.Errorf("configure SQLite (PRAGMA journal_mode = WAL): %w", err)
+	}
 	for _, pragma := range []string{
-		"PRAGMA busy_timeout = 5000",
-		"PRAGMA journal_mode = WAL",
 		"PRAGMA synchronous = FULL",
 		"PRAGMA foreign_keys = ON",
 	} {
@@ -157,11 +164,22 @@ func configure(db *sql.DB) error {
 			return fmt.Errorf("configure SQLite (%s): %w", pragma, err)
 		}
 	}
-	tx, err := db.Begin()
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("begin session schema setup: %w", err)
 	}
-	defer tx.Rollback()
+	defer conn.Close()
+	// A deferred transaction would read user_version first and then try to
+	// upgrade to a write lock; in WAL mode that upgrade fails with SQLITE_BUSY
+	// immediately, ignoring busy_timeout, when another process is creating the
+	// schema at the same moment. BEGIN IMMEDIATE waits for the writer lock up
+	// front, so concurrent first runs serialize instead of failing.
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return fmt.Errorf("begin session schema setup: %w", err)
+	}
+	tx := &schemaTx{ctx: ctx, conn: conn}
+	defer tx.rollbackUnlessCommitted()
 	var version int
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read session schema version: %w", err)
@@ -215,10 +233,78 @@ func configure(db *sql.DB) error {
 	if err := configurePlans(tx); err != nil {
 		return err
 	}
+	if err := configureRunMarkers(tx); err != nil {
+		return err
+	}
+	if err := configureChangeSets(tx); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit session schema setup: %w", err)
 	}
 	return nil
+}
+
+// busyTimeout matches the busy_timeout pragma so the WAL switch retries for
+// no longer than any other statement would wait for a lock.
+const busyTimeout = 5 * time.Second
+
+// enableWAL switches the database to WAL. Concurrent first runs race on this
+// switch from a brand-new rollback-journal file, and SQLite reports
+// SQLITE_BUSY for it without consulting busy_timeout, so retry within the same
+// budget. Once one opener succeeds the mode is persistent and the rest pass.
+func enableWAL(db *sql.DB) error {
+	deadline := time.Now().Add(busyTimeout)
+	for {
+		_, err := db.Exec("PRAGMA journal_mode = WAL")
+		if err == nil || !isBusy(err) || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func isBusy(err error) bool {
+	var sqliteErr *sqlite.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == sqlite3.SQLITE_BUSY
+}
+
+// schemaExecer is the statement surface the additive schema helpers need, so
+// they run inside configure's immediate transaction on its dedicated connection.
+type schemaExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// schemaTx is an explicit BEGIN IMMEDIATE transaction on one connection;
+// database/sql's Tx cannot request the immediate lock mode.
+type schemaTx struct {
+	ctx       context.Context
+	conn      *sql.Conn
+	committed bool
+}
+
+func (t *schemaTx) Exec(query string, args ...any) (sql.Result, error) {
+	return t.conn.ExecContext(t.ctx, query, args...)
+}
+
+func (t *schemaTx) QueryRow(query string, args ...any) *sql.Row {
+	return t.conn.QueryRowContext(t.ctx, query, args...)
+}
+
+func (t *schemaTx) Commit() error {
+	if _, err := t.conn.ExecContext(t.ctx, "COMMIT"); err != nil {
+		return err
+	}
+	t.committed = true
+	return nil
+}
+
+// rollbackUnlessCommitted ends a failed setup; its error is ignored because
+// the setup error being returned already explains the failure.
+func (t *schemaTx) rollbackUnlessCommitted() {
+	if !t.committed {
+		t.conn.ExecContext(t.ctx, "ROLLBACK")
+	}
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -325,13 +411,30 @@ func decode(id, root string, data []byte) (Snapshot, error) {
 	return snapshot, nil
 }
 
+// missingSessionError reports a resume of an ID this repository does not
+// hold; it matches ErrSessionNotFound so callers can branch on errors.Is
+// while users read a sentence instead of "sql: no rows in result set".
+type missingSessionError struct{ id string }
+
+func (e missingSessionError) Error() string {
+	return fmt.Sprintf("no session %s in this repository", e.id)
+}
+
+func (e missingSessionError) Is(target error) bool { return target == ErrSessionNotFound }
+
+// Load returns the session id owned by this store's repository, or an error
+// matching ErrSessionNotFound when the repository has no such session.
 func (s *Store) Load(id string) (Snapshot, error) {
 	if !validID(id) {
 		return Snapshot{}, fmt.Errorf("invalid session ID %q", id)
 	}
 	var data []byte
 	var revision int64
-	if err := s.db.QueryRow("SELECT snapshot, revision FROM sessions WHERE id = ? AND repository = ?", id, s.root).Scan(&data, &revision); err != nil {
+	err := s.db.QueryRow("SELECT snapshot, revision FROM sessions WHERE id = ? AND repository = ?", id, s.root).Scan(&data, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Snapshot{}, missingSessionError{id: id}
+	}
+	if err != nil {
 		return Snapshot{}, fmt.Errorf("load session %s: %w", id, err)
 	}
 	snapshot, err := decode(id, s.root, data)
@@ -347,9 +450,18 @@ func (s *Store) Load(id string) (Snapshot, error) {
 // title and timestamp unchanged. The snapshot update and the private
 // task_records rewrite commit together, so a crash leaves both at the prior
 // revision; a nil snapshot.Tasks (the legacy shape) rewrites no task rows.
-// The plans row commits the same way: a nil snapshot.Plan deletes it, a
-// pointer rewrites it from snapshot.Plan (see plans doc on replacePlan).
+// The plans row commits the same way: a nil snapshot.Plan leaves it
+// untouched, a pointer rewrites it from snapshot.Plan (see replacePlan).
+// Every error names the session, so callers report it without wrapping it
+// in the session ID again; a conflict matches ErrConflict.
 func (s *Store) Save(snapshot Snapshot) error {
+	if err := s.save(snapshot); err != nil {
+		return fmt.Errorf("save session %s: %w", snapshot.ID, err)
+	}
+	return nil
+}
+
+func (s *Store) save(snapshot Snapshot) error {
 	if !validID(snapshot.ID) || snapshot.Root != s.root {
 		return errors.New("session ID or repository does not match store")
 	}
@@ -371,13 +483,13 @@ func (s *Store) Save(snapshot Snapshot) error {
 	}
 	expected := *snapshot.revision
 	if expected != revision {
-		return fmt.Errorf("save session %s: %w", snapshot.ID, ErrConflict)
+		return ErrConflict
 	}
 	// The snapshot update and the task_records rewrite commit together so a
 	// crash cannot leave the rows disagreeing with the saved snapshot.
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("save session: %w", err)
+		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 	var result sql.Result
@@ -394,14 +506,14 @@ func (s *Store) Save(snapshot Snapshot) error {
 			data, title(snapshot), time.Now().UTC().UnixNano(), snapshot.ID, s.root, expected, previous)
 	}
 	if err != nil {
-		return fmt.Errorf("save session: %w", err)
+		return fmt.Errorf("update snapshot: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("verify saved session: %w", err)
 	}
 	if affected != 1 {
-		return fmt.Errorf("save session %s: %w", snapshot.ID, ErrConflict)
+		return ErrConflict
 	}
 	if err := replaceTaskRecords(tx, snapshot); err != nil {
 		return err
@@ -435,7 +547,7 @@ func sameConversation(a, b Snapshot) bool {
 	}
 	for i := range a.History {
 		left, right := a.History[i], b.History[i]
-		if left.Role != right.Role || left.Content != right.Content || left.Reasoning != right.Reasoning || left.ToolCallID != right.ToolCallID || !left.Replay.Equal(right.Replay) || len(left.ToolCalls) != len(right.ToolCalls) {
+		if left.Role != right.Role || left.Content != right.Content || left.Reasoning != right.Reasoning || left.Phase != right.Phase || left.ToolCallID != right.ToolCallID || !left.Replay.Equal(right.Replay) || len(left.ToolCalls) != len(right.ToolCalls) {
 			return false
 		}
 		for j := range left.ToolCalls {

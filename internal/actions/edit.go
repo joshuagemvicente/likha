@@ -21,6 +21,9 @@ const MaxEditBytes = 1 << 20
 
 var ErrStaleEdit = errors.New("edit is stale: file or directory changed since preview")
 
+// ErrGitMetadata refuses edits inside a .git directory.
+var ErrGitMetadata = errors.New("edits inside .git are not allowed")
+
 type Edit struct {
 	Path string
 	Diff string
@@ -31,6 +34,8 @@ type Edit struct {
 	old     string
 	new     string
 	before  os.FileInfo // nil for a file that did not exist
+	applied bool        // set once Apply published the new content
+	stale   bool        // set once Apply saw a conflict; it never clears
 }
 
 // PrepareEdit only reads the repository. Parent directories must already exist;
@@ -73,7 +78,20 @@ func PrepareEdit(root, path, content string) (*Edit, error) {
 // writes a temporary file in the same directory, then atomically publishes it.
 // Like any filesystem check followed by a rename, concurrent adversarial writes
 // during that final interval cannot be made transactional without filesystem help.
+// Once Apply reports ErrStaleEdit the edit stays stale: a conflict that was
+// seen (a new file's target appearing, say) is not forgotten when it vanishes.
 func (e *Edit) Apply() error {
+	if e != nil && e.stale {
+		return fmt.Errorf("%q: %w", e.Path, ErrStaleEdit)
+	}
+	err := e.apply()
+	if errors.Is(err, ErrStaleEdit) {
+		e.stale = true
+	}
+	return err
+}
+
+func (e *Edit) apply() error {
 	if e == nil || len(e.parts) == 0 || len(e.parents) != len(e.parts) {
 		return errors.New("invalid edit")
 	}
@@ -155,11 +173,13 @@ func (e *Edit) Apply() error {
 			}
 			return fmt.Errorf("publish %q: %w", e.Path, err)
 		}
+		e.applied = true
 		return nil
 	}
 	if err := unix.Renameat(int(parent.Fd()), tmpName, int(parent.Fd()), name); err != nil {
 		return fmt.Errorf("publish %q: %w", e.Path, err)
 	}
+	e.applied = true
 	return nil
 }
 
@@ -188,7 +208,28 @@ func editPath(path string) ([]string, error) {
 	if clean == "." {
 		return nil, fmt.Errorf("invalid file path %q", path)
 	}
-	return strings.Split(clean, string(os.PathSeparator)), nil
+	parts = strings.Split(clean, string(os.PathSeparator))
+	for _, part := range parts {
+		// Git runs programs named in .git/config (core.fsmonitor, hooks) on
+		// ordinary read-only commands, so a write there is code execution.
+		if isGitDir(part) {
+			return nil, fmt.Errorf("%q: %w", path, ErrGitMetadata)
+		}
+	}
+	return parts, nil
+}
+
+// isGitDir reports whether one path element names a .git directory. Case and
+// invisible format characters are ignored because macOS filesystems resolve
+// ".GIT" (and, on HFS+, ".g\u200cit") to the same entry as ".git".
+func isGitDir(element string) bool {
+	visible := strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, element)
+	return strings.EqualFold(visible, ".git")
 }
 
 func openParent(root string, parts []string, expected []os.FileInfo) (*os.File, []os.FileInfo, error) {
@@ -204,7 +245,7 @@ func openParent(root string, parts []string, expected []os.FileInfo) (*os.File, 
 			current.Close()
 			return nil, nil, fmt.Errorf("stat parent of %q: %w", filepath.Join(parts...), err)
 		}
-		if expected != nil && !sameState(info, expected[i]) {
+		if expected != nil && !sameDirectory(info, expected[i]) {
 			current.Close()
 			return nil, nil, fmt.Errorf("parent of %q: %w", filepath.Join(parts...), ErrStaleEdit)
 		}
@@ -265,6 +306,13 @@ func readTarget(parent *os.File, name string) (string, os.FileInfo, error) {
 
 func sameState(a, b os.FileInfo) bool {
 	return a != nil && b != nil && os.SameFile(a, b) && a.Size() == b.Size() && a.Mode() == b.Mode() && a.ModTime().Equal(b.ModTime())
+}
+
+// sameDirectory compares an ancestor directory by identity and mode only.
+// Its size and modification time change whenever any sibling entry is
+// created or removed, which says nothing about the file being edited.
+func sameDirectory(a, b os.FileInfo) bool {
+	return a != nil && b != nil && os.SameFile(a, b) && a.Mode() == b.Mode()
 }
 
 // A unified diff uses LF to delimit lines. Other controls can move, erase, or

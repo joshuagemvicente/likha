@@ -117,6 +117,11 @@ func numberedPage(text string, offset, limit int, page Page) Page {
 		line := text[position:end]
 		prefix := strconv.Itoa(lineNumber) + ": "
 		available := budget - len(prefix) - 2 // JSON-escaped newline.
+		if available < 0 && emitted > 0 {
+			// Even an empty line costs its number and newline; without this
+			// a run of empty lines would grow the page past its byte cap.
+			break
+		}
 		take, cost := pagePrefix(line, max(0, available))
 		if take < len(line) && emitted > 0 {
 			break // Leave this entire line for the next page.

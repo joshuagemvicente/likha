@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -22,7 +23,7 @@ func (c *Client) Models(ctx context.Context) ([]ModelDetails, error) {
 		return nil, errors.New("model client is nil")
 	}
 	if c.oauth == nil {
-		return ListModelsWithDetails(ctx, c.base, c.apiKey)
+		return listModelsWithClient(ctx, c.http, c.base, c.apiKey)
 	}
 	requestCtx, cancel := c.oauth.requestContext(ctx)
 	defer cancel()
@@ -82,7 +83,11 @@ func decodeChatGPTModelDetails(raw []byte) ([]ModelDetails, error) {
 		if strings.TrimSpace(item.Slug) == "" || strings.TrimSpace(item.DisplayName) == "" {
 			return nil, errors.New("a listed ChatGPT model is missing its slug or display_name; retry model discovery")
 		}
-		details = append(details, ModelDetails{ID: item.Slug, DisplayName: item.DisplayName})
+		capabilities := &ReasoningCapabilities{EffortsKnown: true, Efforts: slices.Clone(chatGPTDocumentedEfforts[item.Slug])}
+		if len(capabilities.Efforts) == 0 {
+			capabilities = nil
+		}
+		details = append(details, ModelDetails{ID: item.Slug, DisplayName: item.DisplayName, Reasoning: capabilities})
 	}
 	if len(details) == 0 {
 		return nil, errors.New("no models are available to list for the selected ChatGPT account; check its plan permission or choose another account")

@@ -2,11 +2,11 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"likha/internal/agent"
 	"likha/internal/profiles"
+	"likha/internal/runsetup"
 )
 
 // profileRunInputs freezes the discovered profile catalog at a run boundary:
@@ -16,28 +16,23 @@ import (
 // provider is not serving, is refused with a visible reason and held out of
 // this run's advertisement instead of silently substituted.
 func (m *ui) profileRunInputs() ([]string, []agent.TaskProfile) {
-	catalog := profiles.LoadCatalog(m.stateDir)
-	m.profileCatalog = catalog
-	m.reportProfileCatalogIssue(catalog)
-	agents := []string{"explore", "review"}
-	var taskProfiles []agent.TaskProfile
-	for _, profile := range catalog.Profiles {
-		if profile.Model != "" && m.client != nil && profile.Model != m.client.Model() {
-			m.entries = append(m.entries, entry{role: "Likha", content: fmt.Sprintf("Profile %s requires model %s; the active provider is serving %s, so it is not advertised this run.",
-				toolShortText(profile.Name, 48), toolShortText(profile.Model, 96), toolShortText(m.client.Model(), 96))})
-			continue
-		}
-		instructions, err := profiles.ReadProfile(m.stateDir, profile)
-		if err != nil {
-			m.entries = append(m.entries, entry{role: "Likha", content: "Profile " + toolShortText(profile.Name, 48) + " refused: " + toolShortText(err.Error(), 160) +
+	client := m.client
+	if m.working && m.runClient != nil {
+		client = m.runClient
+	}
+	run := runsetup.ProfileInputs(m.stateDir, client)
+	m.profileCatalog = run.Catalog
+	m.reportProfileCatalogIssue(run.Catalog)
+	for _, skip := range run.Skipped {
+		if skip.Err != nil {
+			m.entries = append(m.entries, entry{role: "Likha", content: "Profile " + toolShortText(skip.Profile.Name, 48) + " refused: " + toolShortText(skip.Err.Error(), 160) +
 				" Refresh the catalog before it is advertised again."})
 			continue
 		}
-		taskProfiles = append(taskProfiles, agent.TaskProfile{Profile: profile, Instructions: instructions})
-		agents = append(agents, profile.Name)
+		m.entries = append(m.entries, entry{role: "Likha", content: fmt.Sprintf("Profile %s requires model %s; the active provider is serving %s, so it is not advertised this run.",
+			toolShortText(skip.Profile.Name, 48), toolShortText(skip.Profile.Model, 96), toolShortText(skip.Serving, 96))})
 	}
-	sort.Strings(agents)
-	return agents, taskProfiles
+	return run.Agents, run.Profiles
 }
 
 // reportProfileCatalogIssue surfaces named discovery problems once per state,

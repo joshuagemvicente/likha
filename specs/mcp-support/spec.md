@@ -27,7 +27,10 @@ deliberate exception the user wants (config-driven, no plugin API surface).
 1. **Transport:** stdio only for v1 — launch each configured server as a
    child process (`command` + args + env), speak MCP over stdin/stdout
    (JSON-RPC 2.0, MCP protocol version negotiated at initialize). HTTP/SSE
-   transports are deferred.
+   transports are deferred. *Amended 2026-10-07 by
+   [mcp-http](../mcp-http/spec.md) (FR-46):* Streamable HTTP servers given
+   by `url` are now supported beside stdio; legacy HTTP+SSE and OAuth remain
+   deferred.
 2. **Configuration:** `<stateDir>/mcp.json` (private directory, 0600 file like
    `providers.json`/`config.json`; never the repository) — shape follows the
    familiar convention:

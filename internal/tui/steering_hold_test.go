@@ -21,7 +21,8 @@ import (
 )
 
 // An error holds the queue exactly like a cancel: rows and texts survive,
-// no turn starts, and Enter sends the held message.
+// no turn starts, and Enter tries to send the held message. With no client
+// that send fails and the message stays held with its row.
 func TestSteerHoldErrorKeepsQueueUntilEnter(t *testing.T) {
 	m := newKeysTestUI(t)
 	m.working, m.runID = true, 1
@@ -47,8 +48,14 @@ func TestSteerHoldErrorKeepsQueueUntilEnter(t *testing.T) {
 		t.Fatalf("queued row lost on error: %+v", m.entries)
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if got := string(m.input); got != "held" {
-		t.Fatalf("held send prompt = %q, want %q", got, "held")
+	if !hasEntry(m, "Error", "No provider configured") {
+		t.Fatal("Enter did not try to send the held message")
+	}
+	if len(m.queue) != 1 || m.queue[0] != "held" || len(m.input) != 0 {
+		t.Fatalf("failed send moved the held message: queue=%v draft=%q", m.queue, string(m.input))
+	}
+	if !hasEntry(m, "Queued", "held") {
+		t.Fatalf("failed send dropped the Queued row: %+v", m.entries)
 	}
 }
 

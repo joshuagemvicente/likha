@@ -11,8 +11,6 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
-
-	gitignore "github.com/sabhiram/go-gitignore"
 )
 
 var errInspectionLimit = errors.New("inspection scan limited")
@@ -50,6 +48,12 @@ func (s *inspectionState) limit(format string, args ...any) error {
 	s.skip(format, args...)
 	s.warn("scan limited; narrow path/include or lower result volume; no continuation cursor is available")
 	return errInspectionLimit
+}
+
+// excludedScope explains an explicitly requested scope that the discovery
+// filters exclude, so its empty result is never reported as complete.
+func (s *inspectionState) excludedScope(scope string) {
+	s.skip("scope %s is hidden or ignored, so nothing under it was searched; set include_hidden or include_ignored to search it", inspectionLabel(scope))
 }
 
 func inspectionPath(path string, defaultRoot bool) (string, error) {
@@ -153,8 +157,7 @@ func (s *inspectionState) loadIgnore(ctx context.Context, dir *os.File, prefix s
 		return nil, err
 	}
 	// Reuse Tree's scoped rule representation and matching semantics.
-	rule := gitignore.CompileIgnoreLines(strings.Split(text, "\n")...)
-	return append(append([]*dirIgnore(nil), ignores...), &dirIgnore{dir: prefix, rule: rule}), nil
+	return append(append([]*dirIgnore(nil), ignores...), compileIgnore(prefix, text)), nil
 }
 
 func inspectionVisible(name, path string, directory bool, ignores []*dirIgnore, opts QueryOptions) bool {

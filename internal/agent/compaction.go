@@ -70,7 +70,7 @@ func CompactHistoryUsage(ctx context.Context, client *model.Client, history []mo
 // 8), so a summary can still be made after the provider rejected the
 // session's replay state.
 func backgroundClient(client *model.Client) (*model.Client, error) {
-	plain, err := client.WithoutEffort()
+	plain, err := client.WithoutVariant()
 	if err != nil {
 		return nil, err
 	}

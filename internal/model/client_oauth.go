@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -34,14 +35,31 @@ func NewOAuth(baseURL, modelName, issuer, clientID string, creds OAuthCredential
 	}
 	c := &Client{
 		url:        ChatGPTResource + "/responses",
+		wire:       WireResponses,
 		base:       ChatGPTResource,
 		model:      strings.TrimSpace(modelName),
 		http:       noRedirectHTTPClient(),
-		replayWire: replayWireFor(ChatGPTResource, Providers),
+		replayWire: ReplayResponsesItems,
 	}
 	lifetime, stop := context.WithCancel(context.Background())
 	c.oauth = &oauthSession{client: c, creds: cloneClientOAuthCredentials(creds), lifetime: lifetime, stop: stop}
+	c.oauth.rememberLocked(creds)
 	return c, nil
+}
+
+// OAuthTokens returns every access, refresh and ID token the client's
+// sign-in session has held in this process, the current ones and every one
+// a rotation replaced, so output written after a refresh can still be
+// redacted. Forks share the session and its list. The list only grows, in
+// the order the tokens were first held. A client without a ChatGPT sign-in
+// returns nil.
+func (c *Client) OAuthTokens() []string {
+	if c == nil || c.oauth == nil {
+		return nil
+	}
+	c.oauth.mu.Lock()
+	defer c.oauth.mu.Unlock()
+	return append([]string(nil), c.oauth.held...)
 }
 
 func validateClientOAuthCredentials(creds OAuthCredentials) error {
@@ -124,6 +142,10 @@ type oauthSession struct {
 	invalidErr  error
 	lifetime    context.Context
 	stop        context.CancelFunc
+	// held is every token the session has held (see OAuthTokens). It is
+	// kept after invalidation or rotation clears creds: text written
+	// earlier may still carry an old token.
+	held []string
 }
 
 type oauthAccessFlight struct {
@@ -302,6 +324,19 @@ func (s *oauthSession) replaceCredentialsLocked(fresh OAuthCredentials) {
 		s.version++
 	}
 	s.creds = cloneClientOAuthCredentials(fresh)
+	s.rememberLocked(fresh)
+}
+
+// rememberLocked adds creds' tokens that the session has not held before to
+// held. The caller holds s.mu, or owns the session alone (NewOAuth). A
+// session holds a handful of tokens per hour of use, so a linear scan stays
+// cheap.
+func (s *oauthSession) rememberLocked(creds OAuthCredentials) {
+	for _, token := range []string{creds.Access, creds.Refresh, creds.IDToken} {
+		if token != "" && !slices.Contains(s.held, token) {
+			s.held = append(s.held, token)
+		}
+	}
 }
 
 func validateClientOAuthReplacement(old, fresh OAuthCredentials) error {
@@ -351,6 +386,7 @@ func (c *Client) doOAuthRequest(ctx context.Context, method, route string, paylo
 		if method == http.MethodPost {
 			req.Header.Set("Content-Type", "application/json")
 		}
+		setOverlayHeaders(req.Header, c.variantHeaders)
 		resp, err := c.http.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
@@ -371,11 +407,18 @@ func (c *Client) doOAuthRequest(ctx context.Context, method, route string, paylo
 // oauthHTTPError preserves nonstandard admission bodies, structured API error
 // codes/params, status, and request ID without treating 403/429 as refresh hints.
 func oauthHTTPError(resp *http.Response) error {
+	return responsesHTTPError(resp, "ChatGPT")
+}
+
+// responsesHTTPError formats a failed Responses API reply. label names the
+// service the user signed in to ("ChatGPT") or the neutral "model" for an
+// API-key endpoint, so an error never blames a service that was not used.
+func responsesHTTPError(resp *http.Response, label string) error {
 	detail, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBytes+1))
 	if len(detail) > maxErrorBytes {
 		detail = detail[:maxErrorBytes]
 	}
-	message := fmt.Sprintf("ChatGPT HTTP %s", resp.Status)
+	message := fmt.Sprintf("%s HTTP %s", label, resp.Status)
 	if requestID := resp.Header.Get("x-request-id"); requestID != "" {
 		message += fmt.Sprintf(" (request ID %s)", requestID)
 	}

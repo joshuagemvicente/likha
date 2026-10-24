@@ -169,3 +169,170 @@ func TestProvidersSwitchModelID(t *testing.T) {
 		t.Fatalf("SwitchModelID with neither = %q, want empty", got)
 	}
 }
+
+// Keys pasted from a clipboard or a .env file often carry a trailing newline
+// or spaces; sent verbatim they fail as 401 or an invalid header, and a
+// blank variable must not shadow a later source in the documented order.
+func TestResolveProviderTrimsKeysAndSkipsBlankSources(t *testing.T) {
+	cases := []struct {
+		name, flag, providerEnv, stored, want string
+	}{
+		{name: "flag newline", flag: "sk-flag\n", want: "sk-flag"},
+		{name: "blank flag falls through to provider env", flag: " \t", providerEnv: "sk-env", want: "sk-env"},
+		{name: "provider env spaces", providerEnv: "  sk-env \r\n", want: "sk-env"},
+		{name: "blank provider env falls through to store", providerEnv: "\n", stored: "sk-stored", want: "sk-stored"},
+		{name: "stored newline", stored: "sk-stored\n", want: "sk-stored"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LIKHA_OPENROUTER_API_KEY", tc.providerEnv)
+			stateDir := t.TempDir()
+			if tc.stored != "" {
+				if err := WriteCredentials(stateDir, map[string]StoredCredential{"openrouter": {Type: "api", Key: tc.stored}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			res, err := ResolveProvider("openrouter", "", tc.flag, false, stateDir)
+			if err != nil {
+				t.Fatalf("ResolveProvider: %v", err)
+			}
+			if res.Key != tc.want {
+				t.Fatalf("key = %q, want %q", res.Key, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveProviderBlankKeysAreMissing(t *testing.T) {
+	t.Setenv("LIKHA_OPENROUTER_API_KEY", "  ")
+	_, err := ResolveProvider("openrouter", "", "\n", true, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "requires an API key") {
+		t.Fatalf("blank keys error = %v, want requires an API key", err)
+	}
+}
+
+// Only a key passed on the command line is stored; a key resolved from the
+// environment or the store stays where it came from.
+func TestResolveProviderPersistsOnlyTheFlagKey(t *testing.T) {
+	t.Setenv("LIKHA_OPENROUTER_API_KEY", "sk-env")
+	stateDir := t.TempDir()
+	if _, err := ResolveProvider("openrouter", "", " ", true, stateDir); err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	stored, err := StoredKey(stateDir, "openrouter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored != "" {
+		t.Fatalf("environment key was stored as %q", stored)
+	}
+	if _, err := ResolveProvider("openrouter", "", " sk-flag\n", true, stateDir); err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if stored, err = StoredKey(stateDir, "openrouter"); err != nil || stored != "sk-flag" {
+		t.Fatalf("stored flag key = %q, %v; want sk-flag", stored, err)
+	}
+}
+
+// v1-spec §3: an endpoint outside the accepted list runs with a visible
+// unverified warning, including a listed provider pointed elsewhere.
+func TestResolveProviderEndpointOverrideIsUnverified(t *testing.T) {
+	t.Setenv("LIKHA_ENDPOINT", "")
+	cases := []struct {
+		name, endpoint string
+		verified       bool
+	}{
+		{name: "provider base", endpoint: "", verified: true},
+		{name: "same base spelled out", endpoint: "https://openrouter.ai/api/v1", verified: true},
+		{name: "same base with trailing slash", endpoint: "https://openrouter.ai/api/v1/", verified: true},
+		{name: "other host", endpoint: "https://gateway.example.net/v1", verified: false},
+		{name: "other path on provider host", endpoint: "https://openrouter.ai/api/v2", verified: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := ResolveProvider("openrouter", tc.endpoint, "sk-test", false, t.TempDir())
+			if err != nil {
+				t.Fatalf("ResolveProvider: %v", err)
+			}
+			if res.Verified != tc.verified {
+				t.Fatalf("Verified = %v, want %v (endpoint %q)", res.Verified, tc.verified, res.Endpoint)
+			}
+		})
+	}
+}
+
+// A provider's documented endpoint in another region is the same accepted
+// provider, so it carries no unverified marker; anything else still does.
+func TestEndpointVerified(t *testing.T) {
+	bedrock, ok := model.LookupProvider("bedrock")
+	if !ok {
+		t.Fatal("bedrock missing from the predefined list")
+	}
+	openrouter, ok := model.LookupProvider("openrouter")
+	if !ok {
+		t.Fatal("openrouter missing from the predefined list")
+	}
+	cases := []struct {
+		name     string
+		provider model.Provider
+		endpoint string
+		want     bool
+	}{
+		{"base URL", bedrock, bedrock.BaseURL, true},
+		{"base URL with trailing slash", bedrock, bedrock.BaseURL + "/", true},
+		{"other Bedrock region", bedrock, "https://bedrock-runtime.eu-west-1.amazonaws.com/openai/v1", true},
+		{"GovCloud region", bedrock, "https://bedrock-runtime.us-gov-west-1.amazonaws.com/openai/v1/", true},
+		{"uppercase host", bedrock, "https://BEDROCK-RUNTIME.ap-southeast-2.amazonaws.com/openai/v1", true},
+		{"regional host, other path", bedrock, "https://bedrock-runtime.eu-west-1.amazonaws.com/v2", false},
+		{"plain http", bedrock, "http://bedrock-runtime.eu-west-1.amazonaws.com/openai/v1", false},
+		{"look-alike host", bedrock, "https://bedrock-runtime.eu-west-1.amazonaws.com.evil.example/openai/v1", false},
+		{"not a region", bedrock, "https://bedrock-runtime.evil.amazonaws.com/openai/v1", false},
+		{"user info", bedrock, "https://user@bedrock-runtime.eu-west-1.amazonaws.com/openai/v1", false},
+		{"explicit port", bedrock, "https://bedrock-runtime.eu-west-1.amazonaws.com:8443/openai/v1", false},
+		{"query", openrouter, "https://openrouter.ai/api/v1?x=1", false},
+		{"no regional pattern elsewhere", openrouter, "https://eu.openrouter.ai/api/v1", false},
+		{"unparseable", openrouter, "https://openrouter.ai/api/v1%zz", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := EndpointVerified(tc.provider, tc.endpoint); got != tc.want {
+				t.Fatalf("EndpointVerified(%s, %q) = %t, want %t", tc.provider.Name, tc.endpoint, got, tc.want)
+			}
+		})
+	}
+	res, err := ResolveProvider("bedrock", "https://bedrock-runtime.eu-west-1.amazonaws.com/openai/v1", "sk-test", false, t.TempDir())
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if !res.Verified {
+		t.Fatal("a Bedrock regional endpoint resolved as unverified")
+	}
+}
+
+// A stored key reaches every caller trimmed, so a key saved with a pasted
+// newline works in /models and /providers switches too, and a blank one
+// reads as no key at all.
+func TestStoredKeyTrimsWhitespace(t *testing.T) {
+	cases := []struct {
+		name, stored, want string
+	}{
+		{"trailing newline", "sk-x\n", "sk-x"},
+		{"surrounding spaces", "  sk-x \t", "sk-x"},
+		{"blank", " \r\n", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			if err := WriteCredentials(stateDir, map[string]StoredCredential{"openrouter": {Type: "api", Key: tc.stored}}); err != nil {
+				t.Fatal(err)
+			}
+			got, err := StoredKey(stateDir, "openrouter")
+			if err != nil {
+				t.Fatalf("StoredKey: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("StoredKey = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

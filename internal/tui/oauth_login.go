@@ -253,6 +253,15 @@ func oauthModelMetadata(details []model.ModelDetails) (ids []string, windows map
 }
 
 func (m *ui) handleOAuthLogin(v oauthLoginMsg) tea.Cmd {
+	// The candidate client owns a fresh ChatGPT session. Only the live
+	// re-login path adopts it; every other outcome releases it, so a refused
+	// or failed sign-in never leaves a second session refreshing tokens.
+	adopted := false
+	defer func() {
+		if !adopted {
+			v.client.InvalidateOAuth()
+		}
+	}()
 	if v.attempt != m.oauth.id || !m.oauthWaiting() {
 		return nil
 	}
@@ -273,6 +282,31 @@ func (m *ui) handleOAuthLogin(v oauthLoginMsg) tea.Cmd {
 	if m.oauth.surface == oauthProvider && m.isLiveProvider(p) && (m.working || m.pending != nil) {
 		m.oauthError("Cancel the active run and resolve its review before changing ChatGPT accounts.")
 		return nil
+	}
+	// A live re-login selects its model and variant before anything is
+	// persisted: a failure here leaves disk on the account m.client uses.
+	replaceLive := m.oauth.surface != oauthSetup && m.isLiveProvider(p)
+	var modelID, notice string
+	var live liveEffort
+	if replaceLive {
+		modelID = ids[0]
+		for _, id := range ids {
+			if id == m.modelName {
+				modelID = id
+				break
+			}
+		}
+		if err := v.client.SetModel(modelID); err != nil {
+			m.oauthError("Select model: " + err.Error())
+			return nil
+		}
+		live = liveEffortsByModel(v.details)[modelID]
+		var err error
+		notice, err = providers.ApplyVariant(context.Background(), m.stateDir, v.client, p, live.reasoning(), nil)
+		if err != nil {
+			m.oauthError("Select variant: " + err.Error())
+			return nil
+		}
 	}
 	var err error
 	if v.selectOnly {
@@ -304,28 +338,28 @@ func (m *ui) handleOAuthLogin(v oauthLoginMsg) tea.Cmd {
 		}
 		return m.continueOAuthSetup()
 	}
-	if m.isLiveProvider(p) {
+	if replaceLive {
+		adopted = true
 		if m.client != nil {
 			m.client.InvalidateOAuth()
 		}
-		modelID := ids[0]
-		for _, id := range ids {
-			if id == m.modelName {
-				modelID = id
-				break
-			}
-		}
-		_ = v.client.SetModel(modelID)
 		m.client, m.modelName = v.client, modelID
-		m.applyEffort(p, modelID, liveEffortsByModel(v.details)[modelID], nil)
+		m.activeLive = live
+		m.selectionRevision++
+		if notice != "" {
+			m.entries = append(m.entries, entry{role: "Likha", content: notice})
+		}
 		m.conn.ContextWindows, m.conn.Err = windows, nil
 		m.resolveContextWindow()
 		m.recalculateContext(m.history)
-		if cfg, err := providers.LoadStoredConfig(m.stateDir); err == nil && cfg.Provider == p.Name {
-			cfg.Model = modelID
-			if err := providers.SaveStoredConfig(m.stateDir, cfg); err != nil {
-				m.entries = append(m.entries, entry{role: "Error", content: "Store selected model: " + err.Error()})
+		m.adoptReplacedClient()
+		if err := providers.UpdateStoredConfig(context.Background(), m.stateDir, func(cfg *providers.StoredProviderConfig) error {
+			if cfg.Provider == p.Name {
+				cfg.Model = modelID
 			}
+			return nil
+		}); err != nil {
+			m.entries = append(m.entries, entry{role: "Error", content: "Selected model was not saved: " + err.Error()})
 		}
 	}
 	m.keyModal.checking, m.keyModal.err = false, ""

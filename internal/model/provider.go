@@ -45,7 +45,7 @@ const (
 // Likha hosts no models and does not bundle a local inference server.
 var Providers = []Provider{
 	{Name: "openai", DisplayName: "OpenAI", BaseURL: "https://api.openai.com/v1", KeyEnv: "LIKHA_OPENAI_API_KEY", DefaultModel: "gpt-4o-mini", Hosted: true},
-	{Name: "openrouter", DisplayName: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", KeyEnv: "LIKHA_OPENROUTER_API_KEY", DefaultModel: "openai/gpt-4o-mini", Hosted: true},
+	{Name: "openrouter", DisplayName: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", KeyEnv: "LIKHA_OPENROUTER_API_KEY", DefaultModel: "openai/gpt-4o-mini", Hosted: true, Replay: ReplayReasoningDetails},
 	{Name: "bedrock", DisplayName: "Amazon Bedrock", BaseURL: "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1", KeyEnv: "LIKHA_BEDROCK_API_KEY", DefaultModel: "anthropic.claude-3-5-haiku-20241022-v1:0", Hosted: true},
 	{Name: "dialagram", DisplayName: "Dialagram", BaseURL: "https://dialagram.me/router/v1", KeyEnv: "LIKHA_DIALAGRAM_API_KEY", Hosted: true},
 	{Name: "opencode-zen", DisplayName: "Opencode Zen", BaseURL: "https://opencode.ai/zen/v1", KeyEnv: "LIKHA_OPENCODE_ZEN_API_KEY", DefaultModel: "gpt-5.3-codex", Hosted: true, SessionHeader: "x-opencode-session"},

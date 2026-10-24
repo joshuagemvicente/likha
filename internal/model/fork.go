@@ -27,20 +27,34 @@ func (c *Client) Fork() (*Client, error) {
 
 	c.mu.Lock()
 	child := &Client{
-		url:           c.url,
-		base:          c.base,
-		model:         c.model,
-		apiKey:        c.apiKey,
-		checked:       c.checked,
-		http:          c.http,
-		sessionHeader: c.sessionHeader,
-		sessionID:     c.sessionID,
-		oauth:         c.oauth,
-		effortWire:    c.effortWire,
-		effort:        c.effort,
-		replayWire:    c.replayWire,
+		url:             c.url,
+		base:            c.base,
+		model:           c.model,
+		wire:            c.wire,
+		apiKey:          c.apiKey,
+		checked:         c.checked,
+		http:            c.http,
+		sessionHeader:   c.sessionHeader,
+		sessionID:       c.sessionID,
+		oauth:           c.oauth,
+		effortWire:      c.effortWire,
+		effort:          c.effort,
+		variantID:       c.variantID,
+		variantBody:     c.variantBody,
+		variantHeaders:  c.variantHeaders,
+		baselineBody:    c.baselineBody,
+		baselineHeaders: c.baselineHeaders,
+		nativeSnapshot:  c.nativeSnapshot,
+		nativeThinking:  c.nativeThinking,
+		nativeOutput:    c.nativeOutput,
+		replayWire:      c.replayWire,
 	}
 	c.mu.Unlock()
+	if child.nativeAnthropic() && !child.nativeSnapshot {
+		child.nativeThinking = anthropicThinking(child.model)
+		child.nativeOutput = anthropicMaxTokens(child.model)
+		child.nativeSnapshot = true
+	}
 
 	if strings.TrimSpace(child.model) == "" {
 		return nil, errors.New("fork model client: inherited model is unavailable")
@@ -51,7 +65,7 @@ func (c *Client) Fork() (*Client, error) {
 	if _, err := parseEndpoint(child.base); err != nil {
 		return nil, errors.New("fork model client: inherited endpoint is invalid")
 	}
-	route := wireFor(child.base).route()
+	route := child.wire.route()
 	if child.oauth != nil {
 		route = "/responses"
 	}

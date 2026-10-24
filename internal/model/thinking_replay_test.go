@@ -11,7 +11,7 @@ import (
 
 // Only the mistral row replays thinking chunks (specs/chunked-content T10).
 // A relay or custom endpoint that passes Mistral's chunks through records
-// and sends none, and Mistral effort stays off until its probe passes.
+// and sends no thinking chunks. OpenRouter replays only its own reasoning_details.
 func TestMistralRowReplaysThinking(t *testing.T) {
 	cases := []struct {
 		name string
@@ -19,7 +19,7 @@ func TestMistralRowReplaysThinking(t *testing.T) {
 		want ReplayWire
 	}{
 		{"mistral", "https://api.mistral.ai/v1", ReplayThinkingChunk},
-		{"relay passing chunks through", "https://openrouter.ai/api/v1", ReplayNone},
+		{"relay passing chunks through", "https://openrouter.ai/api/v1", ReplayReasoningDetails},
 		{"custom endpoint", "http://127.0.0.1:8080/v1", ReplayNone},
 	}
 	for _, tc := range cases {

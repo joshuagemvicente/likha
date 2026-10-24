@@ -57,7 +57,7 @@ type Plan struct {
 
 // This additive extension deliberately leaves the existing schema version at 1,
 // mirroring edit_journal and task_records.
-func configurePlans(tx *sql.Tx) error {
+func configurePlans(tx schemaExecer) error {
 	for _, statement := range []string{
 		`CREATE TABLE IF NOT EXISTS plans (
 			session_id TEXT PRIMARY KEY NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -155,6 +155,51 @@ func (s *Store) LoadPlan(sessionID string) (Plan, bool, error) {
 	return sanitizePlan(plan), true, nil
 }
 
+// ResumablePlan loads the session's stored plan for ResumePlan. A step still
+// in_progress or blocked marks the plan Interrupted when the session's last
+// run never completed (see RunUnfinished): only then was formerly active
+// work cut short. A run that ended normally may leave a step in progress,
+// such as one waiting on the user's answer.
+func (s *Store) ResumablePlan(sessionID string) (Plan, bool, error) {
+	plan, found, err := s.LoadPlan(sessionID)
+	if err != nil || !found || plan.Interrupted || !hasActiveStep(plan.Steps) {
+		return plan, found, err
+	}
+	unfinished, err := s.RunUnfinished(sessionID)
+	if err != nil {
+		return Plan{}, false, err
+	}
+	plan.Interrupted = unfinished
+	return plan, true, nil
+}
+
+// MarkPlanInterrupted records on the snapshot's plan that the run that just
+// ended was cancelled or failed while steps were still in_progress or
+// blocked, and reports whether it changed the plan. The caller saves the
+// snapshot right away: the stored row then carries the interruption itself,
+// so a later run that completes (and clears the run marker) without a
+// plan_update cannot make the cut-short steps look live again. A later
+// plan_update replaces the whole plan, and the flag with it.
+func MarkPlanInterrupted(snapshot *Snapshot) bool {
+	if snapshot == nil || snapshot.Plan == nil || snapshot.Plan.Interrupted || !hasActiveStep(snapshot.Plan.Steps) {
+		return false
+	}
+	plan := *snapshot.Plan
+	plan.Interrupted = true
+	snapshot.Plan = &plan
+	return true
+}
+
+func hasActiveStep(steps []PlanStep) bool {
+	for _, step := range steps {
+		status := tools.PlanStepStatus(step.Status)
+		if status == PlanInProgress || status == PlanBlocked {
+			return true
+		}
+	}
+	return false
+}
+
 func planOwner(tx *sql.Tx, sessionID, root string) error {
 	var owner string
 	if err := tx.QueryRow(`SELECT repository FROM sessions WHERE id = ?`, sessionID).Scan(&owner); err != nil {
@@ -185,7 +230,6 @@ func replacePlan(tx *sql.Tx, snapshot Snapshot) error {
 	if snapshot.Plan == nil {
 		return nil
 	}
-	_, err := tx.Exec(`DELETE FROM plans WHERE session_id = ?`, snapshot.ID)
 	data, err := json.Marshal(sanitizePlan(*snapshot.Plan))
 	if err != nil {
 		return fmt.Errorf("encode private plan: %w", err)
@@ -203,41 +247,51 @@ func replacePlan(tx *sql.Tx, snapshot Snapshot) error {
 
 // ResumePlan merges the persisted plan into the snapshot before the resumed
 // session displays it. It does not read the database: the coordinator passes
-// the row loaded through LoadPlan as stored. The persisted version wins when
-// the snapshot carries none or an older UpdatedAt; otherwise the snapshot's
-// current plan stays and nothing changes. Completed statuses are preserved,
-// and any step still in_progress or blocked in the adopted (persisted-before-
-// this-resume) plan marks Plan.Interrupted: formerly active work is reported
-// interrupted/unconfirmed, never restarted and never fabricated as completed.
-// Snapshot-less builds pass a snapshot with a nil Plan; a session with no
-// stored plan and no snapshot plan is legacy and stays nil, which renders as
-// the empty state. Repeated calls with unchanged input change nothing. Like
-// ResumeTasks it never replays work or grants permissions; persist the
-// repaired snapshot through the normal idle optimistic Save path.
+// the row loaded through ResumablePlan as stored, whose Interrupted marker
+// says whether formerly active work was cut short. The persisted version
+// wins when the snapshot carries none or an older UpdatedAt; otherwise the
+// snapshot's current plan stays, taking only the stored Interrupted marker
+// when both hold the same steps. Completed statuses are preserved, and
+// interrupted work is reported interrupted/unconfirmed, never restarted and
+// never fabricated as completed. Either plan is sanitized first (see
+// sanitizePlan), so a step stored before plan_update refused line breaks
+// renders on one line. Snapshot-less builds pass a snapshot with a nil Plan;
+// a session with no stored plan and no snapshot plan is legacy and stays
+// nil, which renders as the empty state. Repeated calls with unchanged input
+// change nothing. Like ResumeTasks it never replays work or grants
+// permissions; persist the repaired snapshot through the normal idle
+// optimistic Save path.
 func ResumePlan(snapshot *Snapshot, stored *Plan) (changed bool) {
 	if snapshot == nil || !validID(snapshot.ID) {
 		return false
 	}
-	if stored == nil {
-		return false // Nothing persisted: keep the snapshot's own plan state.
+	if snapshot.Plan != nil {
+		if clean := sanitizePlan(*snapshot.Plan); !samePlanValue(clean, *snapshot.Plan) {
+			snapshot.Plan, changed = &clean, true
+		}
 	}
-	if snapshot.Plan != nil && !snapshot.Plan.UpdatedAt.Before(stored.UpdatedAt) {
-		return false // The snapshot's plan is current or newer; stored is stale.
+	if stored == nil {
+		return changed // Nothing persisted: keep the snapshot's own plan state.
 	}
 	adopted := sanitizePlan(*stored)
-	if snapshot.Plan == nil || !samePlanValue(*snapshot.Plan, adopted) {
-		for _, step := range adopted.Steps {
-			status := tools.PlanStepStatus(step.Status)
-			if status == PlanInProgress || status == PlanBlocked {
-				adopted.Interrupted = true
-				break
-			}
+	if snapshot.Plan != nil && !snapshot.Plan.UpdatedAt.Before(stored.UpdatedAt) {
+		// The snapshot's plan is current or newer, so it stays. A save made
+		// mid-run normally leaves both copies identical; the caller's
+		// interruption marker on that same list must still reach the
+		// snapshot, or formerly active work would resume looking live.
+		if !adopted.Interrupted || snapshot.Plan.Interrupted || !slices.Equal(snapshot.Plan.Steps, adopted.Steps) {
+			return changed
 		}
-		value := adopted
+		value := *snapshot.Plan
+		value.Interrupted = true
 		snapshot.Plan = &value
 		return true
 	}
-	return false
+	if snapshot.Plan == nil || !samePlanValue(*snapshot.Plan, adopted) {
+		snapshot.Plan = &adopted
+		return true
+	}
+	return changed
 }
 
 // samePlan compares the optional *Plan the way the other durable fields are
@@ -275,10 +329,26 @@ func validatePlan(plan Plan) error {
 	return nil
 }
 
+// plainStep replaces the line breaks, controls and format characters of a
+// stored step with spaces. Older sessions may hold such steps, saved before
+// plan_update refused them, and a row with a line break would render as
+// another step with its own status. Replacing keeps the step and its words
+// visible on one line, where dropping it would hide declared work.
+func plainStep(step PlanStep) PlanStep {
+	if utf8.ValidString(step.ID) {
+		step.ID = tools.SanitizePlanText(step.ID)
+	}
+	if utf8.ValidString(step.Title) {
+		step.Title = tools.SanitizePlanText(step.Title)
+	}
+	return step
+}
+
 func validPlanStep(step PlanStep) bool {
 	if !utf8.ValidString(step.ID) || !utf8.ValidString(step.Title) ||
 		step.ID == "" || utf8.RuneCountInString(step.ID) > maxPlanIDRunes ||
-		step.Title == "" || utf8.RuneCountInString(step.Title) > maxPlanTitleRunes {
+		step.Title == "" || utf8.RuneCountInString(step.Title) > maxPlanTitleRunes ||
+		!tools.PlainPlanText(step.ID) || !tools.PlainPlanText(step.Title) {
 		return false
 	}
 	switch tools.PlanStepStatus(step.Status) {
@@ -292,6 +362,8 @@ func validPlanStep(step PlanStep) bool {
 // sanitizePlan drops steps that fall outside the plan_update contract and
 // keeps the first 32 otherwise-valid steps when a persisted payload somehow
 // holds more, so callers cannot display data the tool could not write. A
+// step stored before plan_update refused line breaks and other controls
+// keeps its text with those characters shown as spaces (see plainStep). A
 // checklist with no remaining steps cannot report an interruption, so the
 // flag is cleared when every step is dropped.
 func sanitizePlan(plan Plan) Plan {
@@ -301,6 +373,7 @@ func sanitizePlan(plan Plan) Plan {
 		if i >= maxPlanSteps {
 			break
 		}
+		step = plainStep(step)
 		if !validPlanStep(step) || seen[step.ID] {
 			continue
 		}

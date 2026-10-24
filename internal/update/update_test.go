@@ -187,6 +187,23 @@ func TestPreparedOutsideWindowAllowsCheck(t *testing.T) {
 	}
 }
 
+func TestPreparedFutureTimestampAllowsCheck(t *testing.T) {
+	dir := t.TempDir()
+	// A check recorded "in the future" (clock set back since, or a corrupt
+	// value) must not suppress checks until that time arrives.
+	future := time.Now().Add(365 * 24 * time.Hour).UnixNano()
+	if err := writeState(dir, future); err != nil {
+		t.Fatalf("seed throttle: %v", err)
+	}
+	ok, mark, err := Prepared(dir)
+	if err != nil || !ok {
+		t.Fatalf("Prepared = (%v, %v), want a due check", ok, err)
+	}
+	if mark == nil {
+		t.Fatal("mark = nil, want non-nil")
+	}
+}
+
 func TestPreparedFreshDirNoState(t *testing.T) {
 	dir := t.TempDir()
 	ok, mark, err := Prepared(dir)

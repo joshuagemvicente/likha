@@ -1,6 +1,8 @@
 package catalog_test
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"likha/internal/model"
@@ -166,20 +168,146 @@ func TestParseRejectsInvalidCatalogs(t *testing.T) {
 	cases := map[string]string{
 		"bad json":         `{`,
 		"wrong schema":     `{"schema": 2, "providers": {}}`,
-		"missing source":   `{"schema": 1, "providers": {"p": {"models": {"m": {}}}}}`,
-		"override no ref":  `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "override", "verified": "2026-10-01"}}}}}`,
-		"negative price":   `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "models.dev", "cost": {"input": -1, "output": 1}}}}}}`,
-		"negative limit":   `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "models.dev", "context": -1}}}}}`,
-		"unsorted tiers":   `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "models.dev", "cost": {"input": 1, "output": 1, "tiers": [{"above": 200, "input": 1, "output": 1}, {"above": 100, "input": 1, "output": 1}]}}}}}}`,
+		"missing source":   `{"schema": 1, "providers": {"p": {"models": {"m": {"tool_call": true}}}}}`,
+		"override no ref":  `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "override", "verified": "2026-10-01", "tool_call": true}}}}}`,
+		"negative price":   `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "models.dev", "tool_call": true, "cost": {"input": -1, "output": 1}}}}}}`,
+		"negative limit":   `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "models.dev", "tool_call": true, "context": -1}}}}}`,
+		"unsorted tiers":   `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "models.dev", "tool_call": true, "cost": {"input": 1, "output": 1, "tiers": [{"above": 200, "input": 1, "output": 1}, {"above": 100, "input": 1, "output": 1}]}}}}}}`,
 		"unknown billing":  `{"schema": 1, "providers": {"p": {"billing": "free", "models": {}}}}`,
-		"negative cache":   `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "models.dev", "cost": {"input": 1, "output": 1, "cache_read": -0.1}}}}}}`,
-		"zero tier above":  `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "models.dev", "cost": {"input": 1, "output": 1, "tiers": [{"above": 0, "input": 1, "output": 1}]}}}}}}`,
-		"unknown source":   `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "guess"}}}}}`,
-		"override no date": `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "override", "ref": "x"}}}}}`,
+		"negative cache":   `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "models.dev", "tool_call": true, "cost": {"input": 1, "output": 1, "cache_read": -0.1}}}}}}`,
+		"zero tier above":  `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "models.dev", "tool_call": true, "cost": {"input": 1, "output": 1, "tiers": [{"above": 0, "input": 1, "output": 1}]}}}}}}`,
+		"unknown source":   `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "guess", "tool_call": true}}}}}`,
+		"override no date": `{"schema": 1, "providers": {"p": {"models": {"m": {"source": "override", "ref": "x", "tool_call": true}}}}}`,
 	}
 	for name, raw := range cases {
 		if _, err := catalog.Parse([]byte(raw)); err == nil {
 			t.Errorf("%s: Parse accepted it", name)
+		}
+	}
+}
+
+// rowCatalog wraps one model row's JSON fields in a minimal catalog.
+func rowCatalog(fields string) []byte {
+	return []byte(`{"schema": 1, "providers": {"p": {"models": {"m": {"source": "models.dev", ` + fields + `}}}}}`)
+}
+
+// Each case breaks one rule of specs/reasoning-options § Validation.
+func TestParseRejectsInvalidReasoningOptions(t *testing.T) {
+	cases := []struct {
+		name   string
+		fields string
+	}{
+		{"tool_call missing", `"reasoning": true`},
+		{"tool_call false", `"tool_call": false`},
+		{"options without reasoning", `"tool_call": true, "reasoning_options": [{"type": "toggle"}]`},
+		{"empty options without reasoning", `"tool_call": true, "reasoning_options": []`},
+		{"unknown type", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "dial"}]`},
+		{"repeated type", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "toggle"}, {"type": "toggle"}]`},
+		{"toggle with values", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "toggle", "values": ["on"]}]`},
+		{"effort with min", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "effort", "values": ["low"], "min": 1}], "efforts": ["low"]`},
+		{"budget with values", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "budget_tokens", "values": ["low"]}]`},
+		{"effort without values", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "effort"}]`},
+		{"effort repeats a level", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "effort", "values": ["low", "low"]}], "efforts": ["low", "low"]`},
+		{"effort repeats default", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "effort", "values": ["default", "low", "default"]}], "efforts": ["low"]`},
+		{"effort upper case", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "effort", "values": ["High"]}], "efforts": ["High"]`},
+		{"negative min", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "budget_tokens", "min": -1}]`},
+		{"negative max", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "budget_tokens", "max": -1}]`},
+		{"min above max", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "budget_tokens", "min": 2048, "max": 1024}]`},
+		{"fractional bound", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "budget_tokens", "min": 1.5}]`},
+		{"efforts without option", `"tool_call": true, "reasoning": true, "efforts": ["low"]`},
+		{"efforts differ from option", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "effort", "values": ["low", "high"]}], "efforts": ["low"]`},
+		{"option without efforts", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "effort", "values": ["low"]}]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := catalog.Parse(rowCatalog(tc.fields)); err == nil {
+				t.Fatalf("Parse accepted %s", tc.fields)
+			}
+		})
+	}
+}
+
+// A missing list (none published) and an empty one (reasoning with no
+// control) are different facts and both survive a round trip.
+func TestReasoningOptionsRoundTrip(t *testing.T) {
+	cases := []struct {
+		name   string
+		fields string
+	}{
+		{"absent", `"tool_call": true, "reasoning": true`},
+		{"empty", `"tool_call": true, "reasoning": true, "reasoning_options": []`},
+		{"all types", `"tool_call": true, "reasoning": true, "reasoning_options": [{"type": "toggle"}, {"type": "effort", "values": ["default", "low", "max"]}, {"type": "budget_tokens", "min": 0, "max": 24576}], "efforts": ["low", "max"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := catalog.Parse(rowCatalog(tc.fields))
+			if err != nil {
+				t.Fatal(err)
+			}
+			m, _ := f.Lookup("p", "m")
+			got, err := json.Marshal(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := json.Marshal(json.RawMessage(`{` + tc.fields + `, "source": "models.dev"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !jsonEqual(t, got, want) {
+				t.Fatalf("round trip = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+func jsonEqual(t *testing.T, a, b []byte) bool {
+	t.Helper()
+	var x, y any
+	if err := json.Unmarshal(a, &x); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &y); err != nil {
+		t.Fatal(err)
+	}
+	return reflect.DeepEqual(x, y)
+}
+
+// The acceptance rows of specs/reasoning-options, checked in the embedded
+// file.
+func TestEmbeddedReasoningOptions(t *testing.T) {
+	f, err := catalog.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for providerID, p := range f.Providers {
+		for modelID, m := range p.Models {
+			if !m.ToolCall {
+				t.Errorf("%s/%s: tool_call is not true", providerID, modelID)
+			}
+		}
+	}
+	cases := []struct {
+		provider, model string
+		want            string
+	}{
+		{"claude", "claude-haiku-4-5", `[{"type":"budget_tokens","min":1024}]`},
+		{"claude", "claude-sonnet-5", `[{"type":"toggle"},{"type":"effort","values":["low","medium","high","xhigh","max"]}]`},
+		{"gemini", "gemini-2.5-pro", `[{"type":"budget_tokens","min":128,"max":32768},{"type":"effort","values":["low","medium","high"]}]`},
+		{"gemini", "gemini-2.5-flash", `[{"type":"toggle"},{"type":"budget_tokens","min":0,"max":24576},{"type":"effort","values":["none","low","medium","high"]}]`},
+		{"gemini", "gemini-2.5-flash-lite", `[{"type":"toggle"},{"type":"budget_tokens","min":512,"max":24576},{"type":"effort","values":["none","low","medium","high"]}]`},
+	}
+	for _, tc := range cases {
+		m, ok := f.Lookup(tc.provider, tc.model)
+		if !ok {
+			t.Errorf("%s/%s missing", tc.provider, tc.model)
+			continue
+		}
+		got, err := json.Marshal(m.ReasoningOptions)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != tc.want {
+			t.Errorf("%s/%s reasoning_options = %s, want %s", tc.provider, tc.model, got, tc.want)
 		}
 	}
 }

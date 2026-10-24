@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"path/filepath"
 	"sync"
 )
@@ -42,17 +43,15 @@ func CommandTrusted(stateDir, root, check, fingerprint string) bool {
 func TrustCommandChecks(stateDir, root string, checks map[string]string) error {
 	commandTrustMu.Lock()
 	defer commandTrustMu.Unlock()
-	cfg, err := LoadStoredConfig(stateDir)
-	if err != nil {
-		return err
-	}
-	if cfg.CommandTrust == nil {
-		cfg.CommandTrust = map[string]StoredCommandTrust{}
-	}
 	copied := make(map[string]string, len(checks))
 	for key, value := range checks {
 		copied[key] = value
 	}
-	cfg.CommandTrust[CanonicalRepoPath(root)] = StoredCommandTrust{Checks: copied}
-	return SaveStoredConfig(stateDir, cfg)
+	return UpdateStoredConfig(context.Background(), stateDir, func(cfg *StoredProviderConfig) error {
+		if cfg.CommandTrust == nil {
+			cfg.CommandTrust = map[string]StoredCommandTrust{}
+		}
+		cfg.CommandTrust[CanonicalRepoPath(root)] = StoredCommandTrust{Checks: copied}
+		return nil
+	})
 }

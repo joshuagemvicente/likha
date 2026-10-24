@@ -71,6 +71,14 @@ func (s *editState) selectedText(input []rune) string {
 	return string(input[start:end])
 }
 
+// moveCaret places the caret without editing. Any caret move ends a yank
+// sequence, so a following Ctrl+Y inserts instead of replacing the runes
+// before the new caret.
+func (s *editState) moveCaret(caret int) {
+	s.caret = caret
+	s.lastWasYank = false
+}
+
 // endCaret moves the caret to the end after a wholesale buffer replacement.
 func (s *editState) endCaret(input []rune) {
 	s.caret = len(input)
@@ -286,19 +294,6 @@ func yank(input *[]rune, s *editState) bool {
 	s.yankIdx = idx
 	s.yankLen = len(kill)
 	s.lastWasYank = true
-	return true
-}
-
-// transpose swaps the two runes before the caret, keeping the caret between
-// them. Fewer than two runes before the caret is a no-op.
-func transpose(input *[]rune, s *editState) bool {
-	s.clampCaret(*input)
-	s.clearSelection()
-	if s.caret < 2 {
-		return false
-	}
-	(*input)[s.caret-2], (*input)[s.caret-1] = (*input)[s.caret-1], (*input)[s.caret-2]
-	s.lastWasYank = false
 	return true
 }
 

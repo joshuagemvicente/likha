@@ -67,7 +67,8 @@ type Decision struct {
 // Classify decides the approval tier of command run in root.
 func Classify(command, root string) Decision {
 	sc := newScope(root)
-	if tier, reason := scanDanger(command, sc); tier < Ask {
+	tier, reason := scanDanger(command, sc)
+	if tier < Ask || reason != "" {
 		return Decision{Tier: tier, Reason: reason}
 	}
 	words, ok := simpleWords(command)
@@ -118,12 +119,21 @@ func (sc scope) primary() string {
 }
 
 func (sc scope) inside(path string) bool {
+	_, ok := sc.relative(path)
+	return ok
+}
+
+// relative returns path relative to the root spelling that contains it.
+func (sc scope) relative(path string) (string, bool) {
 	for _, root := range sc.roots {
-		if path == root || strings.HasPrefix(path, strings.TrimSuffix(root, "/")+"/") {
-			return true
+		if path == root {
+			return ".", true
+		}
+		if rest, ok := strings.CutPrefix(path, strings.TrimSuffix(root, "/")+"/"); ok {
+			return rest, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func (sc scope) isRoot(path string) bool {

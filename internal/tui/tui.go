@@ -15,6 +15,7 @@ import (
 	"likha/internal/agent"
 	"likha/internal/cmdpolicy"
 	"likha/internal/explore"
+	"likha/internal/hooks"
 	"likha/internal/model"
 	"likha/internal/profiles"
 	"likha/internal/providers"
@@ -100,6 +101,8 @@ type ui struct {
 	markdownCache      map[markdownCacheKey]markdownEntry // assistant rows from the last layout, reused while unchanged
 	highlightCache     map[highlightKey]highlightResult   // code highlights from the last layout, reused across widths and themes
 	highlightPending   bool                               // the last layout left code plain for want of highlight budget
+	toolRowsCache      map[int]toolRowsEntry              // tool item rows from the last layout by entry, reused while their inputs are unchanged
+	toolRowsEnv        toolRowsEnv                        // the width, theme, and glyphs toolRowsCache was laid out with
 	streamBuf          strings.Builder
 	reasoningBuf       strings.Builder
 	reasoningStream    int
@@ -120,12 +123,17 @@ type ui struct {
 	installRun         bool              // the active run is an /install turn (agent.RunOptions.InstallMode); cleared by finishRun
 	displayPrompts     map[string]string // model prompt -> the short text its You row shows (/init); status title only
 	runID              uint64
+	runMarker          *runMarker // the active agent run's session run marker; cleared by finishRun
 	cancel             context.CancelFunc
 	events             chan agent.TurnEvent
 	abandon            chan struct{}
 	history            []model.Message
 	promptHistory      promptHistory
-	queue              []string       // steering prompts typed while a run is active; UI mirror of the delivery channel
+	queue              []string // steering prompts typed while a run is active; UI mirror of the delivery channel
+	queueSelections    []queuedSelection
+	runClient          *model.Client
+	rateUsage          string // newest Codex rate-limit summary from a run client; cleared when the composer client is replaced
+	selectionRevision  uint64
 	steer              chan string    // the active turn's steering input; nil while idle
 	steerNow           chan struct{}  // the active turn's steer-now signal (steering-prompts M2); nil while idle and during compaction
 	steering           bool           // a steer-now press is waiting for the fresh request's first output
@@ -159,6 +167,7 @@ type ui struct {
 	modelsFailures     []string                 // failed provider display names this open
 	modelsErrSample    string                   // first fetch error text this open
 	keyModal           keyState                 // /providers: provider auth overlay (key-entry modal and auth-state view)
+	keyChecks          uint64                   // key-modal connection checks started; identifies the latest
 
 	// Session measurements and identity for the status line (spec §4).
 	contextTokens         int64     // input-context estimate or provider-reported value
@@ -198,6 +207,7 @@ type ui struct {
 	ask                   askState
 	askSequence           uint64 // delivery identity counter under m.events broker
 	consent               consentState
+	attention             attentionState // bell/OSC 9 signals and ask auto-skip (specs/attention-notifications)
 	reportedSkillErrors   string
 	webGrants             map[string]bool   // conversation-scoped web consents
 	commandGrants         *cmdpolicy.Grants // commands approved always for this session; replaced on session switch
@@ -205,6 +215,15 @@ type ui struct {
 	webConfigState        string            // last loaded web config; a change clears webGrants
 	webConfigSeen         bool
 	grantsMu              sync.Mutex // serializes UI writes with tool-goroutine reads
+
+	// User hooks from <stateDir>/hooks.json (specs/hooks), read once at
+	// launch: nil when none are configured or the file was refused, in
+	// which case hooksErr says why. promptRow is the You row of a run whose
+	// prompt_submit check has not finished, so a block can remove it.
+	hooks     *hooks.Runner
+	hooksPath string
+	hooksErr  error
+	promptRow int
 
 	// Explore/agent child usage already added to the token totals and spend:
 	// task ID → the newest counted record version and its usage sums.
@@ -217,6 +236,9 @@ type ui struct {
 	// editDiffNext collects the ones the layout in progress uses (nil
 	// outside rebuild).
 	approvedEdits map[string]string
+	// undo is the /undo review open in the pending review slot
+	// (specs/edit-undo); nil when the pending review is an agent request.
+	undo          *undoReview
 	editDiffCache map[editDiffKey]transcript.DiffSummary
 	editDiffNext  map[editDiffKey]transcript.DiffSummary
 
@@ -233,8 +255,10 @@ type ui struct {
 	turnStarted      time.Time       // current user turn's start; zero outside one (and for compaction)
 	turnModel        string          // model the current user turn runs on
 	turnEffort       string          // effort level the current user turn runs at; "" is Default
-	turnThoughtBase  int             // reasoning ordinal of the current turn's first block
-	turnToolItems    int             // top-level tool items the current turn opened
+	turnVariant      string
+	turnThoughtBase  int  // reasoning ordinal of the current turn's first block
+	turnToolItems    int  // top-level tool items the current turn opened
+	turnCompacted    bool // the current user turn compacted automatically (specs/auto-compaction)
 }
 
 // dialogMatches documents the shared selection-dialog filter: a
@@ -254,10 +278,11 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 		glyphs = likhaui.NerdGlyphs()
 	}
 	m := &ui{root: root, repo: repo, client: client, modelName: name, conn: conn, stateDir: stateDir, store: store, snapshot: snapshot, history: snapshot.History, promptHistory: newPromptHistory(restoredPromptHistory(snapshot)), following: true, caretOn: true, streaming: -1, activity: -1, status: "Connected", mode: modeMain, theme: theme, glyphs: glyphs, blocks: likhaui.BlockGlyphSet(conn.ASCII), themeName: themeName, composerStyle: validComposerStyle(conn.ComposerStyle), statusLineOpts: conn.StatusLine, started: time.Now(), freshSession: len(snapshot.Entries) == 0, commandGrants: &cmdpolicy.Grants{}, editGrant: &agent.EditGrant{}}
+	attention, attentionInvalid := newAttentionState(conn.Attention, conn.AttentionOut, root, insideTmux())
+	m.attention = attention
 	m.restoreTaskRecords()
 	m.restorePlan()
 	m.refreshProfileCatalog()
-	m.reportUnansweredQuestions()
 	m.reportSkillCatalogIssue()
 	snapshot = m.snapshot
 	m.resolveContextWindow()
@@ -285,6 +310,29 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 	if m.freshSession {
 		m.entries = append(m.entries, entry{role: "Logo", content: logo})
 	}
+	if attentionInvalid {
+		m.entries = append(m.entries, entry{role: "Likha", content: attentionSkipInvalidNote})
+	}
+	if conn.Err != nil {
+		m.status = "Not connected"
+		m.entries = append(m.entries, entry{role: "Error", content: "Startup connection check failed: " + conn.Err.Error()})
+	}
+	// The session is loaded before setup branches off: a session resumed
+	// into first-run setup keeps its transcript (the first save after setup
+	// would otherwise replace it), and the output store is open for the
+	// first run. Question reconciliation needs the loaded entries.
+	entryBase := len(m.entries)
+	for _, saved := range snapshot.Entries {
+		m.entries = append(m.entries, entry{role: saved.Role, content: saved.Content})
+	}
+	m.toolRecords = append([]session.ToolRecord(nil), snapshot.ToolRecords...)
+	for i := range m.toolRecords {
+		m.toolRecords[i].EntryIndex += entryBase
+	}
+	m.openOutputStore()
+	m.reportInterruptedTasks()
+	m.reportUnansweredQuestions()
+	m.loadHooks()
 	if conn.Setup {
 		m.mode = modeSetup
 		m.setup.stage = setupProvider
@@ -300,24 +348,11 @@ func NewUI(root string, repo *repository.Repository, client *model.Client, name 
 		m.status = "First-run setup"
 		return m
 	}
-	if conn.Err != nil {
-		m.status = "Not connected"
-		m.entries = append(m.entries, entry{role: "Error", content: "Startup connection check failed: " + conn.Err.Error()})
-	}
-	entryBase := len(m.entries)
-	for _, saved := range snapshot.Entries {
-		m.entries = append(m.entries, entry{role: saved.Role, content: saved.Content})
-	}
-	m.toolRecords = append([]session.ToolRecord(nil), snapshot.ToolRecords...)
-	for i := range m.toolRecords {
-		m.toolRecords[i].EntryIndex += entryBase
-	}
-	m.openOutputStore()
-	m.reportInterruptedTasks()
-	if client != nil {
+	m.activeLive = liveEffort{levels: conn.EffortLevels, defaultLevel: conn.DefaultEffort, capabilities: conn.Reasoning}
+	if client != nil && !conn.VariantResolved {
 		// --model and the stored model never prompt; the stored level applies,
 		// checked against the live levels the startup /models fetch published.
-		m.applyEffort(m.activeProvider(), name, liveEffort{levels: conn.EffortLevels, defaultLevel: conn.DefaultEffort}, nil)
+		m.applyVariant(m.activeProvider(), name, liveEffort{levels: conn.EffortLevels, defaultLevel: conn.DefaultEffort, capabilities: conn.Reasoning}, conn.Variant)
 	}
 	if len(snapshot.Entries) > 0 && conn.Err == nil {
 		m.status = "Resumed session"
@@ -334,16 +369,21 @@ type updateAvailableMsg struct{ version string }
 // timeout and compared against the running version. Every failure — fetch,
 // parse, throttle bookkeeping — is silent; the UI simply shows no notice.
 func (m *ui) Init() tea.Cmd {
+	var restore tea.Cmd
+	if !m.conn.SelectionOverride && !m.conn.VariantResolved {
+		restore = m.restoreCommittedSelection()
+	}
 	var login tea.Cmd
 	if m.mode == modeSetup && m.setup.stage == setupLogin && !m.setup.checking {
 		login = m.startOAuthLogin(model.Providers[m.setup.cursor])
 	}
+	sessionStart := m.fireSessionStart(!m.freshSession)
 	shouldCheck, mark, err := update.Prepared(m.stateDir)
 	if err != nil || !shouldCheck {
 		// No update check due: only the caret blink loop runs.
-		return tea.Batch(blinkCaret(), login)
+		return tea.Batch(blinkCaret(), login, sessionStart, restore)
 	}
-	return tea.Batch(blinkCaret(), login, func() tea.Msg {
+	return tea.Batch(blinkCaret(), login, sessionStart, restore, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		latest, err := update.Latest(ctx)
@@ -445,14 +485,53 @@ func (m *ui) startTurn(prompt string, queued []string) tea.Cmd {
 	// Only handleCommand's /init and /install paths run in init or install
 	// mode; every other turn starts as a normal one.
 	m.initRun, m.initProposed, m.installRun = false, false, false
-	return m.startTurnDisplay(prompt, prompt, queued)
+	return m.startTurnDisplay(hooks.OriginTyped, prompt, prompt, queued)
 }
 
 // startTurnDisplay is startTurn with a transcript line that differs from the
 // model prompt: the You row shows display while the model and the saved
 // history receive prompt (/init shows "/init [guidance]" but sends the full
-// survey prompt).
-func (m *ui) startTurnDisplay(display, prompt string, queued []string) tea.Cmd {
+// survey prompt). origin is how the prompt arrived, for prompt_submit hooks.
+func (m *ui) startTurnDisplay(origin, display, prompt string, queued []string) tea.Cmd {
+	// Held prompts are older than this one, and beginTurn's queue reset
+	// would orphan them; sendHeldQueue empties the queue and starts its
+	// batch through beginTurn directly.
+	if m.refuseBehindHeldQueue(display) {
+		return nil
+	}
+	execution, ok := m.runExecution(nil)
+	if !ok {
+		m.input = []rune(display)
+		m.edit.endCaret(m.input)
+		return nil
+	}
+	return m.beginTurn(origin, display, prompt, queued, execution)
+}
+
+// runExecution resolves the client and selection a new run starts with:
+// captured when a held prompt recorded one, the composer's otherwise. It
+// reports a failure in the transcript and returns false, changing nothing
+// else, so each caller decides what the composer and held queue keep.
+func (m *ui) runExecution(captured *queuedSelection) (queuedSelection, bool) {
+	if m.client == nil {
+		m.entries = append(m.entries, entry{role: "Error", content: "No provider configured; complete first-run setup before prompting."})
+		return queuedSelection{}, false
+	}
+	if captured != nil {
+		return *captured, true
+	}
+	execution, err := m.captureSelection()
+	if err != nil {
+		m.entries = append(m.entries, entry{role: "Error", content: "Start run: " + err.Error()})
+		return queuedSelection{}, false
+	}
+	return execution, true
+}
+
+// beginTurn starts the run once its execution is resolved; nothing after
+// this point can refuse the turn, so the queue and steering state change
+// only here.
+func (m *ui) beginTurn(origin, display, prompt string, queued []string, execution queuedSelection) tea.Cmd {
 	steer := make(chan string, 64)
 	for _, q := range queued {
 		select {
@@ -464,16 +543,25 @@ func (m *ui) startTurnDisplay(display, prompt string, queued []string) tea.Cmd {
 	m.steer = steer
 	m.steerNow = make(chan struct{}, 1)
 	m.steering = false
-	if m.client == nil {
-		m.entries = append(m.entries, entry{role: "Error", content: "No provider configured; complete first-run setup before prompting."})
-		m.input = []rune(display)
-		m.edit.endCaret(m.input)
-		return nil
+	m.runClient = execution.client
+	m.queueSelections = make([]queuedSelection, len(queued))
+	for i := range m.queueSelections {
+		m.queueSelections[i] = execution
+		m.queueSelections[i].sent = true
 	}
+	m.commitSelection(execution.selection)
 	prior := m.history
 	m.priorLen = len(prior)
 	m.turnSent = make(map[string]int)
 	m.entries = append(m.entries, entry{role: "You", content: display})
+	// A prompt_submit hook runs on the run's goroutine before anything is
+	// sent; until it passes, the prompt is not persisted, so a block leaves
+	// no trace of it in the session.
+	checkPrompt := m.promptHook(origin)
+	m.promptRow = -1
+	if checkPrompt != nil {
+		m.promptRow = len(m.entries) - 1
+	}
 	if display != prompt {
 		if m.displayPrompts == nil {
 			m.displayPrompts = make(map[string]string)
@@ -482,13 +570,20 @@ func (m *ui) startTurnDisplay(display, prompt string, queued []string) tea.Cmd {
 	}
 	m.history = append(m.history, model.Message{Role: "user", Content: prompt})
 	m.refreshStatusSessionTitle()
-	m.persist()
+	if checkPrompt == nil {
+		m.persist()
+	}
 	m.streamBuf.Reset()
 	m.streaming = -1
 	m.closeReasoning()
 	m.beginTurnFooter()
+	m.turnModel, m.turnVariant = execution.selection.Model, execution.selection.Variant
 	m.status = "Waiting for model"
 	m.working = true
+	// A new run never inherits an earlier run's unacknowledged cancel,
+	// which would silently drop this run's approvals.
+	m.cancelling = false
+	m.markRunStarted()
 	m.jumpBottom()
 	m.layoutWidth = 0
 	m.showActivity()
@@ -497,7 +592,7 @@ func (m *ui) startTurnDisplay(display, prompt string, queued []string) tea.Cmd {
 	m.events = make(chan agent.TurnEvent, 64)
 	m.abandon = make(chan struct{})
 	m.runID++
-	m.runProvider, m.runModel = m.conn.ProviderCanonical, m.modelName
+	m.runProvider, m.runModel = execution.selection.Provider, execution.selection.Model
 	m.taskRuntime = nil
 	m.liveToolCalls, m.runToolCalls, m.approvalCall = nil, nil, ""
 	m.approvedEdits = nil
@@ -505,30 +600,54 @@ func (m *ui) startTurnDisplay(display, prompt string, queued []string) tea.Cmd {
 	runID := m.runID
 	events := m.events
 	abandon := m.abandon
-	client, repo, root, mcp := m.client, m.repo, m.root, m.conn.Mcp
+	client, repo, root, mcp := execution.client, m.repo, m.root, m.conn.Mcp
+	marker := m.newRunMarker()
 	options := m.toolRunOptions(m.runID)
-	go func() {
-		defer close(events)
-		agent.RunTurnWithOptions(ctx, client, repo, root, prior, prompt, mcp, steer, options, func(ev agent.TurnEvent) {
-			ev.RunID = runID
-			// Steer deliveries join terminal events in the non-droppable
-			// path: the engine has already appended the message to its
-			// history, so the UI must account for it before the run ends.
-			// Usage events too: a cancel must not lose a request that
-			// already completed and was billed.
-			if ev.Kind == "done" || ev.Kind == "error" || ev.Kind == "tool_result" || ev.Kind == "steer" || ev.Kind == "stream_interrupted" || ev.Kind == "notice" || ev.Kind == "task" || ev.Kind == "task_runtime" || ev.Kind == "tool_checkpoint" || ev.Kind == "usage" {
-				select {
-				case events <- ev:
-				case <-abandon:
-				}
-				return
-			}
+	options.Provider, options.ContextWindow = execution.selection.Provider, execution.window
+	emit := func(ev agent.TurnEvent) {
+		ev.RunID = runID
+		// Steer deliveries join terminal events in the non-droppable
+		// path: the engine has already appended the message to its
+		// history, so the UI must account for it before the run ends.
+		// Usage events too: a cancel must not lose a request that
+		// already completed and was billed. Hook warnings, blocks and
+		// post_tool events are never silently lost either (specs/hooks), and
+		// an automatic compaction replaced the engine's history and carries
+		// billed usage (specs/auto-compaction).
+		switch ev.Kind {
+		case "done", "error", "tool_result", "steer", "stream_interrupted", "notice", "task", "task_runtime", "tool_checkpoint", "usage", "hook", "hook_observe", "steer_blocked", "prompt_blocked", "auto_compacted":
 			select {
 			case events <- ev:
-			case <-ctx.Done():
 			case <-abandon:
 			}
-		})
+			return
+		}
+		select {
+		case events <- ev:
+		case <-ctx.Done():
+		case <-abandon:
+		}
+	}
+	go func() {
+		defer close(events)
+		if checkPrompt != nil {
+			// A cancel during the check falls through: the run then ends
+			// as cancelled like any other run cancelled before a request.
+			if block := checkPrompt(ctx, prompt, emit); block != nil && ctx.Err() == nil {
+				emit(agent.TurnEvent{Kind: "prompt_blocked", Text: display, Err: block})
+				return
+			}
+		}
+		// Marked only once the prompt passed its hooks, and only while the
+		// run is still live: a blocked or cancelled prompt starts no work
+		// that could be interrupted, and a run force-stopped during its
+		// hook must not write a marker after a later run cleared its own.
+		if ctx.Err() == nil {
+			if err := marker.start(); err != nil {
+				emit(agent.TurnEvent{Kind: "notice", Text: "Run start not recorded: " + err.Error() + ". If this run is cut short, resuming will not report its plan steps as interrupted."})
+			}
+		}
+		agent.RunTurnWithOptions(ctx, client, repo, root, prior, prompt, mcp, steer, options, emit)
 	}()
 	return tea.Batch(waitEvent(events), m.activityTickCmd())
 }
@@ -580,11 +699,13 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 			}
 		})
 		m.markAwaitingAnswer(ask.CallID)
-		return nil
+		return tea.Batch(m.attentionMoment(hookAttentionQuestion), m.armAskTimer())
 	case "consent":
 		m.clearTextSelection()
-		m.openConsent(v.Consent)
-		return nil
+		if !m.openConsent(v.Consent) {
+			return nil // never shown, so nobody's attention is needed
+		}
+		return m.attentionMoment(hookAttentionReview)
 	case "context":
 		// Each stream replaces the displayed context state. An unknown
 		// measurement intentionally clears any value from the prior turn.
@@ -623,6 +744,9 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		if m.cancelling {
 			break
 		}
+		// The review owns Tab/arrows/Enter from now on: a completion popup
+		// left open from the draft must not complete into it or confirm it.
+		m.closePopups()
 		m.pending = v.Approval
 		if m.initRun && isRootAgentsEdit(v.Approval) {
 			m.initProposed = true
@@ -637,6 +761,8 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		m.reviewFocus = focusApprove
 		m.markSeenFromScroll()
 		m.status = "Review " + m.pending.Kind + " before approval"
+		m.signalAttention(attentionApproval)
+		return m.attentionMoment(hookAttentionReview)
 	case "tool_start", "tool_result":
 		m.hideActivity()
 		m.streamBuf.Reset()
@@ -700,7 +826,7 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 			m.entries = append(m.entries, entry{role: "You", content: v.Text})
 		}
 		if len(m.queue) > 0 {
-			m.queue = m.queue[1:]
+			m.dropQueueHead(1)
 		}
 		if m.turnSent == nil {
 			m.turnSent = make(map[string]int)
@@ -718,6 +844,12 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		m.closeReasoning()
 		m.resetToolInspection()
 		m.resetAgentInspection()
+		if m.cancelling {
+			// The summary landed after the user cancelled: honour the cancel
+			// and keep the conversation exactly as it was. finishRun clears
+			// the cancelling state so the next run's reviews are not dropped.
+			return m.finishRun(agent.TurnEvent{Kind: "error", RunID: v.RunID, History: m.history})
+		}
 		// The single summarize call finished: swap the summarized turns
 		// for the brief and mark the point in the conversation.
 		m.history = v.History
@@ -725,6 +857,7 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		m.entries = append(m.entries, entry{role: "Likha", content: "Conversation compacted. Summary of earlier turns:\n\n" + v.Text})
 		m.status = "Ready"
 		m.working = false
+		m.signalRunEnd(false, false)
 		if m.cancel != nil {
 			m.cancel()
 		}
@@ -734,6 +867,20 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 		// A finished compaction holds any queue for an explicit Enter.
 		m.steer, m.steerNow, m.steering = nil, nil, false
 		return nil
+	case "compacting":
+		return m.beginAutoCompaction()
+	case "auto_compacted":
+		return m.applyAutoCompaction(v)
+	case "hook":
+		m.applyHookWarnings([]string{v.Text})
+	case "hook_observe":
+		if v.Hook != nil {
+			return m.fireObserveHook(*v.Hook)
+		}
+	case "steer_blocked":
+		m.applySteerBlocked(v)
+	case "prompt_blocked":
+		m.applyPromptBlocked(v)
 	case "done", "error":
 		if cmd := m.finishRun(v); cmd != nil {
 			m.layoutWidth = 0
@@ -748,6 +895,7 @@ func (m *ui) applyTurnEvent(v agent.TurnEvent) tea.Cmd {
 // for an explicit Enter. forceStopRun reuses it for a run that never
 // delivered one.
 func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
+	hooksCmd := m.runEndHooks(v)
 	m.hideActivity()
 	m.closeReasoning()
 	m.pending = nil
@@ -772,6 +920,8 @@ func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
 		m.recordUnexecutedCalls(v.History)
 	}
 	turnTools, turnCancelled := m.turnToolItems, m.cancelling
+	marker := m.endRunMarker(v.Kind == "done" && !m.cancelling)
+	m.signalRunEnd(v.Kind == "error", m.cancelling)
 	m.liveToolCalls, m.runToolCalls, m.approvalCall = nil, nil, ""
 	m.approvedEdits = nil
 	if m.cancelling {
@@ -780,7 +930,7 @@ func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
 	} else if v.Kind == "error" {
 		m.status = "Error"
 		content := v.Text
-		if note := effortRejectedNote(v.Err); note != "" {
+		if note := variantRejectedNote(v.Err); note != "" {
 			content += "\n" + note
 		}
 		if note := replayRejectedNote(v.Err); note != "" {
@@ -806,10 +956,12 @@ func (m *ui) finishRun(v agent.TurnEvent) tea.Cmd {
 	// backstop against the adopted history, then leave the remaining
 	// messages queued for an explicit Enter (FR-21).
 	m.reconcileQueue()
-	m.persist()
+	// The marker is cleared only once the save holds the run's end.
+	m.clearRunMarker(marker, m.persist())
 	m.refreshStatusSessionTitle()
 	m.steer, m.steerNow, m.steering = nil, nil, false
-	return m.autoNameAfterFirstTurn(v.Kind)
+	// Batch drops nil commands, so without hooks this is the naming command.
+	return tea.Batch(m.autoNameAfterFirstTurn(v.Kind), hooksCmd)
 }
 
 // addRequestUsage adds one completed model request to the session token
@@ -892,12 +1044,19 @@ func (m *ui) addTaskUsage(record explore.Record) {
 // run settles as cancelled with the queue held, and its late events are
 // dropped by the run-ID guard because the UI is no longer working.
 func (m *ui) forceStopRun() tea.Cmd {
+	m.abandonRun()
+	m.entries = append(m.entries, entry{role: "Likha", content: "The run did not stop in time; it was detached."})
+	return m.finishRun(agent.TurnEvent{Kind: "error", RunID: m.runID, History: m.history})
+}
+
+// abandonRun releases the run goroutine's undroppable event sends. It clears
+// the channel as it closes it, so every quit and stop path may call it again
+// without a double close.
+func (m *ui) abandonRun() {
 	if m.abandon != nil {
 		close(m.abandon)
 		m.abandon = nil
 	}
-	m.entries = append(m.entries, entry{role: "Likha", content: "The run did not stop in time; it was detached."})
-	return m.finishRun(agent.TurnEvent{Kind: "error", RunID: m.runID, History: m.history})
 }
 
 // enqueue records a steering prompt typed while a run is active: a visible
@@ -905,14 +1064,30 @@ func (m *ui) forceStopRun() tea.Cmd {
 // A nil or full channel leaves the entry only in m.queue, where the turn-end
 // flush picks it up (spec FR-21).
 func (m *ui) enqueue(text string) {
+	if len(m.queue) >= 64 {
+		m.entries = append(m.entries, entry{role: "Error", content: "Queue is full; the draft was kept."})
+		return
+	}
+	var selected queuedSelection
+	if m.client != nil {
+		var err error
+		selected, err = m.captureSelection()
+		if err != nil {
+			m.entries = append(m.entries, entry{role: "Error", content: "Queue selection: " + err.Error()})
+			return
+		}
+	}
+	canSend := m.queueCanSteer() && (m.runClient == nil || selected.key == m.runClient.ExecutionKey())
 	m.entries = append(m.entries, entry{role: "Queued", content: text})
 	m.queue = append(m.queue, text)
-	if m.steer != nil {
+	if m.steer != nil && canSend {
 		select {
 		case m.steer <- text:
+			selected.sent = true
 		default:
 		}
 	}
+	m.queueSelections = append(m.queueSelections, selected)
 	m.input = nil
 	m.edit.endCaret(nil)
 	m.layoutWidth = 0
@@ -940,15 +1115,26 @@ func (m *ui) queueRunDraft() bool {
 		if prompt == "" {
 			return false
 		}
+	case prompt == "/hooks":
+		// The one command that works during a run (specs/hooks point 13):
+		// it only reports, so it cannot disturb the run.
+		m.entries = append(m.entries, entry{role: "Likha", content: m.hooksView()})
+		m.input = nil
+		m.edit.endCaret(nil)
+		m.layoutWidth = 0
+		return false
 	case strings.HasPrefix(prompt, "/"):
 		m.entries = append(m.entries, entry{role: "Error", content: runDraftCommandRefusal})
 		m.layoutWidth = 0
 		return false
 	}
-	m.promptHistory.append(prompt)
+	before := len(m.queue)
 	m.enqueue(prompt)
+	if len(m.queue) > before {
+		m.promptHistory.append(prompt)
+	}
 	m.persist()
-	return true
+	return len(m.queue) > before
 }
 
 // steerNowPress handles Ctrl+Enter during a run (steering-prompts M2): a
@@ -966,6 +1152,10 @@ func (m *ui) steerNowPress() {
 		return
 	}
 	if m.steerNow == nil || m.cancelling {
+		return
+	}
+	if !m.queueCanSteer() {
+		m.entries = append(m.entries, entry{role: "Likha", content: "The queued selection differs from this run or is held behind other work; press Enter when idle to start it. The active run was not interrupted."})
 		return
 	}
 	select {
@@ -1037,19 +1227,87 @@ func (m *ui) sendHeldQueue() tea.Cmd {
 	if len(m.queue) == 0 {
 		return nil
 	}
+	count := len(m.queue)
+	var captured *queuedSelection
+	if len(m.queueSelections) == len(m.queue) && m.queueSelections[0].client != nil {
+		count = 1
+		for count < len(m.queueSelections) && m.queueSelections[count].key == m.queueSelections[0].key {
+			count++
+		}
+		selected := m.queueSelections[0]
+		captured = &selected
+	}
+	// Resolve the run before touching the batch: a run that cannot start
+	// leaves every held prompt and its Queued row in place.
+	execution, ok := m.runExecution(captured)
+	if !ok {
+		return nil
+	}
 	kept := m.entries[:0]
+	removed := 0
 	indices := make(map[int]int)
 	for index, e := range m.entries {
-		if e.role != "Queued" {
+		if e.role != "Queued" || removed >= count {
 			indices[index] = len(kept)
 			kept = append(kept, e)
+		} else {
+			removed++
 		}
 	}
 	m.remapToolRecords(indices)
 	m.entries = kept
-	head, rest := m.queue[0], m.queue[1:]
+	head, rest := m.queue[0], append([]string(nil), m.queue[1:count]...)
+	tail := append([]string(nil), m.queue[count:]...)
+	var tailSelections []queuedSelection
+	if len(m.queueSelections) == len(m.queue) {
+		tailSelections = append([]queuedSelection(nil), m.queueSelections[count:]...)
+	}
 	m.queue = nil
-	return m.startTurn(head, rest)
+	m.queueSelections = nil
+	m.initRun, m.initProposed, m.installRun = false, false, false
+	cmd := m.beginTurn(hooks.OriginSteering, head, head, rest, execution)
+	m.queue = append(m.queue, tail...)
+	m.queueSelections = append(m.queueSelections, tailSelections...)
+	return cmd
+}
+
+// sendBehindHeldQueue handles a prompt submitted while earlier prompts are
+// held. The held prompts are older, so their batch is sent as the turn
+// (FR-21 order; a differently selected tail stays held, MV-33) and draft
+// stays in the composer. Queueing it behind the batch instead would deliver
+// it as a steering prompt: prompt_submit hooks would see origin "steering"
+// and a block would drop it rather than keep it in the composer (specs/hooks
+// item 10). The next Enter queues it during the batch's run or sends it as
+// a typed prompt after. A batch that cannot start stays held, so the draft
+// goes back to the composer either way.
+func (m *ui) sendBehindHeldQueue(draft string) tea.Cmd {
+	cmd := m.sendHeldQueue()
+	m.input = []rune(draft)
+	m.edit.endCaret(m.input)
+	if m.working {
+		m.entries = append(m.entries, entry{role: "Likha", content: heldQueueSentNote})
+	}
+	return cmd
+}
+
+// heldQueueSentNote follows a held batch sent by Enter on a non-empty draft.
+const heldQueueSentNote = "Held prompts sent; your new prompt is still in the composer."
+
+// heldQueueRefusal is shown when a command would start a turn past held
+// prompts, which would strand their Queued rows.
+const heldQueueRefusal = "Queued prompts are held; press Enter on an empty draft to send them or Esc to clear them first."
+
+// refuseBehindHeldQueue reports whether held prompts stop a new turn. It
+// shows the refusal and puts draft back in the composer, so a command's
+// text is not lost.
+func (m *ui) refuseBehindHeldQueue(draft string) bool {
+	if len(m.queue) == 0 {
+		return false
+	}
+	m.entries = append(m.entries, entry{role: "Error", content: heldQueueRefusal})
+	m.input = []rune(draft)
+	m.edit.endCaret(m.input)
+	return true
 }
 
 // flipQueuedRow turns the first queued row with the given content into a
@@ -1089,11 +1347,7 @@ func (m *ui) reconcileQueue() {
 	for i := 0; i < missing && i < len(m.queue); i++ {
 		m.flipQueuedRow(m.queue[i])
 	}
-	if missing >= len(m.queue) {
-		m.queue = nil
-		return
-	}
-	m.queue = m.queue[missing:]
+	m.dropQueueHead(missing)
 }
 
 // startCompaction summarizes the conversation so far with one model call and
@@ -1102,8 +1356,16 @@ func (m *ui) reconcileQueue() {
 // by waitEvent, and the shared working state. No text streams into the
 // conversation while it runs; the deliverable is a single agent.TurnEvent.
 func (m *ui) startCompaction(focus string) tea.Cmd {
+	client, err := m.client.WithoutVariant()
+	if err != nil {
+		m.entries = append(m.entries, entry{role: "Error", content: "Start compaction: " + err.Error()})
+		return nil
+	}
+	m.runClient = client
 	m.status = "Compacting…"
 	m.working = true
+	m.cancelling = false
+	m.markRunStarted()
 	m.turnStarted = time.Time{} // a compaction is not a user turn: no footer
 	m.jumpBottom()
 	m.layoutWidth = 0
@@ -1124,7 +1386,7 @@ func (m *ui) startCompaction(focus string) tea.Cmd {
 	runID := m.runID
 	events := m.events
 	abandon := m.abandon
-	client, history := m.client, m.history
+	history := m.history
 	go func() {
 		defer close(events)
 		newHistory, summary, usage, usageOK, err := agent.CompactHistoryUsage(ctx, client, history, focus, nil)
@@ -1162,12 +1424,9 @@ func (m *ui) previewTheme(themeName string) {
 func (m *ui) applyTheme(themeName string) {
 	m.themeName = themeName
 	m.previewTheme(themeName)
-	if cfg, err := providers.LoadStoredConfig(m.stateDir); err == nil && cfg.Provider != "" {
-		cfg.Theme = themeName
-		if err := providers.SaveStoredConfig(m.stateDir, cfg); err != nil {
-			m.entries = append(m.entries, entry{role: "Error", content: "Store theme: " + err.Error()})
-			return
-		}
+	if err := providers.UpdateStoredConfig(context.Background(), m.stateDir, func(cfg *providers.StoredProviderConfig) error { cfg.Theme = themeName; return nil }); err != nil {
+		m.entries = append(m.entries, entry{role: "Error", content: "Theme changed but was not saved: " + err.Error()})
+		return
 	}
 	m.entries = append(m.entries, entry{role: "Likha", content: "Theme set to " + themeName + "; stored for later runs."})
 }
@@ -1234,22 +1493,36 @@ func (m *ui) handleModelsResult(msg modelsListMsg) {
 // /model command (spec §7: dialog navigation selects; typed commands never
 // index).
 func (m *ui) applyModel(p model.Provider, id string, live liveEffort, effort *string) {
-	if err := m.client.SetModel(id); err != nil {
+	if id == m.modelName && effort == nil {
+		return
+	}
+	client, err := m.client.Fork()
+	if err == nil {
+		err = client.SetModel(id)
+	}
+	if err != nil {
 		m.entries = append(m.entries, entry{role: "Error", content: err.Error()})
 		return
 	}
+	notice, err := providers.ApplyVariant(context.Background(), m.stateDir, client, p, live.reasoning(), effort)
+	if err != nil {
+		m.entries = append(m.entries, entry{role: "Error", content: "Select model: " + err.Error()})
+		return
+	}
+	m.client = client
+	m.selectionRevision++
 	m.modelName = id
-	effortNote := m.applyEffort(p, id, live, effort)
+	m.activeLive = live
+	if notice != "" {
+		m.entries = append(m.entries, entry{role: "Likha", content: notice})
+	}
 	m.status = "Connected"
 	m.resolveContextWindow()
-	if cfg, err := providers.LoadStoredConfig(m.stateDir); err == nil && cfg.Provider != "" {
-		cfg.Model = id
-		if err := providers.SaveStoredConfig(m.stateDir, cfg); err != nil {
-			m.entries = append(m.entries, entry{role: "Error", content: "Store model: " + err.Error()})
-			return
-		}
+	if err := providers.UpdateStoredConfig(context.Background(), m.stateDir, func(cfg *providers.StoredProviderConfig) error { cfg.Provider, cfg.Model = p.Name, id; return nil }); err != nil {
+		m.entries = append(m.entries, entry{role: "Error", content: "Model changed but was not saved: " + err.Error()})
+		return
 	}
-	m.entries = append(m.entries, entry{role: "Likha", content: "Model switched to " + id + " and stored for later runs." + effortNote})
+	m.entries = append(m.entries, entry{role: "Likha", content: "Model switched to " + id + " and stored for later runs."})
 }
 
 // resolveContextWindow refreshes the active model's context limit from the
@@ -1313,6 +1586,11 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clipboardNoticeExpiredMsg:
 		m.handleClipboardNoticeExpired(v)
 		return m, nil
+	case tea.FocusMsg, tea.BlurMsg:
+		m.handleFocus(v)
+		return m, nil
+	case askTimerMsg:
+		return m, m.handleAskTimer(v)
 	case updateAvailableMsg:
 		if v.version != "" {
 			m.updateVersion = v.version
@@ -1375,10 +1653,14 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "Cancel requested for task " + toolShortText(v.taskID, 64)
 		}
 		return m, nil
+	case hookWarningsMsg:
+		m.applyHookWarnings(v.warnings)
+		return m, nil
 	case agent.TurnEvent:
 		if !m.working || v.RunID != m.runID {
 			return m, nil
 		}
+		m.refreshRateUsage()
 		cmd := m.applyTurnEvent(v)
 		m.layoutWidth = 0
 		// Every event of the live run schedules the next read here, so no
@@ -1436,12 +1718,20 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.handleModelsProviderFailed(v)
 		return m, nil
+	case selectionRestoredMsg:
+		m.applyRestoredSelection(v)
+		return m, nil
 	case nameGeneratedMsg:
 		// The naming request is billed whenever it completed, even when
-		// its name is rejected or arrives too late to apply.
+		// its name is rejected or arrives too late to apply. The totals
+		// belong to this process rather than to one stored session, so a
+		// request whose session was switched away still counts here.
 		if v.usageOK {
 			m.addRequestUsage(v.provider, v.model, v.usage)
 			m.layoutWidth = 0
+		}
+		if v.sessionID != "" && v.sessionID != m.snapshot.ID {
+			return m, nil
 		}
 		// Auto-naming (spec tui-layout 1c): a failure or a late result after
 		// a name was applied stays silent — the derived title remains and no
@@ -1506,6 +1796,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// queue: rows and their texts go together (FR-21).
 					n := len(m.queue)
 					m.queue = nil
+					m.queueSelections = nil
 					kept := m.entries[:0]
 					indices := make(map[int]int)
 					for index, e := range m.entries {
@@ -1544,7 +1835,8 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleKeyCheckMsg(v)
 		return m, nil
 	case setupCheckMsg:
-		if m.mode != modeSetup || m.setup.stage != setupChecking {
+		if m.mode != modeSetup || m.setup.stage != setupChecking || v.attempt != m.setup.checkAttempt {
+			// Late result for an abandoned check: ignore.
 			return m, nil
 		}
 		m.setup.checking = false
@@ -1640,8 +1932,9 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		// The @ completion popup claims navigation and completion keys only
-		// while it has rows; everything else keeps editing the draft.
-		if m.mention.open {
+		// while it has rows; everything else keeps editing the draft. A
+		// pending review owns those keys outright (FR-22).
+		if m.mention.open && m.pending == nil {
 			before := string(m.input)
 			if claimed, cmd := m.updateMention(v); claimed {
 				if string(m.input) != before {
@@ -1652,7 +1945,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// The / command popup mirrors it; the two popups are never open
 		// together, and Esc/Ctrl+C must still reach a running turn.
-		if m.commandPopup.open {
+		if m.commandPopup.open && m.pending == nil {
 			before := string(m.input)
 			if claimed, cmd := m.updateCommand(v); claimed {
 				if string(m.input) != before {
@@ -1711,7 +2004,18 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "right", "tab":
 				m.moveReviewFocus(1)
 				return m, nil
+			case "esc":
+				// An /undo review has no run to cancel: Esc is Cancel.
+				// Agent reviews keep Esc's cancel-run meaning below.
+				if m.undo != nil {
+					m.cancelUndo()
+					return m, nil
+				}
 			case "enter":
+				if m.undo != nil {
+					m.confirmUndo()
+					return m, nil
+				}
 				if m.reviewFocus == focusApprove || m.reviewFocus == focusRemember && m.pending.Remember != "" {
 					if m.width < minWidth || m.height < minHeight {
 						return m, nil
@@ -1755,7 +2059,8 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// have declined them. Popups, the review gate, dialogs, and key modal
 		// therefore retain ownership of their navigation keys.
 		if (v.String() == "up" || v.String() == "down") && m.editable() {
-			return m, m.navigatePromptHistory(v.String() == "up")
+			m.navigatePromptHistory(v.String() == "up")
+			return m, nil
 		}
 		// The Alt-prefix decay window only carries Return; any other chord
 		// is processed as its own key and cancels the window (the ESC is
@@ -1767,24 +2072,9 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc":
 			m.toolCatalogGen++
 			if m.working {
-				m.clearTextSelection()
-				if m.cancelling {
-					// The run has not acknowledged the first cancel; a
-					// second press stops waiting for it.
-					return m, m.forceStopRun()
-				}
 				// Cancel-run stays immediate: ESC during a run never arms
 				// the newline prefix, so it carries no ambiguity.
-				m.cancel()
-				m.pending = nil
-				m.resetToolInspection()
-				m.resetAgentInspection()
-				m.reviewSeen = nil
-				m.reviewFocus = focusApprove
-				m.cancelling = true
-				m.status = "Cancelling"
-				m.layoutWidth = 0
-				return m, cancelWatchdog(m.runID)
+				return m, m.cancelActiveRun()
 			}
 			if v.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -1798,9 +2088,7 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, escDecay()
 		case "ctrl+d":
 			if m.cancel != nil {
-				if m.abandon != nil {
-					close(m.abandon)
-				}
+				m.abandonRun()
 				m.cancel()
 			}
 			return m, tea.Quit
@@ -1894,9 +2182,8 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "ctrl+t":
-			if m.editable() && transpose(&m.input, &m.edit) {
-				m.caretNote()
-				m.promptHistory.resetNavigation()
+			if m.editable() && !m.mention.open && !m.commandPopup.open {
+				m.cycleVariant()
 			}
 		case "ctrl+j", "alt+enter", "ctrl+enter", "shift+enter":
 			// The Return-modifier family. ctrl+enter and shift+enter reach
@@ -1947,6 +2234,10 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.queue) > 0 {
 					return m, m.sendHeldQueue()
 				}
+				if m.client != nil {
+					m.commitSelection(m.composerSelection())
+					m.persist()
+				}
 				return m, nil
 			}
 			submitted := prompt
@@ -1984,6 +2275,9 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, cmd
 			}
+			if len(m.queue) > 0 {
+				return m, m.sendBehindHeldQueue(prompt)
+			}
 			return m, m.startTurn(prompt, nil)
 		default:
 			if m.editable() {
@@ -2015,6 +2309,54 @@ func (m *ui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// cancelActiveRun is the Esc/Ctrl+C cancel of a working run. A second press
+// while the first cancel is unacknowledged stops waiting for the run.
+func (m *ui) cancelActiveRun() tea.Cmd {
+	m.clearTextSelection()
+	if m.cancelling {
+		return m.forceStopRun()
+	}
+	// The run's pending question and web consent die with it: neither may
+	// stay answerable while the run cancels (specs/ask-user, FR-22). The
+	// run is cancelled before the consent closes so the waiting web tool
+	// ends on the cancellation, makes no request, and never reports a
+	// decline the user did not make.
+	m.askInterruptedNote()
+	m.cancel()
+	m.closeConsent()
+	m.pending = nil
+	m.resetToolInspection()
+	m.resetAgentInspection()
+	m.reviewSeen = nil
+	m.reviewFocus = focusApprove
+	m.cancelling = true
+	m.status = "Cancelling"
+	m.layoutWidth = 0
+	return cancelWatchdog(m.runID)
+}
+
+// settledStatus is the status once a transient surface (a dialog, the key
+// modal) closes without acting: the run's own state, or Ready when idle.
+func (m *ui) settledStatus() string {
+	switch {
+	case m.cancelling:
+		return "Cancelling"
+	case m.working:
+		return "Waiting for model"
+	default:
+		return "Ready"
+	}
+}
+
+// closePopups dismisses both completion popups. Every overlay that takes
+// over Tab/arrows/Enter (a review, a question, web consent) closes them so a
+// stale popup can never claim the keys meant for that overlay.
+func (m *ui) closePopups() {
+	m.mention.open = false
+	m.commandPopup.open = false
+	m.layoutWidth = 0
+}
+
 // editable reports whether the composer accepts edits: not while an approval
 // is pending. The composer stays live while a turn streams (FR-21).
 func (m *ui) editable() bool {
@@ -2044,7 +2386,7 @@ func (m *ui) composerInputWidth() int {
 // navigatePromptHistory gives the composer the usual two-step edge behavior:
 // the first edge press moves to the row boundary, and the next recalls a
 // prompt. Within a wrapped draft, it moves vertically without touching history.
-func (m *ui) navigatePromptHistory(up bool) tea.Cmd {
+func (m *ui) navigatePromptHistory(up bool) {
 	width := m.composerInputWidth()
 	caret := min(len(m.input), max(0, m.edit.caret))
 	row := composerVisualRow(m.input, caret, width)
@@ -2054,51 +2396,53 @@ func (m *ui) navigatePromptHistory(up bool) tea.Cmd {
 	if up {
 		if row > firstRow {
 			if next, ok := m.composerVertical.move(m.input, caret, width, -1); ok {
-				m.edit.caret = next
+				m.edit.moveCaret(next)
 				m.caretNote()
 				m.layoutWidth = 0
 			}
-			return nil
+			return
 		}
 		if caret != 0 {
-			m.edit.caret = 0
+			m.edit.moveCaret(0)
 			m.composerVertical.reset()
 			m.caretNote()
 			m.layoutWidth = 0
-			return nil
+			return
 		}
 		recalled, ok := m.promptHistory.previous(m.input)
 		if !ok {
-			return nil
+			return
 		}
 		m.input = append([]rune(nil), recalled...)
 	} else {
 		if row < lastRow {
 			if next, ok := m.composerVertical.move(m.input, caret, width, 1); ok {
-				m.edit.caret = next
+				m.edit.moveCaret(next)
 				m.caretNote()
 				m.layoutWidth = 0
 			}
-			return nil
+			return
 		}
 		if caret != len(m.input) {
-			m.edit.caret = len(m.input)
+			m.edit.moveCaret(len(m.input))
 			m.composerVertical.reset()
 			m.caretNote()
 			m.layoutWidth = 0
-			return nil
+			return
 		}
 		recalled, ok := m.promptHistory.next()
 		if !ok {
-			return nil
+			return
 		}
 		m.input = append([]rune(nil), recalled...)
 	}
 	m.edit.endCaret(m.input)
 	m.composerVertical.reset()
 	m.caretNote()
-	m.layoutWidth = 0
-	return m.syncPopups()
+	// A recalled draft opens no completion popup: one would take over
+	// Up/Down and trap further history navigation. Editing the recalled
+	// draft reopens popups as typing always does.
+	m.closePopups()
 }
 
 // syncPopups re-filters the @-mention and /-command popups after a draft
@@ -2150,8 +2494,9 @@ func cancelWatchdog(runID uint64) tea.Cmd {
 // nameGeneratedMsg carries the outcome of the one auto-naming call. An error
 // or empty name keeps the derived title; nothing is ever surfaced.
 type nameGeneratedMsg struct {
-	name string
-	err  error
+	sessionID string
+	name      string
+	err       error
 	// The naming request's usage, priced with the provider and model the
 	// call was made with; usageOK is false when the request never completed
 	// or reported no usage.
@@ -2171,21 +2516,32 @@ func (m *ui) autoNameAfterFirstTurn(kind string) tea.Cmd {
 		return nil
 	}
 	m.nameTried = true
-	client, history := m.client, m.history
-	provider, modelID := m.conn.ProviderCanonical, m.modelName
+	source := m.runClient
+	if source == nil {
+		source = m.client
+	}
+	client, err := source.WithoutVariant()
+	if err != nil {
+		// Naming is best effort: the derived title stays, silently.
+		return nil
+	}
+	history := append([]model.Message(nil), m.history...)
+	provider, modelID, sessionID := m.runProvider, client.Model(), m.snapshot.ID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		name, usage, usageOK, err := agent.GenerateSessionNameUsage(ctx, client, history)
-		return nameGeneratedMsg{name: name, err: err, usage: usage, usageOK: usageOK, provider: provider, model: modelID}
+		return nameGeneratedMsg{name: name, err: err, usage: usage, usageOK: usageOK, provider: provider, model: modelID, sessionID: sessionID}
 	}
 }
 
-func (m *ui) persist() {
+// persist saves the session and reports whether it was saved; a failure is
+// shown in the transcript and the status line.
+func (m *ui) persist() bool {
 	m.snapshot.PromptHistory = m.promptHistory.all()
 	m.snapshot.Tasks = append([]explore.Record(nil), m.taskRecords...)
 	if m.store == nil {
-		return
+		return false
 	}
 	m.snapshot.History = m.history
 	m.snapshot.Entries = make([]session.Entry, 0, len(m.entries))
@@ -2207,7 +2563,9 @@ func (m *ui) persist() {
 	if err := m.store.Save(m.snapshot); err != nil {
 		m.status = "Session save failed"
 		m.entries = append(m.entries, entry{role: "Error", content: "Session was not saved: " + err.Error()})
+		return false
 	}
+	return true
 }
 
 func windowList(total, cursor, visible int) (count, start int) {

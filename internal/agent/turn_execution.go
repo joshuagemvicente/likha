@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"likha/internal/explore"
+	"likha/internal/hooks"
 	"likha/internal/mcp"
 	"likha/internal/model"
 	"likha/internal/repository"
@@ -32,6 +33,9 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		return
 	}
 	harness, warnings := HarnessMessages(repo, root)
+	// Children share the run's hook gate: their pre_tool and post_tool events
+	// name the child agent (specs/hooks D12).
+	gate := newHookGate(options.Hooks, options.SessionID, root, emit)
 	scope := mainScope(options.Scope)
 	var childRunner explore.Runner
 	var taskRuntime *explore.Manager
@@ -42,7 +46,7 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		// max-depth nodes drop task through the wrapper. Drift and
 		// model-mismatch refusals already happened when TaskProfiles was
 		// built at the run boundary.
-		for _, taskProfile := range options.TaskProfiles {
+		for _, taskProfile := range runTaskProfiles(options) {
 			base, err := profileScopeBaseline(taskProfile.Profile, scope)
 			if err != nil {
 				warnings = append(warnings, "Profile "+taskProfile.Profile.Name+" unavailable: "+err.Error())
@@ -57,7 +61,7 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 				if node.Record().Depth >= explore.MaxDepth {
 					childScope = scopeWithoutTask(childScope)
 				}
-				return ProfileRunner(client, repo, harness, childScope, options.Outputs, profile, instructions)(childCtx, node)
+				return ProfileRunner(client, repo, harness, childScope, options.Outputs, profile, instructions, gate)(childCtx, node)
 			}
 		}
 		var err error
@@ -97,7 +101,7 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		for _, definition := range definitions {
 			childScope.Allowed[definition.Name] = true
 		}
-		childRunner = ExploreRunner(client, repo, harness, childScope, options.Outputs)
+		childRunner = ExploreRunner(client, repo, harness, childScope, options.Outputs, gate)
 		emit(TurnEvent{Kind: "task_runtime", TaskRuntime: taskRuntime})
 	}
 	mainHarness := harness
@@ -129,13 +133,80 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		mainHarness = append([]model.Message(nil), mainHarness...)
 		mainHarness[0].Content += "\n\n" + options.SkillAdvert
 	}
-	applySteer := func(drained []string) {
+	// applySteer delivers drained steering prompts and reports how many
+	// reached the history: a prompt_submit hook may drop one at delivery
+	// (specs/hooks point 10) while the others stay. A cancelled screen
+	// delivers nothing more; the run is ending, and the prompts stay queued
+	// in the UI like any other prompt the run never reached.
+	applySteer := func(drained []string) int {
+		delivered := 0
 		for _, text := range drained {
+			err := screenSteeringPrompt(ctx, options.Hooks, options.SessionID, root, text, emit)
+			var block *hooks.BlockError
+			if errors.As(err, &block) {
+				emit(TurnEvent{Kind: "steer_blocked", Text: text, Err: block})
+				continue
+			}
+			if err != nil {
+				return delivered
+			}
 			history = append(history, model.Message{Role: "user", Content: ExpandFileReferences(text, repo)})
 			emit(TurnEvent{Kind: "steer", Text: text, History: append([]model.Message(nil), history...)})
+			delivered++
 		}
+		return delivered
 	}
 	var continuation *model.Message
+	buildRequest := func() []model.Message {
+		request := append(append([]model.Message(nil), mainHarness...), history...)
+		if continuation != nil {
+			request = append(request, *continuation)
+		}
+		return request
+	}
+	// runStart indexes the run's own prompt in history; automatic
+	// compaction keeps the user messages from there on verbatim.
+	// compactStoodDown ends automatic compaction for the rest of the run
+	// once it failed or could not get under the threshold (D5, D6).
+	runStart := len(prior)
+	// stoppedPartial is set while history ends with the answer a steer-now
+	// press cut short; it stays there only if a steering prompt follows.
+	stoppedPartial := false
+	compactStoodDown := !options.AutoCompact || options.ContextWindow <= 0
+	// compactBeforeRequest runs one automatic compaction (specs/
+	// auto-compaction). proceed is false only when the run was cancelled
+	// and has already failed; every other outcome lets the request go out.
+	// sent reports whether a summarize request was made.
+	compactBeforeRequest := func(tokens int64) (proceed, sent bool) {
+		window := options.ContextWindow
+		emit(TurnEvent{Kind: "compacting"})
+		replacement, summary, usage, usageOK, err := compactRun(ctx, client, history, runStart)
+		if err != nil {
+			if usageOK {
+				emit(TurnEvent{Kind: "usage", Usage: &usage})
+			}
+			nothing := errors.Is(err, errNothingToCompact)
+			if ctx.Err() != nil {
+				fail(err)
+				return false, !nothing
+			}
+			compactStoodDown = true
+			text := fmt.Sprintf("Automatic compaction failed: %v. Continuing without compacting again in this run.", err)
+			if nothing {
+				text = fmt.Sprintf("Nothing earlier to summarize at ~%d%% of the context window; continuing without compacting again in this run.", contextPercent(tokens, window))
+			}
+			emit(TurnEvent{Kind: "notice", Text: text, History: append([]model.Message(nil), history...)})
+			return true, !nothing
+		}
+		history = replacement
+		runStart = 1 // compactRun puts the kept user prompts right after the summary
+		compacted := TurnEvent{Kind: "auto_compacted", Text: summary, History: append([]model.Message(nil), history...), ContextTokens: tokens, ContextWindow: window}
+		if usageOK {
+			compacted.Usage = &usage
+		}
+		emit(compacted)
+		return true, true
+	}
 	for round := 1; ; round++ {
 		if err := ctx.Err(); err != nil {
 			fail(err)
@@ -144,15 +215,51 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 		// A steer-now press that landed while tools executed is delivered
 		// by the ordinary drain below; it must not stop the next request.
 		discardSteerNow(options.SteerNow)
-		applySteer(drainSteer(steer))
-		request := append(append([]model.Message(nil), mainHarness...), history...)
-		if continuation != nil {
-			request = append(request, *continuation)
+		delivered := applySteer(drainSteer(steer))
+		if err := ctx.Err(); err != nil {
+			// A cancel that interrupted a prompt_submit screen is not a
+			// block: the cut-short answer the transcript shows stays in
+			// the history the run ends with.
+			fail(err)
+			return
 		}
+		if stoppedPartial && delivered == 0 {
+			// A prompt_submit hook blocked every prompt the press was for.
+			// Nothing follows the cut-short answer, and a request ending
+			// on an assistant turn is a prefill Claude rejects, so the
+			// model answers afresh instead.
+			history = history[:len(history)-1]
+		}
+		stoppedPartial = false
+		request := buildRequest()
 		tokens, known := client.EstimateInputTokens(request, definitions)
 		emit(TurnEvent{Kind: "context", ContextTokens: tokens, ContextKnown: known, ContextEstimated: true})
+		if !compactStoodDown && shouldAutoCompact(tokens, known, options.ContextWindow) {
+			proceed, sent := compactBeforeRequest(tokens)
+			if !proceed {
+				return
+			}
+			// Compaction is a safe point too: prompts queued while it ran
+			// join this request (D8), and a steer-now press is covered by
+			// that same delivery.
+			discardSteerNow(options.SteerNow)
+			applySteer(drainSteer(steer))
+			request = buildRequest()
+			tokens, known = client.EstimateInputTokens(request, definitions)
+			emit(TurnEvent{Kind: "context", ContextTokens: tokens, ContextKnown: known, ContextEstimated: true, ContextReestimate: !sent})
+			if !compactStoodDown && shouldAutoCompact(tokens, known, options.ContextWindow) {
+				compactStoodDown = true
+				emit(TurnEvent{Kind: "notice", Text: fmt.Sprintf("Still at ~%d%% of the context window after compacting; continuing without compacting again in this run. /compact with a focus may help.", contextPercent(tokens, options.ContextWindow)), History: append([]model.Message(nil), history...)})
+			}
+		}
 		roundCtx, stopRound := watchSteerNow(ctx, options.SteerNow, steer)
 		var partial, partialReasoning strings.Builder
+		// Only text, reasoning and notices are emitted while a response
+		// streams. The headless --json redactor treats tool_start,
+		// tool_result, usage and auto_compacted as the end of a model
+		// response and releases the partial word it held back for
+		// redaction, so emitting one of them mid-stream would let a secret
+		// split across that point go out unredacted.
 		assistant, usage, usageOK, err := client.StreamUsage(roundCtx, request, definitions, func(text string) {
 			partial.WriteString(text)
 			emit(TurnEvent{Kind: "text", Text: text})
@@ -174,6 +281,7 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 				// frame, so the stopped request carries none.
 				if partial.Len() > 0 {
 					history = append(history, client.PartialAssistant(partial.String(), partialReasoning.String()))
+					stoppedPartial = true
 				}
 				emit(TurnEvent{Kind: "stream_interrupted", History: append([]model.Message(nil), history...)})
 				continue
@@ -199,9 +307,14 @@ func RunTurnWithOptions(ctx context.Context, client *model.Client, repo *reposit
 				fail(err)
 				return
 			}
-			if drained := drainSteer(steer); len(drained) > 0 {
-				applySteer(drained)
+			if drained := drainSteer(steer); len(drained) > 0 && applySteer(drained) > 0 {
 				continue
+			}
+			// A cancel that interrupted a prompt_submit screen above still
+			// ends the run as cancelled, not done.
+			if err := ctx.Err(); err != nil {
+				fail(err)
+				return
 			}
 			emit(TurnEvent{Kind: "done", History: history})
 			return

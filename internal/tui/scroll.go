@@ -185,7 +185,7 @@ func (m *ui) spliceScrollbar(rows []string, header int, body int) {
 		cut := truncateRow(row, m.width-1)
 		// A wide glyph can straddle the cut. Fill its abandoned cell so
 		// the scrollbar still occupies the exact final display column.
-		if width := runewidth.StringWidth(stripANSI(cut)); width < m.width-1 {
+		if width := displayWidth(stripANSI(cut)); width < m.width-1 {
 			cut += m.theme.Base.Render(fit("", m.width-1-width))
 		}
 		rows[header+i] = cut + bar[i]
@@ -195,12 +195,15 @@ func (m *ui) spliceScrollbar(rows []string, header int, body int) {
 // truncateRow cuts a rendered row to n display columns on cell boundaries.
 // SGR escape sequences never occupy cells, so their bytes are neither cut
 // nor counted toward the width: a styled row measures by its visible text
-// alone, and a cut never splits a sequence or misplaces the scrollbar.
+// alone, and a cut never splits a sequence or misplaces the scrollbar. A cut
+// styled row ends in a reset, because the row's own closing reset was cut
+// with its tail and its style would otherwise paint what follows.
 func truncateRow(row string, width int) string {
 	var buf []byte
 	w := 0
 	escaping := false
 	escStart := 0
+	styled := false
 	for _, r := range row {
 		if escaping {
 			buf = append(buf, string(r)...)
@@ -211,6 +214,7 @@ func truncateRow(row string, width int) string {
 		}
 		if r == '\x1b' {
 			escaping = true
+			styled = true
 			escStart = len(buf)
 			buf = append(buf, string(r)...)
 			continue
@@ -222,6 +226,9 @@ func truncateRow(row string, width int) string {
 			// corrupt the following row's styling.
 			if escaping {
 				buf = buf[:escStart]
+			}
+			if styled {
+				buf = append(buf, "\x1b[0m"...)
 			}
 			break
 		}

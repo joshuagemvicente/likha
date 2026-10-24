@@ -35,6 +35,9 @@ type anthropicModelEntry struct {
 	Capabilities   *struct {
 		Thinking *struct {
 			Types *struct {
+				Disabled *struct {
+					Supported bool `json:"supported"`
+				} `json:"disabled"`
 				Adaptive *struct {
 					Supported bool `json:"supported"`
 				} `json:"adaptive"`
@@ -132,6 +135,16 @@ func fetchAnthropicModelPage(ctx context.Context, client *http.Client, base, api
 // no default effort level.
 func (e anthropicModelEntry) details() ModelDetails {
 	detail := ModelDetails{ID: e.ID, DisplayName: e.DisplayName, Efforts: e.efforts()}
+	if e.Capabilities != nil {
+		info := e.info()
+		detail.Reasoning = &ReasoningCapabilities{EffortsKnown: e.Capabilities.Effort != nil, Efforts: detail.Efforts, Output: info.maxTokens}
+		if info.adaptiveKnown {
+			detail.Reasoning.Adaptive = &info.adaptive
+		}
+		if thinking := e.Capabilities.Thinking; thinking != nil && thinking.Types != nil && thinking.Types.Disabled != nil {
+			detail.Reasoning.Toggle = &thinking.Types.Disabled.Supported
+		}
+	}
 	if window := positiveWindow(e.MaxInputTokens); window > 0 {
 		detail.ContextWindow, detail.ContextWindowSource = window, "max_input_tokens"
 	}
@@ -141,8 +154,8 @@ func (e anthropicModelEntry) details() ModelDetails {
 func (e anthropicModelEntry) info() anthropicModelInfo {
 	info := anthropicModelInfo{maxTokens: positiveWindow(e.MaxTokens)}
 	if e.Capabilities != nil {
-		info.adaptiveKnown = true
 		thinking := e.Capabilities.Thinking
+		info.adaptiveKnown = thinking != nil && thinking.Types != nil && thinking.Types.Adaptive != nil
 		info.adaptive = thinking != nil && thinking.Types != nil && thinking.Types.Adaptive != nil && thinking.Types.Adaptive.Supported
 	}
 	return info

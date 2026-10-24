@@ -24,6 +24,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -105,6 +106,8 @@ type askState struct {
 	skipHint      string                // muted note shown inside the dialog (e.g. provider warning)
 	committed     func(tools.AskAnswer) // coordinator-supplied reply callback
 	scroll        int                   // vertical page offset when the body is tall
+	skipLeft      time.Duration         // auto-skip time left while the dialog is on screen; 0 = no countdown
+	skipLast      time.Time             // when skipLeft was last advanced
 }
 
 // askPageAnswer is one page's recorded outcome inside a questionnaire.
@@ -189,7 +192,7 @@ func (m *ui) openAskQuestion(rec tools.AskRequest, id, callID string, reply func
 		malformed = malformed || page.Question == ""
 	}
 	if malformed || reply == nil ||
-		m.mode == modeSetup || m.pending != nil || m.keyModal.open || m.dialog.open || m.ask.pending {
+		m.mode == modeSetup || m.pending != nil || m.keyModal.open || m.dialog.open || m.ask.pending || m.consent.pending {
 		m.entries = append(m.entries, entry{role: "Error", content: "Question dropped: another interaction is active or the call was malformed; no answer was sent."})
 		m.layoutWidth = 0
 		if reply != nil {
@@ -202,6 +205,7 @@ func (m *ui) openAskQuestion(rec tools.AskRequest, id, callID string, reply func
 	// like an arriving approval does (see the approval case in Update).
 	m.resetToolInspection()
 	m.resetAgentInspection()
+	m.closePopups()
 	m.ask.generation++
 	m.ask = askState{
 		pending:       true,
@@ -232,6 +236,7 @@ func (m *ui) openAskQuestion(rec tools.AskRequest, id, callID string, reply func
 	m.layoutWidth = 0
 	m.persist()
 	m.status = "Question pending: answer, skip, or cancel"
+	m.signalAttention(attentionQuestion)
 }
 
 // askClampPages bounds a request's pages to the spec limits as a rendering
@@ -506,11 +511,11 @@ func (m *ui) appendAskText(runes []rune) {
 // handleAskKey intercepts keys ONLY while askVisible(): the call site lives
 // before popup/modal/review handling in Update. ctrl+c is never
 // intercepted so run cancellation keeps working through it (FR-30; the
-// same rule handleToolInspection applies). Esc closes the dialog and keeps
-// being handled by the coordinator: with a run active its Esc path
-// cancels the run (spec: Esc cancels the active run and clears the
-// pending question), while idle there is nothing to cancel so the chord is
-// swallowed to protect the draft and popups.
+// same rule handleToolInspection applies). With a run active, Esc records
+// the question as interrupted and cancels the run itself (spec: Esc cancels
+// the active run and clears the pending question); idle, there is nothing
+// to cancel, so it only closes the dialog and is swallowed to protect the
+// draft and popups.
 func (m *ui) handleAskKey(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	if !m.askVisible() {
 		return false, nil
@@ -518,13 +523,23 @@ func (m *ui) handleAskKey(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	if m.ask.responded {
 		return false, nil // already delivered; the dialog is closed anyway
 	}
+	// Any key shows the user is present: the question no longer times out.
+	m.stopAskTimer()
 	switch msg.String() {
 	case "ctrl+c":
 		// Never intercepted: cancellation (or idle quit) stays live.
 		return false, nil
 	case "esc":
-		m.closeAsk()
-		return !m.working, nil
+		if !m.working {
+			m.closeAsk()
+			return true, nil
+		}
+		// Esc cancels the run here rather than falling through, so no popup
+		// or overlay below can swallow it and leave the run waiting on a
+		// closed question. cancelActiveRun records the interruption, as it
+		// does for Ctrl+C.
+		m.toolCatalogGen++
+		return true, m.cancelActiveRun()
 	case "up":
 		m.moveAskSelection(-1)
 	case "down":
@@ -641,7 +656,7 @@ func (l askLine) render(width int) string {
 	if l.suffix == "" {
 		return l.style.Render(fit(l.text, width))
 	}
-	used := runewidth.StringWidth(l.text) + runewidth.StringWidth(l.suffix)
+	used := displayWidth(l.text) + displayWidth(l.suffix)
 	if used > width {
 		return l.style.Render(fit(l.text+l.suffix, width))
 	}
@@ -741,6 +756,11 @@ func (m *ui) askView() string {
 		}
 	} else {
 		footer = append(footer, m.theme.Base.Render(fit("", inner)))
+	}
+	if countdown := m.askCountdownLine(); countdown != "" {
+		for _, line := range wrap(countdown, inner) {
+			footer = append(footer, withBase(m.theme.Muted, m.theme.Base).Render(fit(line, inner)))
+		}
 	}
 	hintLines := wrap(hint, inner)
 	if m.ask.multiPage() {

@@ -110,7 +110,9 @@ func writeCredentials(stateDir string, creds map[string]StoredCredential) error 
 }
 
 // StoredKey never treats an OAuth (or unknown-type) entry as an API key,
-// including malformed old entries that happen to carry a key field.
+// including malformed old entries that happen to carry a key field. The key
+// is trimmed, as every key source is: a pasted trailing newline would reach
+// the provider as a rejected credential, and a blank key reads as none.
 func StoredKey(stateDir, provider string) (string, error) {
 	creds, err := ReadCredentials(stateDir)
 	if err != nil {
@@ -120,7 +122,7 @@ func StoredKey(stateDir, provider string) (string, error) {
 	if entry.Type != "" && entry.Type != "api" {
 		return "", nil
 	}
-	return entry.Key, nil
+	return strings.TrimSpace(entry.Key), nil
 }
 
 // StoredOAuth returns the active, renewable registration. Legacy Codex tokens
