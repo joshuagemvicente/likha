@@ -70,7 +70,7 @@ A prompt starting with `/` is a command, acting on the application and **never s
 | --- | --- |
 | `/sessions` | List saved sessions for the repository (newest first). |
 | `/sessions <n>` | Resume that session in place — no relaunch needed. |
-| `/sessions`, then **Ctrl+D** | Delete the highlighted session after a second confirmation: removes its plan, task, and journal records, and its private tool-output directory when that cleanup succeeds (if cleanup fails, the session is still deleted and the leftover is reported as an error). Refused while a run or review is active; deleting the current session continues in a fresh one. (Checks pass; interactive walkthrough pending.) |
+| `/sessions`, then **Ctrl+D** | Delete the highlighted session after a second confirmation: removes its plan, task, journal, and undo-history records, and its private tool-output directory when that cleanup succeeds (if cleanup fails, the session is still deleted and the leftover is reported as an error). Refused while a run or review is active; deleting the current session continues in a fresh one. (Checks pass; interactive walkthrough pending.) |
 | `/models` | Open a dialog of every configured provider's models, grouped under one section header per provider (active provider first); ↑/↓ navigate, type to filter, Enter applies. Enter on another provider's model moves the session to that provider+model and stores the pair. When the model publishes reasoning-effort levels and its provider can carry them, Enter opens an effort step first (see [Reasoning effort](#reasoning-effort)). |
 | `/effort [level]` | Open the effort step for the current model, or set a level directly (`/effort high`, `/effort default`). See [Reasoning effort](#reasoning-effort). |
 | `/providers` | Open a dialog to manage a provider's stored key; `/providers <n-or-name> [key]` targets one directly. Switching provider and model happens through `/models`. Selecting an unconnected ChatGPT row opens browser sign-in; a connected row opens account management. |
@@ -79,9 +79,11 @@ A prompt starting with `/` is a command, acting on the application and **never s
 | `/agents` | Inspect agent profiles, the live task tree, child transcripts, and branch cancellation. |
 | `/plan` | Toggle read-only plan mode: edits, commands, and MCP calls are refused until you toggle it off. |
 | `/todo` | Show the persisted plan checklist and its progress. |
+| `/undo` | Revert Likha's most recent file change after a review; repeat it to go further back. Shell command effects are not undone. See [Undo](#undo-undo). |
 | `/skills` | List the global Markdown skills discovered under `skills/<name>/SKILL.md`. |
 | `/skill <name> [request]` | Load one skill and start a turn with it. |
 | `/mcp` | Show configured MCP servers, their state, and their tools. |
+| `/hooks` | List the hooks from `hooks.json`, each with its last outcome, or why the file was refused (see [Hooks](#hooks)). Works during a run. |
 | `/compact [focus]` | Summarize the conversation so far into one compact brief and continue from it — the summarized turns are replaced, the session stays resumable. |
 | `/quit` | Exit, same as Ctrl+D. |
 | `/help` | Print the command list in the conversation. |
@@ -123,11 +125,114 @@ Reasoning models accept an effort level that trades speed and tokens for deeper 
 
 The provider and model must come from these flags or `LIKHA_PROVIDER`/`LIKHA_MODEL`; the provider stored by first-run setup is never probed. `--api-key` works as usual but is never stored by a probe. `--endpoint` (or `LIKHA_ENDPOINT`) may point the named provider elsewhere, and the result is then labelled `endpoint override`; nothing is sent there before you confirm, so the levels come from the bundled catalog or `--probe-levels`. `claude` refuses `--endpoint`, since only its own endpoint speaks the native Messages API that carries effort, and refuses `--probe-wire`, since it has one shape. Exit codes: 0 when the probe ran to the end and wrote its report, 1 when you declined, Default failed, the provider rejected the credentials, the report could not be written, or the results could not be printed (the report is still saved and its path printed to stderr), 2 for a usage error (nothing was sent), and 130 for Ctrl+C.
 
+## Headless runs (`-p`)
+
+`likha -p "PROMPT" [repository]` runs one prompt without the TUI and exits. It works without a terminal, so scripts, CI jobs and editor tasks can use it. `likha -p - [repository]` reads the prompt from stdin instead (UTF-8, at most 256 KiB). The provider, model, key and stored effort level resolve as they do for an interactive launch; first-run setup and ChatGPT browser sign-in never start, so set those up interactively first.
+
+Nothing asks for a decision. Reads, `read_output`, `plan_update`, explore children, read-only commands and verification checks you already trusted in the TUI (while their scripts are unchanged) run as usual. Everything that would open a review or a question is refused without running: `edit` and `edit_file` proposals (nothing is written; the model is asked to describe the change in its answer instead), commands that would ask, `ask_user`, web search and fetch, and MCP tools. Configured MCP servers are not started, because MCP trust is per session and a headless run can never grant it. The model gets each refusal as a refused result saying no reviewer is present in headless mode, never as success or as your rejection, and may finish the run. No flag approves actions headlessly.
+
+Output:
+
+- **Text (default):** stdout gets only the final answer, written once when the run completes. stderr gets plain progress lines (no color): the repository, provider, model, effort and session at the start, one line per tool call with its outcome (`ok`, `auto-approved (…)`, `refused: …`, `error: …`), notes, and a summary with the status, session ID, requests, tool calls, refusals, tokens, and spend when the price is known. Reasoning is not printed.
+- **`--json`:** stdout carries only JSON Lines, one event per line, as the run happens; stderr stays empty after startup.
+
+| Event | Fields |
+| --- | --- |
+| `start` | `schema` (1), `session_id`, `repository`, `provider`, `model`, `effort` |
+| `text` | `delta` of answer text |
+| `reasoning` | `delta` of display reasoning |
+| `tool_start` | `call_id`, `name`, `arguments` (at most 4 KiB) |
+| `tool_result` | `call_id`, `name`, `status` (`ok`, `error`, `refused`, `cancelled`), `auto_approved` when a reason applied, `content` (at most 4 KiB) |
+| `notice` | `text` |
+| `usage` | `prompt_tokens`, `completion_tokens`, `reasoning_tokens`, `cached_tokens`, `cost` when known |
+| `result` | `status` (`completed`, `failed`, `cancelled`, `time_limit`), `text` (the answer), `session_id`, `requests`, `tool_calls`, `refusals`, token totals, `cost` when known, `error` when the run did not complete |
+
+Exactly one `result` event ends every run that started, and it is the last line. Later schema versions may add fields; existing fields keep their meaning while `schema` stays 1.
+
+Exit codes: 0 the run completed (refusals included), 1 the run failed (provider or connection error, time limit, session not saved, output not written), 2 a usage or setup error before any prompt was sent, 130 interrupted. Ctrl+C (SIGINT) or SIGTERM cancels the run like Esc and saves the session; a second signal exits at once. `--max-time DURATION` bounds the whole run (default `30m`, `0` for none); until automatic model recovery lands, it is also what stops a provider that stops sending data.
+
+Each run is saved as an ordinary session, titled from the prompt's first line. Open it later with `likha --resume ID`, or continue it headlessly with `likha --resume ID -p "next prompt"`. `-p` combines with `--provider`, `--model`, `--api-key`, `--endpoint`, `--resume`, `--json`, `--max-time` and the repository path; `--theme`, `--nerd-fonts`, `--ascii` and `--debug-models` are accepted and have no effect. It cannot be combined with `--sessions`, `--login` or `--probe-effort`, and `--json` or `--max-time` without `-p` is a usage error. Slash commands are interactive only: a prompt starting with `/` is refused. No output contains your API key or sign-in tokens.
+
 ## Conversation compaction (`/compact`)
 
 Long sessions resend their entire history to the provider every turn, and eventually that exceeds the model's context window. `/compact` is the escape hatch: Likha makes **one** summarize model call over the conversation so far — preserving your goal, the decisions made, files changed and how, pending next steps, and open questions — and replaces the summarized turns with that brief, so the task continues without the transcript. Anything after `/compact` (for example `/compact focus on the approval flow refactor`) steers what the summary emphasizes without being stored as conversation content.
 
-The compacted session shows a visible marker entry ("Conversation compacted. Summary of earlier turns:") and the summary stays fully readable through normal paging; the brief travels as the conversation context on every later turn, and the session persists and resumes in its compacted state. `/compact` is **manual-only** — there is no automatic compaction near the context limit. It is refused with a visible message while a review is pending, on an empty session ("Nothing to compact yet."), and without a configured model; a failing or cancelled summarize (Esc cancels it) leaves the history untouched with a visible error, and you can retry.
+The compacted session shows a visible marker entry ("Conversation compacted. Summary of earlier turns:") and the summary stays fully readable through normal paging; the brief travels as the conversation context on every later turn, and the session persists and resumes in its compacted state. `/compact` itself runs only when you type it. It is refused with a visible message while a review is pending, on an empty session ("Nothing to compact yet."), and without a configured model; a failing or cancelled summarize (Esc cancels it) leaves the history untouched with a visible error, and you can retry.
+
+### Automatic compaction
+
+Before each model request of a run, Likha estimates the request's size. When the model's context window is known and the estimate reaches **85%** of it, Likha first compacts the conversation with the same single summarize call, then sends the request and the run carries on without any input from you:
+
+- The status line reads `Compacting…` while the summary is made. The run stays active: `/` commands stay refused and **Esc** cancels the run, leaving the conversation uncompacted.
+- The conversation shows a divider naming the trigger, for example `Conversation compacted automatically at ~86% of the 200k context window. Summary of earlier turns:`, followed by the summary. The earlier transcript stays on screen; only what is sent to the model changes.
+- The prompt that started the run and steering prompts already delivered in it are kept word for word after the summary; everything else, including the run's own tool rounds, is summarized. Prompts you queue while it compacts are delivered in the same run.
+- The turn footer adds `compacted` (`✻ gpt-5.5 · 2m 4s · 9 tools · compacted`), and the summarize call counts toward session spend. The compacted conversation is saved, so a resumed session continues compacted.
+- If compacting still leaves the request at 85% or more, or there is nothing earlier to summarize, Likha says so once and does not compact again in that run; `/compact` with a focus may help. If the summarize call fails, the error is shown, nothing is replaced, and the request is sent as it was.
+- It never runs when the context window is unknown (the status line shows `ctx ~42k/?`), and never for explore children, profile tasks or session naming.
+
+Automatic compaction is on by default. To turn it off, add `"auto_compact": false` to the private `config.json`; the status line's 80% warning and `/compact` keep working as before.
+
+## Undo (`/undo`)
+
+Every file change Likha applies through its edit tools (`edit_file` and `edit`, including edits under **Approve always** and `/init` proposals) is kept as one *change set*: the files it touched, their content and permissions before the write, and any directories it created. `/undo` takes back the newest remaining change set; run it again to take back the one before that.
+
+- `/undo` first opens a review with the reverse diff — restored files show their diff back to the original, files Likha created show as deletions, and directories Likha created are listed. **Undo** applies it (after you have read every page, like an edit review); **Cancel** or **Esc** writes nothing and keeps the change set. Approve always never covers an undo.
+- Undo never overwrites newer work. If any file in the change set changed since Likha wrote it (content, permissions, deleted, or replaced by a symlink), nothing is reverted and every changed path is named. Saving the file again with the same content (an editor that writes by rename) does not count as a change. The change set stays, so you can put the file back and try again.
+- Files Likha created are removed; directories Likha created are removed only when they are empty.
+- **Effects of shell commands are not undone.** The review says so when a command ran after the change.
+- The next model request carries a short note naming the undone paths (never their content), so the model rereads them.
+- Undo history is private session data in `sessions.sqlite`: it survives resume, is deleted with the session, and keeps at most 20 change sets and 64 MiB per session (the oldest go first; `/undo` then says older changes can no longer be undone). An edit too large to keep says `not undoable: too large` on its tool item.
+- `/undo` is refused during a run or a pending review, and with any argument. An interrupted undo is reported on resume like an interrupted edit (`/tools recovery`) and is never replayed.
+
+(Checks pass; interactive walkthrough pending.)
+
+## Hooks
+
+Hooks run your own commands at fixed Likha events: to log every command, refuse reads of `.env`, or play a sound when a run ends. They come **only** from `hooks.json` in Likha's private state directory (`~/.config/likha/hooks.json` on macOS and Linux). No repository file (`.likha/hooks.json`, `.claude/settings.json`, …) ever adds a hook. Likha never creates the file; it reads it once at launch, so edits apply after a relaunch.
+
+```json
+{
+  "hooks": {
+    "pre_tool": [
+      {"name": "no-dotenv", "match": ["read", "grep"], "command": "~/bin/deny-dotenv"}
+    ],
+    "post_tool": [{"match": ["run_command"], "command": "cat >> ~/likha-commands.jsonl"}],
+    "run_end": [{"command": "afplay /System/Library/Sounds/Glass.aiff"}]
+  }
+}
+```
+
+Each entry needs a `command`. Optional fields:
+
+- `name`: shown in `/hooks`, warnings and block reasons (default `<event>[<index>]`).
+- `match`: glob patterns over the tool's name, only on `pre_tool` and `post_tool` (`run_command`, `edit*`, `mcp__github__*`). Without it the hook runs for every tool.
+- `timeout`: whole seconds from 1 to 60 (default 10). A hook that runs out is killed with everything it started.
+- `on_error`: `block` (default) or `allow`, for the blocking events below.
+
+**Events.** Every event carries `version` (1), `event`, `session_id`, `repository` and `agent` (`main`, or a child such as `explore`).
+
+| Event | When | Extra fields | Can block |
+| --- | --- | --- | --- |
+| `session_start` | Launch, and resuming a session with `/sessions` | `resumed` | No |
+| `prompt_submit` | Before your prompt is sent (typed, queued steering, `/init`, `/install`) | `prompt`, `origin` | Yes |
+| `pre_tool` | After a tool call's arguments are validated, before any review, grant or auto-approval | `tool` (`name`, `source`, `server` for MCP, `effects`, `arguments`) | Yes |
+| `post_tool` | After a tool call finishes | `tool`, `result` (`status`, `exit_code` for commands, `content` up to 16 KiB, `content_truncated`) | No |
+| `run_end` | A run completed, failed or was cancelled | `outcome`, `error` | No |
+| `attention` | A review or question opened, or a run finished on its own | `attention` (`review`, `question`, `run_end`) | No |
+
+Explore and profile children fire only `pre_tool` and `post_tool`, with their own `agent`.
+
+**How a hook answers.** The hook gets the event as one JSON object on stdin. It runs with `sh -c` in the repository root, with `LIKHA_HOOK_EVENT` and `LIKHA_SESSION_ID` set, and without `LIKHA_API_KEY` or any `LIKHA_*_API_KEY`. For `pre_tool` and `prompt_submit`:
+
+- exit status **2** blocks, and stderr is the reason;
+- or print `{"decision": "block", "reason": "…"}` and exit 0;
+- exit 0 with no output means no objection.
+
+A blocked tool call never runs and opens no review; the model receives `Blocked by hook "<name>": <reason>`. A blocked prompt is not sent and goes back to the composer; a blocked queued prompt is dropped and the others stay queued. **Hooks can never approve:** output such as `{"decision": "allow"}` is ignored with a warning, and every usual review, question and refusal still applies. A blocking hook that fails (other exit status, timeout, output that is not a JSON object) blocks unless it sets `"on_error": "allow"`; either way a warning names the hook and the cause. Observe-only hooks never block or delay the run; their failures show one warning each. Hook output never reaches the model, apart from a block reason. stdout and stderr are each read up to 64 KiB; a block reason is cut to 1 KiB.
+
+**Safety.** A hook runs with your permissions, outside any review, and receives tool arguments and prompt text. Likha refuses the whole file, and runs no hook from it, when it is invalid JSON, names an unknown event or field, has an entry without a command or with a bad pattern, timeout or `on_error`, or is writable by group or others (`chmod go-w`). The refusal is shown at launch and in `/hooks`.
+
+**Headless runs.** `likha -p` loads the same `hooks.json` and runs the same hooks, except `attention` (nobody is watching). A blocked tool call is a refused result; a blocked prompt sends nothing, saves nothing and exits 1 with the block message. Hook warnings and a refused `hooks.json` appear as `likha: note:` lines on stderr, or `notice` events with `--json`. Observe-only hooks are awaited before the run's final result is written.
 
 ## File references (`@`)
 

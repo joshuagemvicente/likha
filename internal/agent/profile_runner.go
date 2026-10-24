@@ -22,7 +22,7 @@ import (
 // frozen Resolve output, used verbatim. The captured harness and scope are
 // run-boundary snapshots, never the parent's conversation, approvals, or live
 // configuration.
-func ProfileRunner(client *model.Client, repo *repository.Repository, harness []model.Message, scope tools.Scope, outputs *tooloutput.Store, profile profiles.Profile, instructions string) explore.Runner {
+func ProfileRunner(client *model.Client, repo *repository.Repository, harness []model.Message, scope tools.Scope, outputs *tooloutput.Store, profile profiles.Profile, instructions string, gate tools.Gate) explore.Runner {
 	harness = exploreLoopMessages(harness)
 	return func(ctx context.Context, node *explore.Node) explore.Outcome {
 		record := node.Record()
@@ -96,6 +96,9 @@ func ProfileRunner(client *model.Client, repo *repository.Repository, harness []
 		registry, err := ExploreRegistry(repo, node, childScope)
 		if err != nil {
 			return finish(explore.Failed, "Cannot construct profile tools: "+err.Error())
+		}
+		if gate != nil {
+			registry.SetGate(gate)
 		}
 		compiled := ProfileMessages(exploreLoopMessages(harness), record, profile, instructions)
 		// ProfileMessages includes the scoped user brief. Keep that one fresh

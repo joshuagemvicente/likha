@@ -32,6 +32,7 @@ func TestTurnRoundTrip(t *testing.T) {
 	cases := []TurnInfo{
 		{Model: "nexum-router", Duration: 12300 * time.Millisecond, Tools: 3},
 		{Model: "gpt-5.1", Duration: 64 * time.Second, Tools: 1, Cancelled: true},
+		{Model: "gpt-5.1", Duration: 64 * time.Second, Tools: 4, Compacted: true},
 		{Model: "", Duration: 0, Tools: 0},
 		{Model: `quote"back\slash<tag>&`, Duration: 2 * time.Hour, Tools: 999},
 		{Model: "模型-ñ", Duration: 7 * time.Millisecond},
@@ -170,6 +171,8 @@ func TestFooterTextSegments(t *testing.T) {
 		{"negative tools omitted", TurnInfo{Model: "m", Duration: time.Second, Tools: -1}, "m · 1.0s"},
 		{"cancelled", TurnInfo{Model: "m", Duration: 2 * time.Second, Tools: 2, Cancelled: true}, "m · 2.0s · 2 tools · cancelled"},
 		{"cancelled no tools", TurnInfo{Model: "m", Duration: 2 * time.Second, Cancelled: true}, "m · 2.0s · cancelled"},
+		{"compacted", TurnInfo{Model: "m", Duration: 2 * time.Second, Tools: 2, Compacted: true}, "m · 2.0s · 2 tools · compacted"},
+		{"compacted and cancelled", TurnInfo{Model: "m", Duration: 2 * time.Second, Compacted: true, Cancelled: true}, "m · 2.0s · compacted · cancelled"},
 		{"empty model", TurnInfo{Duration: 2 * time.Second, Tools: 1}, "2.0s · 1 tool"},
 		{"blank model", TurnInfo{Model: "  ", Duration: 2 * time.Second}, "2.0s"},
 		{"hidden runes escaped", TurnInfo{Model: "a\x1b[31mb\u202ec\u200bd\u2028e", Duration: time.Second}, `a\u001B[31mb\u202Ec\u200Bd\u2028e · 1.0s`},
@@ -216,6 +219,36 @@ func TestFooterTextDropsSegmentsRightToLeft(t *testing.T) {
 	}
 	if got := FooterText(info, 10, "..."); got != "nexum-r..." {
 		t.Errorf("width 10 ASCII truncation = %q", got)
+	}
+}
+
+func TestEncodeTurnCompactedOnlyWhenSet(t *testing.T) {
+	if got, want := EncodeTurn(TurnInfo{Model: "m", Duration: time.Second, Compacted: true}), `{"v":1,"model":"m","ms":1000,"tools":0,"cancelled":false,"compacted":true}`; got != want {
+		t.Fatalf("EncodeTurn = %s, want %s", got, want)
+	}
+	// Footers stored before the field existed decode as not compacted.
+	got, ok := DecodeTurn(`{"v":1,"model":"m","ms":1000,"tools":0,"cancelled":false}`)
+	if !ok || got.Compacted {
+		t.Fatalf("legacy footer = %+v ok=%t", got, ok)
+	}
+}
+
+func TestFooterTextDropsCompactedBeforeTools(t *testing.T) {
+	info := TurnInfo{Model: "nexum-router", Duration: 12300 * time.Millisecond, Tools: 3, Compacted: true, Cancelled: true}
+	// Full: 54 cells; without cancelled: 42; without compacted: 30.
+	cases := []struct {
+		width int
+		want  string
+	}{
+		{54, "nexum-router · 12.3s · 3 tools · compacted · cancelled"},
+		{53, "nexum-router · 12.3s · 3 tools · compacted"},
+		{42, "nexum-router · 12.3s · 3 tools · compacted"},
+		{41, "nexum-router · 12.3s · 3 tools"},
+	}
+	for _, tc := range cases {
+		if got := FooterText(info, tc.width, "…"); got != tc.want {
+			t.Errorf("width %d: FooterText = %q, want %q", tc.width, got, tc.want)
+		}
 	}
 }
 

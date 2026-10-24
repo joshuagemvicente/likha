@@ -64,6 +64,15 @@ Options:
   --probe-levels L  With --probe-effort: comma-separated levels to probe
                     instead of the model's published levels.
   --yes             With --probe-effort: confirm the spend without a prompt.
+  -p PROMPT         Run one prompt without the TUI, print the final answer on
+                    stdout and progress on stderr, then exit ("-p -" reads the
+                    prompt from stdin, at most 256 KiB). Nothing prompts:
+                    edits, commands that would ask, MCP, questions and web
+                    access are refused; reads, read-only commands and checks
+                    you already trusted run. Exit codes: 0 completed, 1
+                    failed or time limit, 2 usage or setup, 130 interrupted.
+  --json            With -p: stream JSON Lines events on stdout instead.
+  --max-time D      With -p: bound the whole run (default 30m; 0 for none).
   --debug-models    Log model IDs and context metadata to
                     model-metadata.log (also LIKHA_DEBUG_MODELS=1).
   --ascii           Draw transcript block glyphs and the composer box in plain
@@ -86,8 +95,10 @@ Examples:
   likha ~/projects/app                                        # first-run setup
   likha --provider opencode-go ~/projects/app                 # stored key, default model
   likha --provider openai --api-key sk-... ~/projects/app
+  likha -p "summarize the README" ~/projects/app             # headless run
 
-Put options before the repository path. Likha needs an interactive terminal.
+Put options before the repository path. Without -p, Likha needs an
+interactive terminal.
 
 Composer editing keys: Ctrl+W / Ctrl+Backspace / Alt+Backspace delete the
 previous word (with its spaces), Ctrl+Delete or Alt+D the next word;
@@ -198,12 +209,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	probeWire := flags.String("probe-wire", "", "with --probe-effort: top, object or both wire shapes")
 	probeLevels := flags.String("probe-levels", "", "with --probe-effort: comma-separated levels to probe")
 	assumeYes := flags.Bool("yes", false, "with --probe-effort: confirm the spend without a prompt")
+	promptFlag := flags.String("p", "", "run one prompt without the TUI (\"-\" reads it from stdin)")
+	jsonOutput := flags.Bool("json", false, "with -p: stream JSON Lines events on stdout")
+	maxTime := flags.Duration("max-time", defaultMaxTime, "with -p: bound the whole run (0 for no bound)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return 2
 	}
+	given := flagsSet(flags)
+	headlessRun := given["p"]
 	if *showVersion {
 		fmt.Fprintf(stdout, "Likha %s\n", tui.Version)
 		return 0
@@ -216,9 +232,25 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "likha: expected at most one repository path")
 		return 2
 	}
+	if err := headlessFlagError(given); err != nil {
+		fmt.Fprintf(stderr, "likha: %v\n", err)
+		return 2
+	}
 	if err := probeFlagError(flags, *probeEffort, *listSessions, *login, *resumeID); err != nil {
 		fmt.Fprintf(stderr, "likha: %v\n", err)
 		return 2
+	}
+	var prompt string
+	if headlessRun {
+		if *maxTime < 0 {
+			fmt.Fprintln(stderr, "likha: --max-time cannot be negative")
+			return 2
+		}
+		var err error
+		if prompt, err = readPrompt(*promptFlag, headlessStdin); err != nil {
+			fmt.Fprintf(stderr, "likha: %v\n", err)
+			return 2
+		}
 	}
 	path := "."
 	if *listSessions && *resumeID != "" {
@@ -337,7 +369,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	// clearly.
 	setupNeeded := effectiveProvider == "" && *endpoint == "" && os.Getenv("LIKHA_ENDPOINT") == ""
 	output, isFile := stdout.(*os.File)
-	interactive := isatty.IsTerminal(os.Stdin.Fd()) && isFile && isatty.IsTerminal(output.Fd())
+	// A headless run never starts setup or a browser sign-in, whatever the
+	// terminal: both need a person.
+	interactive := !headlessRun && isatty.IsTerminal(os.Stdin.Fd()) && isFile && isatty.IsTerminal(output.Fd())
 	if setupNeeded && !interactive {
 		fmt.Fprintln(stderr, "likha: no provider configured; set --provider or LIKHA_PROVIDER (see --help), or run Likha in an interactive terminal to set one up")
 		return 2
@@ -395,6 +429,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "likha: %v\n", err)
 		return 2
+	}
+	if headlessRun {
+		return headlessFlow(headlessStart{
+			prompt: prompt, root: root, stateDir: stateDir, repo: repo, store: store, resumeID: *resumeID,
+			client: client, res: res, selected: selected, display: display, key: key, apiKey: *apiKey, stored: stored,
+			json: *jsonOutput, maxTime: *maxTime,
+		}, stdout, stderr)
 	}
 	mcpServers, err := mcp.NewMcpManager(stateDir, model.UserAgent)
 	if err != nil {

@@ -37,7 +37,7 @@ Every file edit and every risky shell command is shown to you as an exact diff o
 | **MCP servers** | Use stdio MCP servers with a Claude Desktop–style `mcp.json`. Each server needs your approval the first time it is used. |
 | **Web tools (opt-in)** | `web_fetch` for public HTTPS pages and `web_search` (keyless DuckDuckGo, or Brave, Tavily, or Exa with a key), each needing consent before first use. |
 | **Skills** | Global Markdown instruction files that you load into a turn with `/skill <name>`. |
-| **Resumable sessions** | Local SQLite history per repository, auto-generated session names, and `/compact` to summarize long conversations. |
+| **Resumable sessions** | Local SQLite history per repository, auto-generated session names, `/compact` to summarize long conversations, and automatic compaction near the context limit. |
 | **Spend and context tracking** | The status line shows context usage, tokens, and session spend from provider-reported costs or a bundled price catalog. It never guesses a price for an unknown model. |
 | **A polished TUI** | Markdown and syntax-highlighted answers, inline diffs, collapsible reasoning, smooth scrolling, built-in copy, 22 themes, and Nerd Font or plain-ASCII glyph modes. |
 
@@ -121,9 +121,10 @@ For API-key providers, Likha looks for a key in this order: `--api-key`, `LIKHA_
 likha [options] [repository]       # repository defaults to the current directory
 likha --sessions [repository]      # list saved sessions (no model needed)
 likha --resume ID [repository]     # resume one
+likha -p "PROMPT" [repository]     # one headless run: answer on stdout, nothing prompts
 ```
 
-Put options before the repository path. `likha --help` lists every option, provider, and environment variable.
+Put options before the repository path. Headless runs (`-p`, `--json` events, exit codes) are described in [docs/usage.md](docs/usage.md#headless-runs--p). `likha --help` lists every option, provider, and environment variable.
 
 ### Keys
 
@@ -153,6 +154,7 @@ Put options before the repository path. `likha --help` lists every option, provi
 | `/init [guidance]` | Survey the repository and propose a root `AGENTS.md` for review. |
 | `/install <request>` | Interview you about an install, show a plan, then run each step with approval. |
 | `/todo` | Show the model's plan checklist. |
+| `/undo` | Revert Likha's most recent file change after a review (shell command effects are not undone). |
 | `/agents` | Inspect subagent profiles, the task tree, and child transcripts. |
 | `/tools` | Inspect available tools, their permissions, and retained output. |
 | `/mcp` | Show MCP servers and their tools. |

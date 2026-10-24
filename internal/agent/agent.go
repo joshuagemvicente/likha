@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"likha/internal/explore"
+	"likha/internal/hooks"
 	"likha/internal/mcp"
 	"likha/internal/model"
 	"likha/internal/repository"
@@ -79,7 +80,16 @@ type TurnEvent struct {
 	Usage *model.RequestUsage
 	// Err is the cause of a Kind "error" event, so the interface can match it
 	// with errors.As (an effort rejection gets a hint); Text is its message.
+	// On a "steer_blocked" event it is the hook's *hooks.BlockError.
 	Err error
+	// ContextWindow is the window an "auto_compacted" event compacted
+	// against; ContextTokens then holds the estimate that triggered it
+	// (specs/auto-compaction).
+	ContextWindow int64
+	// Hook is a post_tool event (Kind "hook_observe") for the interface to
+	// fire off the tool path (specs/hooks): observe-only hooks never delay
+	// the run.
+	Hook *hooks.Event
 }
 
 // ConsentRequest asks for one conversation-scoped web grant. Search consents
@@ -163,6 +173,39 @@ func dispatchTool(ctx context.Context, repo *repository.Repository, root string,
 
 func requestApproval(ctx context.Context, kind, title, body string, emit func(TurnEvent)) (bool, error) {
 	return awaitApproval(ctx, &ApprovalRequest{Kind: kind, Title: title, Body: body}, emit)
+}
+
+// NoReviewerError is the refusal returned instead of a review when no person
+// can answer one (RunOptions.NoReviewer, specs/headless-print). It is neither
+// a success nor a user rejection (FR-09).
+type NoReviewerError struct {
+	// Kind is the review that would have opened: "edit", "command" or "mcp".
+	Kind string
+	// Action describes what was not done, e.g. "this edit was not applied".
+	Action string
+	// Reason says why nobody can review, e.g. "no reviewer is present in
+	// headless mode".
+	Reason string
+	// Advice tells the model what to do instead; it may be empty.
+	Advice string
+}
+
+func (e *NoReviewerError) Error() string {
+	message := "refused (" + e.Kind + " needs review): " + e.Reason + ", so " + e.Action + "."
+	if e.Advice != "" {
+		message += " " + e.Advice
+	}
+	return message
+}
+
+// review asks for one decision, or refuses with a *NoReviewerError when the
+// run has no reviewer. A refused review emits no approval event.
+func review(ctx context.Context, request *ApprovalRequest, options RunOptions, emit func(TurnEvent), refusal NoReviewerError) (bool, error) {
+	if options.NoReviewer != "" {
+		refusal.Kind, refusal.Reason = request.Kind, options.NoReviewer
+		return false, &refusal
+	}
+	return awaitApproval(ctx, request, emit)
 }
 
 // awaitApproval emits a prepared request and blocks for its single decision.

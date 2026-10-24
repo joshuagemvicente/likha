@@ -86,6 +86,9 @@ listed so implementation cannot re-litigate them.
    build on; auto-compact near the context limit is future work once a source of
    truth exists. (The measured `ctx` in the status line covers provider-reported
    per-turn usage only — no request-side token estimate — and is not a compaction trigger.)
+   *Planned 2026-10-07:* [auto-compaction](../auto-compaction/spec.md) (FR-42)
+   adds an automatic trigger at 85% of a known context window, using the
+   context tracker's request estimate; `/compact` itself is unchanged.
 2. **The summary travels as a `developer`-role message.** `developer` is in
    `client.go`'s role whitelist, so the replacement message is sent verbatim as
    context on the next turn; no pre-send remap is needed. It renders in the

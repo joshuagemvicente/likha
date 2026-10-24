@@ -29,6 +29,7 @@ type TurnInfo struct {
 	Effort    string        // the effort level the turn ran at; "" is Default (specs/model-effort)
 	Duration  time.Duration // wall time from prompt submit to run end
 	Tools     int           // top-level tool calls the turn showed as items
+	Compacted bool          // the conversation was compacted automatically during the turn
 	Cancelled bool          // the user cancelled the run
 	// Thoughts holds the measured duration of each reasoning block of the
 	// turn, in transcript order (spec § Persistence: reasoning durations
@@ -48,6 +49,9 @@ type turnJSON struct {
 	MS        int64  `json:"ms"`
 	Tools     int    `json:"tools"`
 	Cancelled bool   `json:"cancelled"`
+	// Compacted is omitted when false, so a turn without automatic
+	// compaction encodes exactly as before the field existed.
+	Compacted bool `json:"compacted,omitempty"`
 	// ThoughtsMS is omitted when empty, so a turn without reasoning encodes
 	// exactly as version 1 did before the field existed.
 	ThoughtsMS []int64 `json:"thoughts_ms,omitempty"`
@@ -63,7 +67,7 @@ func EncodeTurn(t TurnInfo) string {
 	for _, d := range t.Thoughts {
 		thoughts = append(thoughts, turnMS(d))
 	}
-	data, err := json.Marshal(turnJSON{V: &v, Model: t.Model, Effort: t.Effort, MS: turnMS(t.Duration), Tools: max(t.Tools, 0), Cancelled: t.Cancelled, ThoughtsMS: thoughts})
+	data, err := json.Marshal(turnJSON{V: &v, Model: t.Model, Effort: t.Effort, MS: turnMS(t.Duration), Tools: max(t.Tools, 0), Cancelled: t.Cancelled, Compacted: t.Compacted, ThoughtsMS: thoughts})
 	if err != nil { // unreachable: every field marshals
 		return fmt.Sprintf(`{"v":%d}`, turnVersion)
 	}
@@ -93,7 +97,7 @@ func DecodeTurn(s string) (TurnInfo, bool) {
 	if raw.V == nil || *raw.V < 1 || raw.MS < 0 || raw.Tools < 0 || raw.MS > math.MaxInt64/int64(time.Millisecond) {
 		return TurnInfo{}, false
 	}
-	info := TurnInfo{Model: raw.Model, Effort: raw.Effort, Duration: time.Duration(raw.MS) * time.Millisecond, Tools: raw.Tools, Cancelled: raw.Cancelled}
+	info := TurnInfo{Model: raw.Model, Effort: raw.Effort, Duration: time.Duration(raw.MS) * time.Millisecond, Tools: raw.Tools, Cancelled: raw.Cancelled, Compacted: raw.Compacted}
 	for _, ms := range raw.ThoughtsMS {
 		if ms < 0 || ms > math.MaxInt64/int64(time.Millisecond) {
 			info.Thoughts = nil
@@ -133,9 +137,11 @@ func TurnDuration(d time.Duration) string {
 //
 // The effort segment appears only when the turn ran above Default.
 // The tools segment reads "1 tool" for one call and is omitted at zero;
-// " · cancelled" appears only for cancelled turns; an empty model omits the
-// model segment. When the line is wider than width cells, segments drop
-// right-to-left (cancelled, then tools, then duration, then effort) and the last
+// " · compacted" appears only for turns that compacted automatically
+// (specs/auto-compaction), and " · cancelled" only for cancelled turns; an
+// empty model omits the model segment. When the line is wider than width
+// cells, segments drop right-to-left (cancelled, then compacted, then tools,
+// then duration, then effort) and the last
 // remaining segment truncates with ellipsis (clipRight: when ellipsis itself
 // does not fit, the segment is cut to width without it). The model name is
 // flattened to one row with hidden runes shown as \uXXXX (flattenRow), so
@@ -158,6 +164,9 @@ func FooterText(t TurnInfo, width int, ellipsis string) string {
 		segments = append(segments, "1 tool")
 	case t.Tools > 1:
 		segments = append(segments, fmt.Sprintf("%d tools", t.Tools))
+	}
+	if t.Compacted {
+		segments = append(segments, "compacted")
 	}
 	if t.Cancelled {
 		segments = append(segments, "cancelled")
